@@ -17,29 +17,30 @@ import pyphot
 
 
 def convert_jansky_to_ergs(j):
-    '''Converts flux from jansky to erg s-1 cm-2'''
+    """Convert flux from jansky to erg s-1 cm-2."""
     return j * 1e-23
 
 
 def convert_jansky_to_ergs_lambda(j, l):
-    '''Converts flux from jansky to erg s-2 cm-2 lambda-1 in the units of l'''
+    """Convert flux from jansky to erg s-2 cm-2 lambda-1 in the units of l."""
     # TODO: fix the constant and use astropy constans instead
     return j * 2.99792458E-05 / l ** 2
 
 
 def convert_f_lambda_to_f_nu(f, l):
-    '''Converts flux from erg s-1 cm-2 lambda-1 to erg s-1 cm-2 Hz-1'''
+    """Convert flux from erg s-1 cm-2 lambda-1 to erg s-1 cm-2 Hz-1."""
     # TODO: fix the constant and use astropy constants instead
     return sed / 2.99792458E+18 * l ** 2
 
 
 def convert_f_nu_to_f_lambda(f, l):
-    '''Converts flux from erf s-1 cm-2 Hz-1 to erg s-1 cm-2 lambda-1'''
+    """Convert flux from erf s-1 cm-2 Hz-1 to erg s-1 cm-2 lambda-1."""
     return f * const.c.to(u.micrometer / u.s).value / l ** 2
 
 
 def mag_to_flux(mag, mag_err, band):
-    '''Converts from magnitude to flux.
+    """Convert from magnitude to flux.
+
     mag_to_flux performs the conversion from magnitude to flux in
     erg s-1 cm-2 um-1.
 
@@ -47,9 +48,8 @@ def mag_to_flux(mag, mag_err, band):
     match exactly the name in pyphots filter database
 
     If the filter is from PanSTARRS or SDSS, then the magnitude is in the AB
-    system. Else it's in the Vega system
-    '''
-
+    system. Else it's in the Vega system.
+    """
     if 'PS1_' in band or 'SDSS_' in band:
         # Get flux from AB mag
         flux, flux_err = mag_to_flux_AB(mag, mag_err)
@@ -67,7 +67,7 @@ def mag_to_flux(mag, mag_err, band):
 
 
 def get_band_info(band):
-    '''Looks for the filter information in the pyphot library of filters.'''
+    """Look for the filter information in the pyphot library of filters."""
     # TODO: rename?
     # Load photometry filter library
     filt = pyphot.get_library()[band]
@@ -77,7 +77,7 @@ def get_band_info(band):
 
 
 def get_effective_wavelength(band):
-    '''Gets central wavelength of a specific filter in um.'''
+    """Get central wavelength of a specific filter in um."""
     # Load photometry filter library
     filt = pyphot.get_library()[band]
     # Get central wavelength in um
@@ -86,7 +86,7 @@ def get_effective_wavelength(band):
 
 
 def get_bandpass(band):
-    '''Gets the bandpass of a specific filter in um.'''
+    """Get the bandpass of a specific filter in um."""
     # Load photometry filter library
     filt = pyphot.get_library()[band]
     # Get lower and upper bandpass in um
@@ -96,7 +96,7 @@ def get_bandpass(band):
 
 
 def mag_to_flux_AB(mag, mag_err):
-    '''Calculates flux in erg s-1 cm-2 Hz-1'''
+    """Calculate flux in erg s-1 cm-2 Hz-1."""
     flux = 10 ** (-.4 * (mag + 48.57))
     flux_err = abs(-.4 * flux * sp.log(10) * mag_err)
     return flux, flux_err
