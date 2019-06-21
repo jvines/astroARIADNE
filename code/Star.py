@@ -64,6 +64,12 @@ class Star:
         self.get_magnitudes()
 
     def get_magnitudes(self):
+        """Retrieve the magnitudes of the star.
+
+        Looks into APASS, WISE, Pan-STARRS, Gaia, 2MASS and SDSS surveys
+        looking for different magnitudes for the star, along with the
+        associated uncertainties.
+        """
         if self.coords:
             cats = Vizier.query_region(
                 coord.SkyCoord(
