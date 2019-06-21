@@ -48,7 +48,8 @@ class Star:
     }
 
     def __init__(self, starname, coords=None, ra=None, dec=None,
-                 ra_units=None, dec_units=None, fixed_Z=False):
+                 fixed_Z=False):
+        """ra/dec units must be in deg."""
         self.full_grid = sp.loadtxt('test_grid.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
@@ -96,3 +97,37 @@ class Star:
         self.filters = sp.array(filters)
         self.magnitudes = sp.array(magnitudes)
         self.errors = sp.array(errors)
+
+    def get_parallax(self):
+        """Retrieve the parallax of the star.
+
+        Retrieve the parallax of the star from Gaia
+        (or Hipparcos if Gaia is absent)
+        """
+        if self.coords:
+            cats = Vizier.query_region(
+                coord.SkyCoord(
+                    ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
+                ), radius=Angle(.01, "deg")
+            )
+        else:
+            cats = Vizier.query_object(self.starname)
+        try:
+            plx = cats[self.plx_catalogs['Gaia']
+                       [0]][self.plx_catalogs['Gaia'][1]]
+            plx_e = cats[self.plx_catalogs['Gaia']
+                         [0]][self.plx_catalogs['Gaia'][2]]
+        except Exception as e:
+            print('No Gaia parallax found for this star.', end=' ')
+            print('Retrying with Hipparcos.')
+            try:
+                plx = cats[self.plx_catalogs['Hipparcos']
+                           [0]][self.plx_catalogs['Hipparcos'][1]]
+                plx_e = cats[self.plx_catalogs['Hipparcos']
+                             [0]][self.plx_catalogs['Hipparcos'][2]]
+            except Exception as e:
+                print('No Hipparcos parallax found.', end=' ')
+                print('Input the parallax manually.')
+
+        self.plx = plx
+        self.plx_e = plx_e
