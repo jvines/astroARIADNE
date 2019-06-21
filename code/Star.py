@@ -1,4 +1,9 @@
 """Star.py contains the Star class which contains the data regarding a star."""
+from astroquery.vizier import Vizier
+from astroquery.gaia import Gaia
+from astropy.coordinates import SkyCoord, Angle
+import astropy.units as u
+import scipy as sp
 
 
 class Star:
@@ -119,10 +124,31 @@ class Star:
                              [0]][self.plx_catalogs['Hipparcos'][2]]
             except Exception as e:
                 print('No Hipparcos parallax found.', end=' ')
-                print('Input the parallax manually.')
+                print('Try inputting manually.')
 
         self.plx = plx
         self.plx_e = plx_e
+
+    def get_radius(self):
+        """Retrieve the stellar radius from Gaia if available."""
+        catalog = Gaia.query_object_async(
+            SkyCoord(
+                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
+            ), radius=Angle(.01, "deg")
+        ).get_data()
+        try:
+            rad = catalog['radius_val'][0]
+            rad_upper = catalog['radius_percentile_upper'][0]
+            rad_lower = catalog['radius_percentile_lower'][0]
+            e_up = rad_upper - rad
+            e_lo = rad - rad_lower
+            rad_e = (e_up + e_lo) / 2
+        except Exception as e:
+            print('No radius value found.', end=' ')
+            print('Try inputting manually')
+
+        self.rad = rad
+        self.rad_e = rad_e
 
     def get_catalogs(self):
         """Retrieve available catalogs for a star from Vizier."""
