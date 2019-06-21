@@ -70,14 +70,7 @@ class Star:
         looking for different magnitudes for the star, along with the
         associated uncertainties.
         """
-        if self.coords:
-            cats = Vizier.query_region(
-                coord.SkyCoord(
-                    ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-                ), radius=Angle(.01, "deg")
-            )
-        else:
-            cats = Vizier.query_object(self.starname)
+        cats = self.get_catalogs()
 
         filters = []
         magnitudes = []
@@ -110,14 +103,7 @@ class Star:
         Retrieve the parallax of the star from Gaia
         (or Hipparcos if Gaia is absent)
         """
-        if self.coords:
-            cats = Vizier.query_region(
-                coord.SkyCoord(
-                    ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-                ), radius=Angle(.01, "deg")
-            )
-        else:
-            cats = Vizier.query_object(self.starname)
+        cats = self.get_catalogs()
         try:
             plx = cats[self.plx_catalogs['Gaia']
                        [0]][self.plx_catalogs['Gaia'][1]]
@@ -137,3 +123,16 @@ class Star:
 
         self.plx = plx
         self.plx_e = plx_e
+
+    def get_catalogs(self):
+        """Retrieve available catalogs for a star from Vizier."""
+        if self.coords:
+            cats = Vizier.query_region(
+                coord.SkyCoord(
+                    ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
+                ), radius=Angle(.01, "deg")
+            )
+        else:
+            cats = Vizier.query_object(self.starname)
+
+        return cats
