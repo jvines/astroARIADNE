@@ -1,4 +1,6 @@
 """Star.py contains the Star class which contains the data regarding a star."""
+from __future__ import print_function, division
+
 from astroquery.vizier import Vizier
 from astroquery.gaia import Gaia
 from astropy.coordinates import SkyCoord, Angle
@@ -7,6 +9,77 @@ import scipy as sp
 
 
 class Star:
+    """Object that holds stellar magnitudes and other relevant information.
+
+    Parameters
+    ----------
+    starname : str
+        The name of the object. If ra and dec aren't provided nor is a
+        list of magnitudes with associated uncertainties prvided, the search
+        for stellar magnitudes will be done using the object's name instead.
+
+    ra : float
+        RA coordinate of the object in degrees.
+
+    dec : float
+        DEC coordinate of the object in degrees.
+
+    coord_search : bool
+        If True uses coordinates to search for the object in the catalogs.
+        Else it uses the object's name.
+
+    fixed_z : bool, float, optional
+        Bool with False if the fit won't have a fixed metallicity. Else
+        fixed_z must be a float with the desired metallicity value. This value
+        must not be [Fe/H].
+
+    get_plx : bool, optional
+        Set to True in order to query Gaia DR2 (or Hipparcos if for some reason
+        the Gaia parallax is unavailable) for the stellar parallax.
+
+    get_rad : bool, optional
+        Set to True in order to query Gaia DR2 for the stellar radius, if
+        available.
+
+    Attributes
+    ----------
+    catalogs : dict
+        A dictionary with the Vizier catalogs of different surveys
+        used to retrieve stellar magnitudes.
+
+    full_grid : ndarray
+        The full grid of fluxes.
+
+    teff : ndarray
+        The effective temperature axis of the flux grid.
+
+    logg : ndarray
+        The gravity axis of the flux grid
+
+    z : ndarray, float
+        If fixed_z is False, then z is the metallicity axis of the flux grid.
+        Otherwise z has the same value as fixed_z
+
+    starname : str
+        The name of the object.
+
+    ra : float
+        RA coordinate of the object.
+
+    dec : float
+        DEC coordinate of the object.
+
+    filters : ndarray
+        An array containing the filters or bands for which there is
+        archival photometry
+
+    magnitudes : ndarray
+        An array containing the archival magnitudes for the object.
+
+    errors : ndarray
+        An array containing the uncertainties in the magnitudes.
+
+    """
 
     # pyphot filter names: currently unused are U R I PS1_w
 
@@ -19,32 +92,46 @@ class Star:
     #     'WISE_RSR_W1', 'WISE_RSR_W2'
 
     # Catalogs magnitude names
-    apass_mags = ['Vmag', 'Bmag', 'g_mag', 'r_mag', 'i_mag']
-    apass_errs = ['e_Vmag', 'e_Bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
-    apass_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
-                     'SDSS_g', 'SDSS_r', 'SDSS_i']
-    wise_mags = ['W1mag', 'W2mag']
-    wise_errs = ['e_W1mag', 'e_W2mag']
-    wise_filters = ['WISE_RSR_W1', 'WISE_RSR_W2']
-    ps1_mags = ['gmag', 'rmag', 'imag', 'zmag', 'ymag']
-    ps1_errs = ['e_gmag', 'e_rmag', 'e_imag', 'e_zmag', 'e_ymag']
-    ps1_filters = ['PS1_g', 'PS1_r', 'PS1_i', 'PS1_z', 'PS1_y']
-    twomass_mags = ['Jmag', 'Hmag', 'Kmag']
-    twomass_errs = ['e_Jmag', 'e_Hmag', 'e_Kmag']
-    twomass_filters = ['2MASS_J', '2MASS_H', '2MASS_Ks']
-    gaia_mags = ['Gmag', 'BPmag', 'RPmag']
-    gaia_errs = ['e_Gmag', 'e_BPmag', 'e_RPmag']
-    gaia_filters = ['GaiaDR2v2_G',  'GaiaDR2v2_BP', 'GaiaDR2v2_RP']
-    sdss_mags = ['umag', 'zmag']
-    sdss_errs = ['e_umag', 'e_zmag']
-    sdss_filters = ['SDSS_u', 'SDSS_z']
+    __apass_mags = ['Vmag', 'Bmag', 'g_mag', 'r_mag', 'i_mag']
+    __apass_errs = ['e_Vmag', 'e_Bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
+    __apass_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
+                       'SDSS_g', 'SDSS_r', 'SDSS_i']
+    __wise_mags = ['W1mag', 'W2mag']
+    __wise_errs = ['e_W1mag', 'e_W2mag']
+    __wise_filters = ['WISE_RSR_W1', 'WISE_RSR_W2']
+    __ps1_mags = ['gmag', 'rmag', 'imag', 'zmag', 'ymag']
+    __ps1_errs = ['e_gmag', 'e_rmag', 'e_imag', 'e_zmag', 'e_ymag']
+    __ps1_filters = ['PS1_g', 'PS1_r', 'PS1_i', 'PS1_z', 'PS1_y']
+    __twomass_mags = ['Jmag', 'Hmag', 'Kmag']
+    __twomass_errs = ['e_Jmag', 'e_Hmag', 'e_Kmag']
+    __twomass_filters = ['2MASS_J', '2MASS_H', '2MASS_Ks']
+    __gaia_mags = ['Gmag', 'BPmag', 'RPmag']
+    __gaia_errs = ['e_Gmag', 'e_BPmag', 'e_RPmag']
+    __gaia_filters = ['GaiaDR2v2_G',  'GaiaDR2v2_BP', 'GaiaDR2v2_RP']
+    __sdss_mags = ['umag', 'zmag']
+    __sdss_errs = ['e_umag', 'e_zmag']
+    __sdss_filters = ['SDSS_u', 'SDSS_z']
 
     # APASS DR9, WISE, PAN-STARRS DR1, GAIA DR2, 2MASS, SDSS DR9
     catalogs = {
-        'apass': ['II/336/apass9', zip(apass_mags, apass_errs, apass_filters)],
-        'Wise': ['II/311/wise', zip(wise_mags, wise_errs, wise_filters)],
-        'Pan-STARRS': ['II/349/ps1', zip(ps1_mags, ps1_errs, ps1_filters)],
-        'Gaia': ['I/345/gaia2', zip(gaia_mags, gaia_errs, gaia_filters)],
+        'apass': [
+            'II/336/apass9',
+            zip(__apass_mags, __apass_errs, __apass_filters)
+        ],
+        'Wise': [
+            'II/311/wise',
+            zip(__wise_mags, __wise_errs, __wise_filters)
+        ],
+        'Pan-STARRS':
+        [
+            'II/349/ps1',
+            zip(__ps1_mags, __ps1_errs, __ps1_filters)
+        ],
+        'Gaia':
+        [
+            'I/345/gaia2',
+            zip(__gaia_mags, __gaia_errs, __gaia_filters)
+        ],
         '2MASS': [
             'II/246/out',
             zip(twomass_mags, twomass_errs, twomass_filters)
@@ -52,21 +139,22 @@ class Star:
         'SDSS': ['V/139/sdss9', zip(sdss_mags, sdss_errs, sdss_filters)]
     }
 
-    def __init__(self, starname, coords=None, ra=None, dec=None,
-                 fixed_Z=False):
-        """ra/dec units must be in deg."""
+    def __init__(self, starname, ra, dec, coord_search=False,
+                 fixed_z=False, get_plx=False, get_rad=False):
         self.full_grid = sp.loadtxt('test_grid.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
-        self.z = self.full_grid[:, 2] if not fixed_Z else fixed_Z
+        self.z = self.full_grid[:, 2] if not fixed_z else fixed_z
+        self.__coord_search
         self.starname = starname
-        self.coords = coords
-        if coords:
-            self.ra = ra
-            self.ra_units = ra_units
-            self.dec = dec
-            self.dec_units = dec_units
+        self.ra = ra
+        self.dec = dec
         self.get_magnitudes()
+
+        if get_plx:
+            self.get_parallax()
+        if get_rad:
+            self.get_radius()
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -152,7 +240,7 @@ class Star:
 
     def get_catalogs(self):
         """Retrieve available catalogs for a star from Vizier."""
-        if self.coords:
+        if self.coord_search:
             cats = Vizier.query_region(
                 coord.SkyCoord(
                     ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
