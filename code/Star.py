@@ -1,11 +1,13 @@
 """Star.py contains the Star class which contains the data regarding a star."""
 from __future__ import print_function, division
 
+
 from astroquery.vizier import Vizier
 from astroquery.gaia import Gaia
 from astropy.coordinates import SkyCoord, Angle
 import astropy.units as u
 import scipy as sp
+from scipy.interpolate import griddata
 
 
 class Star:
@@ -79,17 +81,23 @@ class Star:
     errors : ndarray
         An array containing the uncertainties in the magnitudes.
 
+    grid : ndarray
+        An array containing a grid with teff, logg and z if it's not fixed
+        to be used for interpolation later.
+
     """
 
     # pyphot filter names: currently unused are U R I PS1_w
 
-    #     '2MASS_H', '2MASS_J', '2MASS_Ks',
-    #     'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
-    #     'GROUND_COUSINS_R', 'GROUND_COUSINS_I',
-    #     'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
-    #     'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
-    #     'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
-    #     'WISE_RSR_W1', 'WISE_RSR_W2'
+    __filter_names = [
+        '2MASS_H', '2MASS_J', '2MASS_Ks',
+        'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
+        'GROUND_COUSINS_R', 'GROUND_COUSINS_I',
+        'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
+        'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
+        'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
+        'WISE_RSR_W1', 'WISE_RSR_W2'
+    ]
 
     # Catalogs magnitude names
     __apass_mags = ['Vmag', 'Bmag', 'g_mag', 'r_mag', 'i_mag']
@@ -150,6 +158,12 @@ class Star:
         self.ra = ra
         self.dec = dec
         self.get_magnitudes()
+
+        # Create the grid to interpolate later.
+        if not fixed_z:
+            self.grid = sp.vstack((self.teff, self.logg, self.z)).T
+        else:
+            self.grid = sp.vstack((self.teff, self.logg)).T
 
         if get_plx:
             self.get_parallax()
@@ -250,3 +264,42 @@ class Star:
             cats = Vizier.query_object(self.starname)
 
         return cats
+
+    def get_interpolated_flux(self, temp, logg, z, filt, fixed_z=False):
+        """Interpolate the grid of fluxes in a given Teff, logg and z.
+
+        Parameters
+        ----------
+        temp : float
+            The effective temperature.
+
+        logg : float
+            The superficial gravity.
+
+        z : float
+            The metallicity.
+
+        filt : str
+            The desired filter.
+
+        fixed_z : bool, float, optional
+            False if the metallicity is not fixed. The metallicity value
+            otherwise.
+
+        Returns
+        -------
+        flux : float
+            The interpolated flux at temp, logg, z for filter filt.
+
+        """
+        filter_index = sp.where(self.__filter_names == filt)[0]
+        if not fixed_z:
+            model_fluxes = self.full_grid[:, 3 + filter_index]
+            flux = griddata(grid, model_fluxes,
+                            (temp, logg, z), method='linear')
+        else:
+            model_fluxes = self.full_grid[self.full_grid[:, 2] ==
+                                          fixed_z][:, 3 + filter_index]
+            flux = griddata(grid, model_fluxes, (temp, logg), method='linear')
+
+        return flux
