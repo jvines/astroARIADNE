@@ -111,3 +111,29 @@ def loglike(theta, filters, grids, flux, flux_er, fixed_Z=False):
     lnl = (residuals**2).sum() / errs**2
 
     return -.5 * lnl
+
+
+def read_priors(priorf):
+    """Read the prior file.
+
+    Returns a dictionary with the pdfs of each parameter/prior
+    """
+    param, prior, bounds = sp.loadtxt(priorf, usecols=[0, 1, 2], unpack=True)
+    prior_dict = dict()
+    for par, pri, bo in zip(param, prior, bounds):
+        if pri.lower() == 'uniform':
+            a, b = bounds.split(',')
+            a, b = float(a), float(b)
+            prior_dict[par] = st.uniform(loc=a, scale=b - a).pdf
+        elif pri.lower() == 'normal':
+            mu, sig = bounds.split(',')
+            mu, sig = float(mu), float(sig)
+            prior_dict[par] = st.norm(loc=mu, scale=sig).pdf
+        elif pri.lower() == 'truncatednormal':
+            mu, sig, up, low = bounds.split(',')
+            mu, sig, up, low = float(mu), float(sig), float(up), float(low)
+            up, low = (up - mu) / sig, (low - mu) / sig
+            priot_dict[par] = st.truncnorm(a=low, b=up, loc=mu, scale=sig).pdf
+        elif pri.lower() == 'fixed':
+            continue
+    return prior_dict
