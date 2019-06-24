@@ -9,7 +9,6 @@ from astroquery.vizier import Vizier
 from scipy.interpolate import griddata
 
 from phot_utils import *
-from sed_library import extract_info
 
 
 class Star:
