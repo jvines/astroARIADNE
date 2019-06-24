@@ -1,13 +1,15 @@
 """Star.py contains the Star class which contains the data regarding a star."""
-from __future__ import print_function, division
+from __future__ import division, print_function
 
-
-from astroquery.vizier import Vizier
-from astroquery.gaia import Gaia
-from astropy.coordinates import SkyCoord, Angle
 import astropy.units as u
 import scipy as sp
+from astropy.coordinates import Angle, SkyCoord
+from astroquery.gaia import Gaia
+from astroquery.vizier import Vizier
 from scipy.interpolate import griddata
+
+from phot_utils import *
+from sed_library import extract_info
 
 
 class Star:
@@ -166,6 +168,13 @@ class Star:
         self.dec = dec
         self.get_magnitudes()
 
+        # Get the wavelength and fluxes of the retrieved magnitudes.
+        wave, flux, _ = extract_info(
+            self.magnitudes, self.errors, self.filters)
+
+        self.wave = wave
+        self.flux = flux
+
         # Create the grid to interpolate later.
         if not fixed_z:
             self.grid = sp.vstack((self.teff, self.logg, self.z)).T
@@ -184,6 +193,9 @@ class Star:
         looking for different magnitudes for the star, along with the
         associated uncertainties.
         """
+        print('Looking online for archival magnitudes for star', end=' ')
+        print(self.starname)
+
         cats = self.get_catalogs()
 
         filters = []
@@ -218,6 +230,7 @@ class Star:
         (or Hipparcos if Gaia is absent)
         """
         cats = self.get_catalogs()
+        print('Searching for parallax in Gaia...')
         try:
             plx = cats[self.plx_catalogs['Gaia']
                        [0]][self.plx_catalogs['Gaia'][1]]
@@ -245,6 +258,7 @@ class Star:
                 ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
             ), radius=Angle(.01, "deg")
         ).get_data()
+        print('Searching for radius in Gaia...')
         try:
             rad = catalog['radius_val'][0]
             rad_upper = catalog['radius_percentile_upper'][0]
@@ -273,7 +287,7 @@ class Star:
         return cats
 
     def get_interpolated_flux(self, temp, logg, z, filt, fixed_z=False):
-        """Interpolate the grid of fluxes in a given Teff, logg and z.
+        """Interpolate the grid of fluxes in a given teff, logg and z.
 
         Parameters
         ----------
