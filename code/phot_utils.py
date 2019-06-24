@@ -8,12 +8,12 @@ broadband filters.
 """
 
 
-from __future__ import print_function, division
+from __future__ import division, print_function
 
-import scipy as sp
-import astropy.units as u
 import astropy.constants as const
+import astropy.units as u
 import pyphot
+import scipy as sp
 
 
 def convert_jansky_to_ergs(j):
