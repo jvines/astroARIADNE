@@ -81,6 +81,13 @@ class Star:
     errors : ndarray
         An array containing the uncertainties in the magnitudes.
 
+    wave : ndarray
+        An array containing the wavelengths associated to the different
+        filters retrieved.
+
+    flux : ndarray
+        An array containing the fluxes of the different retrieved magnitudes.
+
     grid : ndarray
         An array containing a grid with teff, logg and z if it's not fixed
         to be used for interpolation later.
