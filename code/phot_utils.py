@@ -16,6 +16,42 @@ import pyphot
 import scipy as sp
 
 
+def extract_info(magnitudes, errors, filters):
+    """Extract the flux information for a Star."""
+    flux = []
+    wave = []
+    bandpass = []
+    bands = []
+
+    for mag, err, band in zip(magnitudes, errors, filters):
+        # Get central wavelength
+        leff = get_effective_wavelength(band)
+        # Extract mag and error from dictionary
+        mag = mag
+        mag_err = err
+        # get flux, flux error and bandpass
+        flx, flx_err = mag_to_flux(mag, mag_err, band)
+        bp_l, bp_u = get_bandpass(band)
+        flux.append([flx * leff, flx_err * leff])
+        wave.append(leff)
+        bandpass.append([leff - bp_l, bp_u - leff])
+
+        # print('Flux in band', end=' ')
+        # print(band, end=': ')
+        # print(flx, end=' ')
+        # print(r'erg/cm2/s/um', end='; ')
+        # print('Central wavelength:', end=' ')
+        # print('{:2.3f}'.format(leff), end=' ')
+        # print('Bandpass:', end=' ')
+        # print('{:2.3f}'.format(bp_u - bp_l))
+
+    wave = sp.array(wave_flux)
+    flux = sp.array(flux)
+    bandpass = sp.array(bandpass)
+
+    return wave, flux, bandpass
+
+
 def convert_jansky_to_ergs(j):
     """Convert flux from jansky to erg s-1 cm-2."""
     return j * 1e-23
