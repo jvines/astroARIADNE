@@ -3,10 +3,11 @@
 # TODO: create settings file
 from __future__ import division, print_function
 
-import matplotlib.pyplot as plt
 import matplotlib
-import scipy as sp
+import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+import scipy as sp
+
 from phot_utils import *
 from Star import *
 
