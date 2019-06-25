@@ -157,7 +157,8 @@ class Star:
     }
 
     def __init__(self, starname, ra, dec, coord_search=False,
-                 fixed_z=False, get_plx=False, get_rad=False, mag_dict=None):
+                 fixed_z=False, get_plx=False, plx=None, plx_e=None,
+                 get_rad=False, rad=None, rad_e=None, mag_dict=None):
         self.full_grid = sp.loadtxt('test_grid.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
@@ -197,10 +198,16 @@ class Star:
         else:
             self.grid = sp.vstack((self.teff, self.logg)).T
 
-        if get_plx:
+        if get_plx and not (plx and plx_e):
             self.get_parallax()
+        else:
+            self.plx = plx
+            self.plx_e = plx_e
         if get_rad:
             self.get_radius()
+        elif rad and rad_e:
+            self.rad = rad
+            self.rad_e = rad_e
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -245,34 +252,27 @@ class Star:
         Retrieve the parallax of the star from Gaia
         (or Hipparcos if Gaia is absent)
         """
-        cats = self.get_catalogs()
+        catalog = Gaia.query_object_async(
+            SkyCoord(
+                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
+            ), radius=Angle(.001, "deg")
+        )
         print('Searching for parallax in Gaia...')
         try:
-            plx = cats[self.plx_catalogs['Gaia']
-                       [0]][self.plx_catalogs['Gaia'][1]]
-            plx_e = cats[self.plx_catalogs['Gaia']
-                         [0]][self.plx_catalogs['Gaia'][2]]
+            plx = catalog['parallax'][0]
+            plx_e = catalog['parallax_error'][0]
+            self.plx = plx
+            self.plx_e = plx_e
         except Exception as e:
             print('No Gaia parallax found for this star.', end=' ')
-            print('Retrying with Hipparcos.')
-            try:
-                plx = cats[self.plx_catalogs['Hipparcos']
-                           [0]][self.plx_catalogs['Hipparcos'][1]]
-                plx_e = cats[self.plx_catalogs['Hipparcos']
-                             [0]][self.plx_catalogs['Hipparcos'][2]]
-            except Exception as e:
-                print('No Hipparcos parallax found.', end=' ')
-                print('Try inputting manually.')
-
-        self.plx = plx
-        self.plx_e = plx_e
+            print('Try inputting manually.')
 
     def get_radius(self):
         """Retrieve the stellar radius from Gaia if available."""
         catalog = Gaia.query_object_async(
             SkyCoord(
                 ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=Angle(.01, "deg")
+            ), radius=Angle(.001, "deg")
         ).get_data()
         print('Searching for radius in Gaia...')
         try:
@@ -282,12 +282,11 @@ class Star:
             e_up = rad_upper - rad
             e_lo = rad - rad_lower
             rad_e = (e_up + e_lo) / 2
+            self.rad = rad
+            self.rad_e = rad_e
         except Exception as e:
             print('No radius value found.', end=' ')
-            print('Try inputting manually')
-
-        self.rad = rad
-        self.rad_e = rad_e
+            print('Try inputting manually.')
 
     def get_catalogs(self):
         """Retrieve available catalogs for a star from Vizier."""
@@ -295,7 +294,7 @@ class Star:
             cats = Vizier.query_region(
                 SkyCoord(
                     ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-                ), radius=Angle(.01, "deg")
+                ), radius=Angle(.001, "deg")
             )
         else:
             cats = Vizier.query_object(self.starname)
