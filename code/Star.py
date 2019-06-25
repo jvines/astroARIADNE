@@ -7,6 +7,7 @@ from astropy.coordinates import Angle, SkyCoord
 from astroquery.gaia import Gaia
 from astroquery.vizier import Vizier
 from scipy.interpolate import griddata
+from tqdm import tqdm
 
 from phot_utils import *
 
@@ -152,7 +153,7 @@ class Star:
             'II/246/out',
             zip(__twomass_mags, __twomass_errs, __twomass_filters)
         ],
-        'SDSS': ['V/139/sdss9', zip(__sdss_mags, __sdss_errs, __sdss_filters)]
+        'SDSS': ['V/147/sdss12', zip(__sdss_mags, __sdss_errs, __sdss_filters)]
     }
 
     def __init__(self, starname, ra, dec, coord_search=False,
@@ -217,7 +218,7 @@ class Star:
         magnitudes = []
         errors = []
 
-        for c in self.catalogs.keys():
+        for c in tqdm(self.catalogs.keys()):
             # load magnitude names, filter names and error names of
             # current catalog
             current = self.catalogs[c][1]
@@ -290,9 +291,9 @@ class Star:
 
     def get_catalogs(self):
         """Retrieve available catalogs for a star from Vizier."""
-        if self.coord_search:
+        if self.__coord_search:
             cats = Vizier.query_region(
-                coord.SkyCoord(
+                SkyCoord(
                     ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
                 ), radius=Angle(.01, "deg")
             )
