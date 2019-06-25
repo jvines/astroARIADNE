@@ -26,7 +26,6 @@ def extract_info(magnitudes, errors, filters):
     for mag, err, band in zip(magnitudes, errors, filters):
         # Get central wavelength
         leff = get_effective_wavelength(band)
-        # Extract mag and error from dictionary
         mag = mag
         mag_err = err
         # get flux, flux error and bandpass
@@ -45,11 +44,12 @@ def extract_info(magnitudes, errors, filters):
         # print('Bandpass:', end=' ')
         # print('{:2.3f}'.format(bp_u - bp_l))
 
-    wave = sp.array(wave_flux)
+    wave = sp.array(wave)
     flux = sp.array(flux)
+    flux_er = sp.array(flx_err)
     bandpass = sp.array(bandpass)
 
-    return wave, flux, bandpass
+    return wave, flux, flux_er, bandpass
 
 
 def convert_jansky_to_ergs(j):
