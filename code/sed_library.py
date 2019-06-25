@@ -6,7 +6,7 @@ from phot_utils import *
 from Star import *
 
 
-def model_grid(theta, star):
+def model_grid(theta, star, fixed_z=False):
     """Return the model grid in the selected filters.
 
     Parameters:
@@ -24,48 +24,26 @@ def model_grid(theta, star):
         interpolated fluxes
 
     """
-    teff, logg, z, rad, dist = theta
+    if not fixed_z:
+        teff, logg, z, rad, dist = theta
+    else:
+        teff, logg, rad, dist = theta
+        z = -1
     model = dict()
 
     for f in star.filters:
         model[f] = star.get_interpolated_flux(
-            teff, logg, z, f) * (rad / dist) ** 2
+            teff, logg, z, f, fixed_z) * (rad / dist) ** 2
     return model
 
 
-def model_grid_fixed_z(theta, star):
-    """Return the model grid in the selected filters.
-
-    This model assumes a fixed metallicity
-
-    Parameters:
-    -----------
-    theta : array_like
-        The parameters of the fit: teff, logg, radius, distance
-
-    star : Star
-        The Star object containing all relevant information regarding the star.
-
-    Returns
-    -------
-    model : dict
-        A dictionary whose keys are the filters and the values are the
-        interpolated fluxes
-
-    """
-    teff, logg, rad, dist = theta
-    model = dict()
-
-    for f in star.filters:
-        model[f] = star.get_interpolated_flux(
-            teff, logg, -1, f, fixed_z=True) * (rad / dist) ** 2
-
-    return model
-
-
-def log_prior(theta, priorf):
-    teff, logg, z, rad, dist = theta
-    lp_teff, lp_logg, lp_z, lp_rad, lp_dist = 0, 0, 0, 0, 0
+def log_prior(theta, prior_dict, fixed_z=False):
+    if not fixed_z:
+        teff, logg, z, rad, dist = theta
+        lp_z = 0
+    else:
+        teff, logg, rad, dist = theta
+    lp_teff, lp_logg, lp_rad, lp_dist = 0, 0, 0, 0, 0
 
     if not 2300 < teff < 12000:
         return -sp.inf
@@ -74,30 +52,25 @@ def log_prior(theta, priorf):
     if not -4 < z < 1:
         return -sp.inf
 
-    prior_dict = read_priors(priorf)
-
     for k in prior_dict.keys():
         if k == 'teff':
-            lp_teff += prior_dict[k](teff)
+            lp_teff += prior_dict[k].pdf(teff)
         elif k == 'logg':
-            lp_logg += prior_dict[k](logg)
-        elif k == 'z':
-            lp_z += prior_dict[k](z)
+            lp_logg += prior_dict[k].pdf(logg)
+        elif k == 'z' and not fixed_z:
+            lp_z += prior_dict[k].pdf(z)
         elif k == 'rad':
-            lp_rad += prior_dict[k](rad)
+            lp_rad += prior_dict[k].pdf(rad)
         elif k == 'dist':
-            lp_dist += prior_dict[k](dist)
+            lp_dist += prior_dict[k].pdf(dist)
 
     return lp_teff + lp_logg + lp_z + lp_rad + lp_dist
 
 
-def loglike(theta, filters, grids, flux, flux_er, fixed_Z=False):
+def log_likelihood(theta, filters, flux, flux_er, fixed_z=False):
     """flux is a dictionary where key = filter."""
-    if not fixed_Z:
-        model_dict = model_grid(theta, filters, grids)
-    else:
-        model_dict = model_grid_fixed_z(theta, filters, grids)
 
+    model_dict = model_grid(theta, filters, grids, fixed_z)
     residuals = []
     errs = []
     for f in filters:
@@ -108,32 +81,18 @@ def loglike(theta, filters, grids, flux, flux_er, fixed_Z=False):
     residuals = sp.array(residuals)
     errs = sp.array(errs)
 
-    lnl = (residuals**2).sum() / errs**2
+    lnl = (residuals ** 2).sum() / errs ** 2
 
     return -.5 * lnl
 
 
-def read_priors(priorf):
-    """Read the prior file.
-
-    Returns a dictionary with the pdfs of each parameter/prior
-    """
-    param, prior, bounds = sp.loadtxt(priorf, usecols=[0, 1, 2], unpack=True)
-    prior_dict = dict()
-    for par, pri, bo in zip(param, prior, bounds):
-        if pri.lower() == 'uniform':
-            a, b = bounds.split(',')
-            a, b = float(a), float(b)
-            prior_dict[par] = st.uniform(loc=a, scale=b - a).pdf
-        elif pri.lower() == 'normal':
-            mu, sig = bounds.split(',')
-            mu, sig = float(mu), float(sig)
-            prior_dict[par] = st.norm(loc=mu, scale=sig).pdf
-        elif pri.lower() == 'truncatednormal':
-            mu, sig, up, low = bounds.split(',')
-            mu, sig, up, low = float(mu), float(sig), float(up), float(low)
-            up, low = (up - mu) / sig, (low - mu) / sig
-            priot_dict[par] = st.truncnorm(a=low, b=up, loc=mu, scale=sig).pdf
-        elif pri.lower() == 'fixed':
-            continue
-    return prior_dict
+def log_probability(theta, params):
+    star, prior_dict = params
+    filters = star.filters
+    flux = star.flux
+    flux_er = star.flux_er
+    fixed_z = star.fixed_z
+    lp = log_prior(theta, prior_dict, fixed_z)
+    if not sp.isfinite(lp):
+        return -sp.inf
+    return lp + log_likelihood(theta, filters, flux, flux_er, fixed_z)
