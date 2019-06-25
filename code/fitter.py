@@ -13,7 +13,7 @@ from phot_utils import *
 
 class Fitter:
 
-    def __init__(self, star, nwalkers, nsteps, priorfile, burnout=False):
+    def __init__(self, star, nwalkers, nsteps, priorfile=None, burnout=False):
         self.star = star
 
         # emcee settings
