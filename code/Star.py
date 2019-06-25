@@ -97,7 +97,7 @@ class Star:
 
     # pyphot filter names: currently unused are U R I PS1_w
 
-    __filter_names = [
+    filter_names = sp.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
         'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
         'GROUND_COUSINS_R', 'GROUND_COUSINS_I',
@@ -105,7 +105,7 @@ class Star:
         'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
         'WISE_RSR_W1', 'WISE_RSR_W2'
-    ]
+    ])
 
     # Catalogs magnitude names
     __apass_mags = ['Vmag', 'Bmag', 'g_mag', 'r_mag', 'i_mag']
@@ -150,29 +150,45 @@ class Star:
         ],
         '2MASS': [
             'II/246/out',
-            zip(twomass_mags, twomass_errs, twomass_filters)
+            zip(__twomass_mags, __twomass_errs, __twomass_filters)
         ],
-        'SDSS': ['V/139/sdss9', zip(sdss_mags, sdss_errs, sdss_filters)]
+        'SDSS': ['V/139/sdss9', zip(__sdss_mags, __sdss_errs, __sdss_filters)]
     }
 
     def __init__(self, starname, ra, dec, coord_search=False,
-                 fixed_z=False, get_plx=False, get_rad=False):
+                 fixed_z=False, get_plx=False, get_rad=False, mag_dict=None):
         self.full_grid = sp.loadtxt('test_grid.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
         self.z = self.full_grid[:, 2] if not fixed_z else fixed_z
-        self.__coord_search
+        self.__coord_search = coord_search
+        self.fixed_z = fixed_z
         self.starname = starname
         self.ra = ra
         self.dec = dec
-        self.get_magnitudes()
+
+        if not mag_dict:
+            self.get_magnitudes()
+        else:
+            mags = []
+            errors = []
+            filters = []
+            for k in mag_dict.keys():
+                filters.append(k)
+                mags.append(mag_dict[k][0])
+                errors.append(mag_dict[k][1])
+            self.filters = sp.array(filters)
+            self.magnitudes = sp.array(mags)
+            self.errors = sp.array(errors)
 
         # Get the wavelength and fluxes of the retrieved magnitudes.
-        wave, flux, _ = extract_info(
+        wave, flux, flux_er, bandpass = extract_info(
             self.magnitudes, self.errors, self.filters)
 
         self.wave = wave
         self.flux = flux
+        self.flux_er = flux_er
+        self.bandpass = bandpass
 
         # Create the grid to interpolate later.
         if not fixed_z:
@@ -285,7 +301,7 @@ class Star:
 
         return cats
 
-    def get_interpolated_flux(self, temp, logg, z, filt, fixed_z=False):
+    def get_interpolated_flux(self, temp, logg, z, filt):
         """Interpolate the grid of fluxes in a given teff, logg and z.
 
         Parameters
@@ -302,24 +318,21 @@ class Star:
         filt : str
             The desired filter.
 
-        fixed_z : bool, float, optional
-            False if the metallicity is not fixed. The metallicity value
-            otherwise.
-
         Returns
         -------
         flux : float
             The interpolated flux at temp, logg, z for filter filt.
 
         """
-        filter_index = sp.where(self.__filter_names == filt)[0]
-        if not fixed_z:
+        filter_index = sp.where(self.filter_names == filt)[0]
+        if not self.fixed_z:
             model_fluxes = self.full_grid[:, 3 + filter_index]
-            flux = griddata(grid, model_fluxes,
+            flux = griddata(self.grid, model_fluxes,
                             (temp, logg, z), method='linear')
         else:
-            model_fluxes = self.full_grid[self.full_grid[:, 2] ==
-                                          fixed_z][:, 3 + filter_index]
-            flux = griddata(grid, model_fluxes, (temp, logg), method='linear')
+            model_fluxes = self.full_grid[self.full_grid[:, 2]
+                                          == self.fixed_z][:, 3 + filter_index]
+            flux = griddata(self.grid, model_fluxes,
+                            (temp, logg), method='linear')
 
         return flux
