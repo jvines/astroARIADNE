@@ -45,6 +45,9 @@ class Star:
         Set to True in order to query Gaia DR2 for the stellar radius, if
         available.
 
+    verbose : bool, optional
+        Set to False to supress printed outputs.
+
     Attributes
     ----------
     catalogs : dict
@@ -158,13 +161,17 @@ class Star:
 
     def __init__(self, starname, ra, dec, coord_search=False,
                  fixed_z=False, get_plx=False, plx=None, plx_e=None,
-                 get_rad=False, rad=None, rad_e=None, mag_dict=None):
+                 get_rad=False, rad=None, rad_e=None, mag_dict=None,
+                 verbose=True):
+        # Grid stuff
         self.full_grid = sp.loadtxt('test_grid.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
         self.z = self.full_grid[:, 2] if not fixed_z else fixed_z
         self.__coord_search = coord_search
         self.fixed_z = fixed_z
+
+        # Star stuff
         self.starname = starname
         self.ra = ra
         self.dec = dec
@@ -203,11 +210,15 @@ class Star:
         else:
             self.plx = plx
             self.plx_e = plx_e
+        self.calculate_distance()
         if get_rad:
             self.get_radius()
         elif rad and rad_e:
             self.rad = rad
             self.rad_e = rad_e
+
+        # MISC
+        self.verbose = verbose
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -216,8 +227,9 @@ class Star:
         looking for different magnitudes for the star, along with the
         associated uncertainties.
         """
-        print('Looking online for archival magnitudes for star', end=' ')
-        print(self.starname)
+        if self.verbose:
+            print('Looking online for archival magnitudes for star', end=' ')
+            print(self.starname)
 
         cats = self.get_catalogs()
 
@@ -257,12 +269,20 @@ class Star:
                 ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
             ), radius=Angle(.001, "deg")
         )
-        print('Searching for parallax in Gaia...')
+
+        if self.verbose:
+            print('Searching for parallax in Gaia...')
+
         try:
             plx = catalog['parallax'][0]
             plx_e = catalog['parallax_error'][0]
             self.plx = plx
             self.plx_e = plx_e
+
+            if self.verbose:
+                print('Parallax found!\nParallax value', end=': ')
+                print(self.plx, end=' +- ')
+                print(self.plx_e, end=' mas\n')
         except Exception as e:
             print('No Gaia parallax found for this star.', end=' ')
             print('Try inputting manually.')
@@ -273,8 +293,11 @@ class Star:
             SkyCoord(
                 ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
             ), radius=Angle(.001, "deg")
-        ).get_data()
-        print('Searching for radius in Gaia...')
+        )
+
+        if self.verbose:
+            print('Searching for radius in Gaia...')
+
         try:
             rad = catalog['radius_val'][0]
             rad_upper = catalog['radius_percentile_upper'][0]
@@ -284,6 +307,11 @@ class Star:
             rad_e = (e_up + e_lo) / 2
             self.rad = rad
             self.rad_e = rad_e
+
+            if self.verbose:
+                print('Radius found!\nRadius value', end=': ')
+                print(self.rad, end=' +- ')
+                print(self.rad_e, end=' R_sun\n')
         except Exception as e:
             print('No radius value found.', end=' ')
             print('Try inputting manually.')
@@ -336,3 +364,10 @@ class Star:
                             (temp, logg), method='linear')
 
         return flux
+
+    def calculate_distance(self):
+        """Calculate distance using parallax in solar radii."""
+        dist = 1 / (1000 * self.plx)
+        dist_e = dist * self.plx_e / self.plx
+        self.dist = dist * u.pc.to(u.solRad)
+        self.dist_e = dist_e * u.pc.to(u.solRad)
