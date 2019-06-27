@@ -6,7 +6,7 @@ from phot_utils import *
 from Star import *
 
 
-def model_grid(theta, star, fixed_z=False):
+def model_grid(theta, star):
     """Return the model grid in the selected filters.
 
     Parameters:
@@ -24,7 +24,7 @@ def model_grid(theta, star, fixed_z=False):
         interpolated fluxes
 
     """
-    if not fixed_z:
+    if not star.fixed_z:
         teff, logg, z, rad, dist = theta
     else:
         teff, logg, rad, dist = theta
@@ -33,7 +33,7 @@ def model_grid(theta, star, fixed_z=False):
 
     for f in star.filters:
         model[f] = star.get_interpolated_flux(
-            teff, logg, z, f, fixed_z) * (rad / dist) ** 2
+            teff, logg, z, f) * (rad / dist) ** 2
     return model
 
 
@@ -43,7 +43,7 @@ def log_prior(theta, prior_dict, fixed_z=False):
         lp_z = 0
     else:
         teff, logg, rad, dist = theta
-    lp_teff, lp_logg, lp_rad, lp_dist = 0, 0, 0, 0, 0
+    lp_teff, lp_logg, lp_rad, lp_dist = 0, 0, 0, 0
 
     if not 2300 < teff < 12000:
         return -sp.inf
@@ -67,32 +67,26 @@ def log_prior(theta, prior_dict, fixed_z=False):
     return lp_teff + lp_logg + lp_z + lp_rad + lp_dist
 
 
-def log_likelihood(theta, filters, flux, flux_er, fixed_z=False):
+def log_likelihood(theta, star):
     """flux is a dictionary where key = filter."""
-
-    model_dict = model_grid(theta, filters, grids, fixed_z)
+    model_dict = model_grid(theta, star)
     residuals = []
     errs = []
-    for f in filters:
-        if f in model_dict.keys() and flux.keys():
-            residuals.append(model_dict[f] - flux[f])
-            errs.append(flux_er[f])
+    for f in star.filters:
+        if f in model_dict.keys() and star.flux.keys():
+            residuals.append(model_dict[f] - star.flux[f])
+            errs.append(star.flux_er[f])
 
     residuals = sp.array(residuals)
     errs = sp.array(errs)
 
-    lnl = (residuals ** 2).sum() / errs ** 2
+    lnl = (residuals ** 2 / errs ** 2).sum()
 
     return -.5 * lnl
 
 
-def log_probability(theta, params):
-    star, prior_dict = params
-    filters = star.filters
-    flux = star.flux
-    flux_er = star.flux_er
-    fixed_z = star.fixed_z
-    lp = log_prior(theta, prior_dict, fixed_z)
+def log_probability(theta, star, prior_dict):
+    lp = log_prior(theta, prior_dict, star.fixed_z)
     if not sp.isfinite(lp):
         return -sp.inf
-    return lp + log_likelihood(theta, filters, flux, flux_er, fixed_z)
+    return lp + log_likelihood(theta, star)

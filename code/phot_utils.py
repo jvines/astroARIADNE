@@ -18,10 +18,10 @@ import scipy as sp
 
 def extract_info(magnitudes, errors, filters):
     """Extract the flux information for a Star."""
-    flux = []
-    wave = []
-    bandpass = []
-    bands = []
+    flux = dict()
+    flux_er = dict()
+    wave = dict()
+    bandpass = dict()
 
     for mag, err, band in zip(magnitudes, errors, filters):
         # Get central wavelength
@@ -31,9 +31,10 @@ def extract_info(magnitudes, errors, filters):
         # get flux, flux error and bandpass
         flx, flx_err = mag_to_flux(mag, mag_err, band)
         bp_l, bp_u = get_bandpass(band)
-        flux.append([flx * leff, flx_err * leff])
-        wave.append(leff)
-        bandpass.append([leff - bp_l, bp_u - leff])
+        flux[band] = flx * leff
+        flux_er[band] = flx_err * leff
+        wave[band] = leff
+        bandpass[band] = [leff - bp_l, bp_u - leff]
 
         # print('Flux in band', end=' ')
         # print(band, end=': ')
@@ -43,11 +44,6 @@ def extract_info(magnitudes, errors, filters):
         # print('{:2.3f}'.format(leff), end=' ')
         # print('Bandpass:', end=' ')
         # print('{:2.3f}'.format(bp_u - bp_l))
-
-    wave = sp.array(wave)
-    flux = sp.array(flux)
-    flux_er = sp.array(flx_err)
-    bandpass = sp.array(bandpass)
 
     return wave, flux, flux_er, bandpass
 

@@ -163,6 +163,11 @@ class Star:
                  fixed_z=False, get_plx=False, plx=None, plx_e=None,
                  get_rad=False, rad=None, rad_e=None, mag_dict=None,
                  verbose=True):
+        # MISC
+        self.verbose = verbose
+        self.get_rad = get_rad
+        self.get_plx = get_plx
+
         # Grid stuff
         self.full_grid = sp.loadtxt('test_grid.dat')
         self.teff = self.full_grid[:, 0]
@@ -170,6 +175,10 @@ class Star:
         self.z = self.full_grid[:, 2] if not fixed_z else fixed_z
         self.__coord_search = coord_search
         self.fixed_z = fixed_z
+        self.model_grid = dict()
+
+        for i, f in enumerate(self.filter_names):
+            self.model_grid[f] = self.full_grid[:, 3 + i]
 
         # Star stuff
         self.starname = starname
@@ -216,9 +225,6 @@ class Star:
         elif rad and rad_e:
             self.rad = rad
             self.rad_e = rad_e
-
-        # MISC
-        self.verbose = verbose
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -352,15 +358,12 @@ class Star:
             The interpolated flux at temp, logg, z for filter filt.
 
         """
-        filter_index = sp.where(self.filter_names == filt)[0]
+        # filter_index = sp.where(self.filter_names == filt)[0]
         if not self.fixed_z:
-            model_fluxes = self.full_grid[:, 3 + filter_index]
-            flux = griddata(self.grid, model_fluxes,
+            flux = griddata(self.grid, self.model_grid[filt],
                             (temp, logg, z), method='linear')
         else:
-            model_fluxes = self.full_grid[self.full_grid[:, 2]
-                                          == self.fixed_z][:, 3 + filter_index]
-            flux = griddata(self.grid, model_fluxes,
+            flux = griddata(self.grid, self.model_grid[filt],
                             (temp, logg), method='linear')
 
         return flux
