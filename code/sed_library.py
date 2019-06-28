@@ -25,9 +25,9 @@ def model_grid(theta, star):
 
     """
     if not star.fixed_z:
-        teff, logg, z, rad, dist = theta
+        teff, logg, z, dist, rad = theta
     else:
-        teff, logg, rad, dist = theta
+        teff, logg, dist, rad = theta
         z = -1
     model = dict()
 
@@ -39,10 +39,10 @@ def model_grid(theta, star):
 
 def log_prior(theta, prior_dict, fixed_z=False):
     if not fixed_z:
-        teff, logg, z, rad, dist = theta
+        teff, logg, z, dist, rad = theta
         lp_z = 0
     else:
-        teff, logg, rad, dist = theta
+        teff, logg, dist, rad = theta
     lp_teff, lp_logg, lp_rad, lp_dist = 0, 0, 0, 0
 
     if not 2300 < teff < 12000:
