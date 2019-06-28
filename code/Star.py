@@ -162,12 +162,13 @@ class Star:
     def __init__(self, starname, ra, dec, coord_search=False, fixed_z=False,
                  get_plx=False, plx=None, plx_e=None,
                  get_rad=False, rad=None, rad_e=None,
-                 get_teff=False, temp=None, temp_e=None,
+                 get_temp=False, temp=None, temp_e=None,
                  mag_dict=None, verbose=True):
         # MISC
         self.verbose = verbose
         self.get_rad = get_rad
         self.get_plx = get_plx
+        self.get_temp = get_temp
 
         # Grid stuff
         self.full_grid = sp.loadtxt('test_grid.dat')
