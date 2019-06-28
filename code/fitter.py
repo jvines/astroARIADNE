@@ -62,8 +62,8 @@ class Fitter:
                     continue
         else:
             if self.star.get_temp:
-                prior_dict['teff'] = st.normal(
-                    loc=self.star.temp, scale=self.star.temp_e)
+                prior_dict['teff'] = st.norm(
+                    loc=self.star.temp, scale=2 * self.star.temp_e)
             else:
                 prior_dict['teff'] = st.uniform(loc=2300, scale=12000 - 2300)
             prior_dict['logg'] = st.uniform(loc=0, scale=6)
