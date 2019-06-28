@@ -375,7 +375,7 @@ class Star:
             temp_upper = catalog['teff_percentile_upper']
             temp_lower = catalog['teff_percentile_lower']
             e_up = temp_upper - temp
-            u_lo = temp - temp_lower
+            e_lo = temp - temp_lower
             temp_e = (e_up + e_lo) / 2
             self.temp = temp
             self.temp_e = temp_e
