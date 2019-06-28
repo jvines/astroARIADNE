@@ -317,7 +317,7 @@ class Star:
         else:
             self.rad = rad
             self.rad_e = rad_e
-        if self.get_teff and not (temp and temp_e):
+        if self.get_temp and not (temp and temp_e):
             self.get_temperature(catalog)
         else:
             self.temp = temp
