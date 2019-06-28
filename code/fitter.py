@@ -61,7 +61,11 @@ class Fitter:
                 elif pri.lower() == 'fixed':
                     continue
         else:
-            prior_dict['teff'] = st.uniform(loc=2300, scale=12000 - 2300)
+            if self.star.get_temp:
+                prior_dict['teff'] = st.normal(
+                    loc=self.star.temp, scale=self.star.temp_e)
+            else:
+                prior_dict['teff'] = st.uniform(loc=2300, scale=12000 - 2300)
             prior_dict['logg'] = st.uniform(loc=0, scale=6)
             if not self.star.fixed_z:
                 prior_dict['z'] = st.uniform(loc=-4, scale=1 + 4)
