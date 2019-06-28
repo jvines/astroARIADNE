@@ -6,7 +6,7 @@ import scipy as sp
 from astropy.coordinates import Angle, SkyCoord
 from astroquery.gaia import Gaia
 from astroquery.vizier import Vizier
-from scipy.interpolate import griddata
+from scipy.interpolate import LinearNDInterpolator
 from tqdm import tqdm
 
 from phot_utils import *
@@ -159,10 +159,11 @@ class Star:
         'SDSS': ['V/147/sdss12', zip(__sdss_mags, __sdss_errs, __sdss_filters)]
     }
 
-    def __init__(self, starname, ra, dec, coord_search=False,
-                 fixed_z=False, get_plx=False, plx=None, plx_e=None,
-                 get_rad=False, rad=None, rad_e=None, mag_dict=None,
-                 verbose=True):
+    def __init__(self, starname, ra, dec, coord_search=False, fixed_z=False,
+                 get_plx=False, plx=None, plx_e=None,
+                 get_rad=False, rad=None, rad_e=None,
+                 get_teff=False, temp=None, temp_e=None,
+                 mag_dict=None, verbose=True):
         # MISC
         self.verbose = verbose
         self.get_rad = get_rad
@@ -177,8 +178,11 @@ class Star:
         self.fixed_z = fixed_z
         self.model_grid = dict()
 
-        for i, f in enumerate(self.filter_names):
-            self.model_grid[f] = self.full_grid[:, 3 + i]
+        # Create the grid to interpolate later.
+        if not fixed_z:
+            grid = sp.vstack((self.teff, self.logg, self.z)).T
+        else:
+            grid = sp.vstack((self.teff, self.logg)).T
 
         # Star stuff
         self.starname = starname
@@ -208,23 +212,24 @@ class Star:
         self.flux_er = flux_er
         self.bandpass = bandpass
 
-        # Create the grid to interpolate later.
-        if not fixed_z:
-            self.grid = sp.vstack((self.teff, self.logg, self.z)).T
-        else:
-            self.grid = sp.vstack((self.teff, self.logg)).T
+        # Do the interpolation
+        self.interpolate(grid)
 
-        if get_plx and not (plx and plx_e):
-            self.get_parallax()
-        else:
-            self.plx = plx
-            self.plx_e = plx_e
+        self.get_stellar_params(plx, plx_e, rad, rad_e, temp, temp_e)
         self.calculate_distance()
-        if get_rad:
-            self.get_radius()
-        elif rad and rad_e:
-            self.rad = rad
-            self.rad_e = rad_e
+
+    def interpolate(self, grid):
+        if self.verbose:
+            print('Interpolating grids for filters:')
+            for f in self.filters:
+                print(f)
+        interpolators = dict()
+        for i, f in enumerate(self.filter_names):
+            if f in self.filters:
+                interpolators[f] = LinearNDInterpolator(
+                    grid, self.full_grid[:, 3 + i]
+                )
+        self.interpolators = interpolators
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -264,18 +269,60 @@ class Star:
         self.magnitudes = sp.array(magnitudes)
         self.errors = sp.array(errors)
 
-    def get_parallax(self):
-        """Retrieve the parallax of the star.
+    def get_stellar_params(self, plx=None, plx_e=None, rad=None, rad_e=None,
+                           temp=None, temp_e=None):
+        """Retrieve stellar parameters from Gaia if available.
+        The retrieved stellar parameters are parallax, radius and effective
+        temperature.
 
-        Retrieve the parallax of the star from Gaia
-        (or Hipparcos if Gaia is absent)
+        Parameters
+        ----------
+        plx : bool, optional
+            Bool to check if the parallax needs to be retrieved or not.
+
+        plx_e : bool, optional
+            Bool to check if the parallax needs to be retrieved or not.
+
+        rad : bool, optional
+            Bool to check if the radius needs to be retrieved or not.
+
+        rad_e : bool, optional
+            Bool to check if the radius needs to be retrieved or not.
+
+        temp : bool, optional
+            Bool to check if the effective temperature needs to be retrieved
+            or not.
+
+        temp_e : bool, optional
+            Bool to check if the effective temperature needs to be retrieved
+            or not.
+
         """
+        # Query Gaia
         catalog = Gaia.query_object_async(
             SkyCoord(
                 ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
             ), radius=Angle(.001, "deg")
         )
 
+        if self.get_plx and not (plx and plx_e):
+            self.get_parallax(catalog)
+        else:
+            self.plx = plx
+            self.plx_e = plx_e
+        if self.get_rad and not (rad and rad_e):
+            self.get_radius(catalog)
+        else:
+            self.rad = rad
+            self.rad_e = rad_e
+        if self.get_teff and not (temp and temp_e):
+            self.get_temperature(catalog)
+        else:
+            self.temp = temp
+            self.temp_e = temp_e
+
+    def get_parallax(self, catalog):
+        """Retrieve the parallax of the star."""
         if self.verbose:
             print('Searching for parallax in Gaia...')
 
@@ -293,14 +340,8 @@ class Star:
             print('No Gaia parallax found for this star.', end=' ')
             print('Try inputting manually.')
 
-    def get_radius(self):
+    def get_radius(self, catalog):
         """Retrieve the stellar radius from Gaia if available."""
-        catalog = Gaia.query_object_async(
-            SkyCoord(
-                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=Angle(.001, "deg")
-        )
-
         if self.verbose:
             print('Searching for radius in Gaia...')
 
@@ -321,6 +362,21 @@ class Star:
         except Exception as e:
             print('No radius value found.', end=' ')
             print('Try inputting manually.')
+
+    def get_temperature(self, catalog):
+        """Retrieve effectove temperature from Gaia if available."""
+        if self.verbose:
+            print('Searching for effective temperature in Gaia...')
+
+        try:
+            temp = catalog['teff_val'][0]
+            temp_upper = catalog['teff_percentile_upper']
+            temp_lower = catalog['teff_percentile_lower']
+            e_up = temp_upper - temp
+            u_lo = temp - temp_lower
+            temp_e = (e_up + e_lo) / 2
+            self.temp = temp
+            self.temp_e = temp_e
 
     def get_catalogs(self):
         """Retrieve available catalogs for a star from Vizier."""
@@ -360,11 +416,9 @@ class Star:
         """
         # filter_index = sp.where(self.filter_names == filt)[0]
         if not self.fixed_z:
-            flux = griddata(self.grid, self.model_grid[filt],
-                            (temp, logg, z), method='linear')
+            flux = self.interpolators[filt](temp, logg, z)
         else:
-            flux = griddata(self.grid, self.model_grid[filt],
-                            (temp, logg), method='linear')
+            flux = self.interpolators[filt](temp, logg)
 
         return flux
 
