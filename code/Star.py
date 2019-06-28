@@ -372,13 +372,17 @@ class Star:
 
         try:
             temp = catalog['teff_val'][0]
-            temp_upper = catalog['teff_percentile_upper']
-            temp_lower = catalog['teff_percentile_lower']
+            temp_upper = catalog['teff_percentile_upper'][0]
+            temp_lower = catalog['teff_percentile_lower'][0]
             e_up = temp_upper - temp
             e_lo = temp - temp_lower
             temp_e = (e_up + e_lo) / 2
             self.temp = temp
             self.temp_e = temp_e
+            if self.verbose:
+                print('Teff found!\nTeff value', end=': ')
+                print(self.temp, end=' +- ')
+                print(self.temp_e, end=' K\n')
         except Exception as e:
             print('No effective temperature value found.', end=' ')
             print('Try inputting manually.')
