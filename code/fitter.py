@@ -1,7 +1,7 @@
 """Main driver of the fitting routine."""
 from __future__ import division, print_function
 
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 
 import astropy.units as u
 import scipy as sp
@@ -67,11 +67,11 @@ class Fitter:
                 prior_dict['z'] = st.uniform(loc=-4, scale=1 + 4)
 
             prior_dict['dist'] = st.norm(
-                loc=self.star.dist, scale=self.star.dist_e)
+                loc=self.star.dist, scale=2 * self.star.dist_e)
 
             if self.star.get_rad:
                 prior_dict['radius'] = st.norm(
-                    loc=self.star.rad, scale=self.star.rad_e)
+                    loc=self.star.rad, scale=2 * self.star.rad_e)
             else:
                 prior_dict['radius'] = st.uniform(loc=.1, scale=15 - .1)
         self.priors = prior_dict
@@ -85,13 +85,14 @@ class Fitter:
 
     def fit(self):
         """Run emcee here."""
-        # The parameters are teff, logg, z, rad, dist, unless z is fixed.
+        # The parameters are teff, logg, z, dist, rad - unless z is fixed.
         ndim = 5 if not self.star.fixed_z else 4
         # Randomize starting position for the walkers.
         self.pos(ndim)
         sampler = emcee.EnsembleSampler(
             self.nwalkers, ndim, log_probability,
-            args=[self.star, self.priors])
+            args=[self.star, self.priors], threads=self.cores
+        )
         sampler.run_mcmc(self.p0, self.nsteps, progress=True)
         flat_samples = sampler.get_chain(
             discard=self.burnout, thin=1, flat=True)
