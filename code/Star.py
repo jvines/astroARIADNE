@@ -219,6 +219,7 @@ class Star:
         self.calculate_distance()
 
     def interpolate(self, grid):
+        """Create interpolation grids for later evaluation."""
         if self.verbose:
             print('Interpolating grids for filters:')
             for f in self.filters:
@@ -377,6 +378,9 @@ class Star:
             temp_e = (e_up + e_lo) / 2
             self.temp = temp
             self.temp_e = temp_e
+        except Exception as e:
+            print('No effective temperature value found.', end=' ')
+            print('Try inputting manually.')
 
     def get_catalogs(self):
         """Retrieve available catalogs for a star from Vizier."""
