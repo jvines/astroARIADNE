@@ -26,13 +26,12 @@ def extract_info(magnitudes, errors, filters):
     for mag, err, band in zip(magnitudes, errors, filters):
         # Get central wavelength
         leff = get_effective_wavelength(band)
-        mag = mag
         mag_err = err
         # get flux, flux error and bandpass
         flx, flx_err = mag_to_flux(mag, mag_err, band)
         bp_l, bp_u = get_bandpass(band)
-        flux[band] = flx * leff
-        flux_er[band] = flx_err * leff
+        flux[band] = flx  # * leff
+        flux_er[band] = flx_err  # * leff
         wave[band] = leff
         bandpass[band] = [leff - bp_l, bp_u - leff]
 
@@ -61,8 +60,7 @@ def convert_jansky_to_ergs_lambda(j, l):
 
 def convert_f_lambda_to_f_nu(f, l):
     """Convert flux from erg s-1 cm-2 lambda-1 to erg s-1 cm-2 Hz-1."""
-    # TODO: fix the constant and use astropy constants instead
-    return sed / 2.99792458E+18 * l ** 2
+    return sed / const.c.to(u.micrometer / u.s).value * l ** 2
 
 
 def convert_f_nu_to_f_lambda(f, l):
@@ -96,6 +94,19 @@ def mag_to_flux(mag, mag_err, band):
         flux = 10 ** (-.4 * mag) * f0
         flux_err = abs(-.4 * flux * sp.log(10) * mag_err)
     return flux, flux_err
+
+
+def flux_to_mag(flux, flux_err, band):
+    """Convert from flux to magnitude.
+
+    The flux is expected to be in the units of erg s-1 cm-2 um-1
+    """
+    # if 'PS1_' in band or 'SDSS_' in band:
+    leff = get_effective_wavelength(band)
+    # flux = convert_f_lambda_to_f_nu(flux, leff)
+    f0 = get_band_info(band)
+    mag = -2.5 * sp.log10(flux / f0)
+    return mag
 
 
 def get_band_info(band):
@@ -132,3 +143,8 @@ def mag_to_flux_AB(mag, mag_err):
     flux = 10 ** (-.4 * (mag + 48.57))
     flux_err = abs(-.4 * flux * sp.log(10) * mag_err)
     return flux, flux_err
+
+
+def flux_to_mag_AB(flux, flux_err):
+    """Calculate magnitudes from flux."""
+    pass

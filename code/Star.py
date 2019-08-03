@@ -7,6 +7,7 @@ from astropy.coordinates import Angle, SkyCoord
 from astroquery.gaia import Gaia
 from astroquery.vizier import Vizier
 from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import Delaunay
 from tqdm import tqdm
 
 from phot_utils import *
@@ -171,7 +172,7 @@ class Star:
         self.get_temp = get_temp
 
         # Grid stuff
-        self.full_grid = sp.loadtxt('test_grid.dat')
+        self.full_grid = sp.loadtxt('model_grid.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
         self.z = self.full_grid[:, 2] if not fixed_z else fixed_z
@@ -216,6 +217,9 @@ class Star:
         # Do the interpolation
         self.interpolate(grid)
 
+        for f in self.filters:
+            self.get_interpolated_flux(0, 0, 0, f)
+
         self.get_stellar_params(plx, plx_e, rad, rad_e, temp, temp_e)
         self.calculate_distance()
 
@@ -223,13 +227,14 @@ class Star:
         """Create interpolation grids for later evaluation."""
         if self.verbose:
             print('Interpolating grids for filters:')
-            for f in self.filters:
-                print(f)
         interpolators = dict()
+        tri = Delaunay(grid)
         for i, f in enumerate(self.filter_names):
             if f in self.filters:
+                if self.verbose:
+                    print(f)
                 interpolators[f] = LinearNDInterpolator(
-                    grid, self.full_grid[:, 3 + i]
+                    tri, self.full_grid[:, 3 + i]
                 )
         self.interpolators = interpolators
 
@@ -423,17 +428,13 @@ class Star:
             The interpolated flux at temp, logg, z for filter filt.
 
         """
-        # filter_index = sp.where(self.filter_names == filt)[0]
-        if not self.fixed_z:
-            flux = self.interpolators[filt](temp, logg, z)
-        else:
-            flux = self.interpolators[filt](temp, logg)
-
+        values = (temp, logg, z) if not self.fixed_z else (temp, logg)
+        flux = self.interpolators[filt](values)
         return flux
 
     def calculate_distance(self):
         """Calculate distance using parallax in solar radii."""
-        dist = 1 / (1000 * self.plx)
+        dist = 1 / (0.001 * self.plx)
         dist_e = dist * self.plx_e / self.plx
-        self.dist = dist * u.pc.to(u.solRad)
-        self.dist_e = dist_e * u.pc.to(u.solRad)
+        self.dist = dist
+        self.dist_e = dist_e
