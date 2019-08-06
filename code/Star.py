@@ -10,6 +10,8 @@ from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import Delaunay
 from tqdm import tqdm
 
+import pickle
+
 from phot_utils import *
 
 
@@ -160,7 +162,7 @@ class Star:
         'SDSS': ['V/147/sdss12', zip(__sdss_mags, __sdss_errs, __sdss_filters)]
     }
 
-    def __init__(self, starname, ra, dec, coord_search=False, fixed_z=False,
+    def __init__(self, starname, ra, dec, coord_search=False,
                  get_plx=False, plx=None, plx_e=None,
                  get_rad=False, rad=None, rad_e=None,
                  get_temp=False, temp=None, temp_e=None,
@@ -172,19 +174,15 @@ class Star:
         self.get_temp = get_temp
 
         # Grid stuff
-        self.full_grid = sp.loadtxt('model_grid.dat')
+        self.full_grid = sp.loadtxt('model_grid_fix.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
-        self.z = self.full_grid[:, 2] if not fixed_z else fixed_z
+        self.z = self.full_grid[:, 2]
         self.__coord_search = coord_search
-        self.fixed_z = fixed_z
         self.model_grid = dict()
 
         # Create the grid to interpolate later.
-        if not fixed_z:
-            grid = sp.vstack((self.teff, self.logg, self.z)).T
-        else:
-            grid = sp.vstack((self.teff, self.logg)).T
+        grid = sp.vstack((self.teff, self.logg, self.z)).T
 
         # Star stuff
         self.starname = starname
@@ -215,10 +213,7 @@ class Star:
         self.bandpass = bandpass
 
         # Do the interpolation
-        self.interpolate(grid)
-
-        for f in self.filters:
-            self.get_interpolated_flux(0, 0, 0, f)
+        # self.interpolate(grid)
 
         self.get_stellar_params(plx, plx_e, rad, rad_e, temp, temp_e)
         self.calculate_distance()
@@ -230,13 +225,15 @@ class Star:
         interpolators = dict()
         tri = Delaunay(grid)
         for i, f in enumerate(self.filter_names):
-            if f in self.filters:
-                if self.verbose:
-                    print(f)
-                interpolators[f] = LinearNDInterpolator(
-                    tri, self.full_grid[:, 3 + i]
-                )
-        self.interpolators = interpolators
+            # if f in self.filters:
+            if self.verbose:
+                print(f)
+            interpolators[f] = LinearNDInterpolator(
+                tri, self.full_grid[:, 3 + i]
+            )
+        with open('interpolations.pkl', 'wb') as jar:
+            pickle.dump(interpolators, jar)
+        # self.interpolators = interpolators
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.

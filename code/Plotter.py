@@ -15,21 +15,21 @@ from Star import *
 
 class SEDPlotter:
 
-    def __init__(self, star, fitter):
+    def __init__(self, fitter):
         # TODO: read settings file.
-        self.star = star
         self.fitter = fitter
 
         self.__extract_info()
         self.__extract_params()
         self.read_config()
 
-        self.model = model_grid(self.theta, self.star)
+        self.model = model_grid(
+            self.theta, self.fitter.star, self.fitter.interpolators)
 
     def __extract_params(self):
         # teff, logg, z, dist, rad, Av = theta
         theta = []
-        for i in range(5):
+        for i in range(self.fitter.ndim):
             theta.append(sp.median(self.fitter.chain[:, i]))
         self.theta = theta
 
@@ -39,13 +39,13 @@ class SEDPlotter:
         self.wave = []
         self.bandpass = []
 
-        for _, f in self.star.flux.items():
+        for _, f in self.fitter.star.flux.items():
             self.flux.append(f)
-        for _, e in self.star.flux_er.items():
+        for _, e in self.fitter.star.flux_er.items():
             self.flux_er.append(e)
-        for _, w in self.star.wave.items():
+        for _, w in self.fitter.star.wave.items():
             self.wave.append(w)
-        for _, bp in self.star.bandpass.items():
+        for _, bp in self.fitter.star.bandpass.items():
             self.bandpass.append(bp)
 
         self.flux = sp.array(self.flux)

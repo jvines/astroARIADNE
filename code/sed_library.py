@@ -7,8 +7,51 @@ from extinction import apply, fitzpatrick99
 from phot_utils import *
 from Star import *
 
+# GLOBAL VARIABLES
 
-def model_grid(theta, star):
+order = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+
+
+def build_params(theta, coordinator):
+    params = sp.zeros(6)
+
+    for i, k in enumerate(order):
+        if k in coordinator.keys():
+            params[i] = coordinator[k]
+        else:
+            params[i] = theta[i]
+    return params
+
+
+def get_interpolated_flux(temp, logg, z, filt, interpolators):
+    """Interpolate the grid of fluxes in a given teff, logg and z.
+
+    Parameters
+    ----------
+    temp : float
+        The effective temperature.
+
+    logg : float
+        The superficial gravity.
+
+    z : float
+        The metallicity.
+
+    filt : str
+        The desired filter.
+
+    Returns
+    -------
+    flux : float
+        The interpolated flux at temp, logg, z for filter filt.
+
+    """
+    values = (temp, logg, z)
+    flux = interpolators[filt](values)
+    return flux
+
+
+def model_grid(theta, star, interpolators):
     """Return the model grid in the selected filters.
 
     Parameters:
@@ -26,41 +69,31 @@ def model_grid(theta, star):
         interpolated fluxes
 
     """
-    if not star.fixed_z:
-        # teff, logg, z, dist, rad, Av = theta
-        teff, logg, z, dist, rad = theta
-    else:
-        # teff, logg, dist, rad, Av = theta
-        teff, logg, dist, rad = theta
-        z = -1
+    teff, logg, z, dist, rad, Av = theta
     model = dict()
 
     dist = (dist * u.pc).to(u.solRad).value
     Rv = 3.1  # For extinction.
     for f in star.filters:
-        # wav = star.wave[f]  # wavelength in um.
-        # wav *= 1e4  # um to AA, the unit required for extinction.
-        # wav = sp.array([wav])
-        # ext = fitzpatrick99(wav, Av, Rv)  # Calculate extinction.
-        # model[f] = apply(ext, star.get_interpolated_flux(
-        #     teff, logg, z, f) * (rad / dist) ** 2)[0]
-        model[f] = star.get_interpolated_flux(
-            teff, logg, z, f) * (rad / dist) ** 2
+        wav = star.wave[f]  # wavelength in um.
+        wav *= 1e4  # um to AA, the unit required for extinction.
+        wav = sp.array([wav])
+        ext = fitzpatrick99(wav, Av, Rv)  # Calculate extinction.
+        model[f] = apply(ext, get_interpolated_flux(
+            teff, logg, z, f, interpolators) * (rad / dist) ** 2)[0]
+        # model[f] = star.get_interpolated_flux(
+        #     teff, logg, z, f) * (rad / dist) ** 2
     return model
 
 
-def log_prior(theta, star, prior_dict):
-    if not star.fixed_z:
-        # teff, logg, z, dist, rad, Av = theta
-        teff, logg, z, dist, rad = theta
-    else:
-        # teff, logg, dist, rad, Av = theta
-        teff, logg, dist, rad = theta
+def log_prior(theta, prior_dict, coordinator):
+
+    teff, logg, z, dist, rad, Av = theta
     lp = 0
 
     if not 2300 <= teff <= 12000:
         return -sp.inf
-    if not 0 < logg <= 6:
+    if not -4 < logg <= 6:
         return -sp.inf
     if not -4 <= z <= 1:
         return -sp.inf
@@ -68,33 +101,34 @@ def log_prior(theta, star, prior_dict):
         return -sp.inf
     if not 0 < rad <= 15:
         return -sp.inf
-    # if not 0 < Av < .032:
-    #     return -sp.inf
+    if not 0 < Av < .032:
+        return -sp.inf
     # if not 0 < sigma < 1:
     #     return -sp.inf
 
     for k in prior_dict.keys():
-        if k == 'teff':
-            lp += sp.log(prior_dict[k].pdf(teff))
-        elif k == 'logg':
-            lp += sp.log(prior_dict[k].pdf(logg))
-        elif k == 'z' and not star.fixed_z:
-            lp += sp.log(prior_dict[k].pdf(z))
-        elif k == 'rad':
-            lp += sp.log(prior_dict[k].pdf(rad))
-        elif k == 'dist':
-            lp += sp.log(prior_dict[k].pdf(dist))
-        # elif k == 'extinction':
-        #     lp += sp.log(prior_dict[k].pdf(Av))
-        # elif k == 'inflation':
-        #     lp += prior_dict[k].pdf(sigma)
+        if k not in coordinator.keys():
+            if k == 'teff':
+                lp += sp.log(prior_dict[k].pdf(teff))
+            elif k == 'logg':
+                lp += sp.log(prior_dict[k].pdf(logg))
+            elif k == 'z':
+                lp += sp.log(prior_dict[k].pdf(z))
+            elif k == 'rad':
+                lp += sp.log(prior_dict[k].pdf(rad))
+            elif k == 'dist':
+                lp += sp.log(prior_dict[k].pdf(dist))
+            elif k == 'extinction':
+                lp += sp.log(prior_dict[k].pdf(Av))
+            # elif k == 'inflation':
+            #     lp += prior_dict[k].pdf(sigma)
 
     return lp
 
 
-def log_likelihood(theta, star):
+def log_likelihood(theta, star, interpolators):
     """flux is a dictionary where key = filter."""
-    model_dict = model_grid(theta, star)
+    model_dict = model_grid(theta, star, interpolators)
     inflation = theta[-1]
     residuals = []
     errs = []
@@ -113,9 +147,10 @@ def log_likelihood(theta, star):
     return -.5 * lnl
 
 
-def log_probability(theta, star, prior_dict):
-    lp = log_prior(theta, star, prior_dict)
-    lnl = log_likelihood(theta, star)
+def log_probability(theta, star, prior_dict, coordinator, interpolators):
+    params = build_params(theta, coordinator)
+    lp = log_prior(params, prior_dict, coordinator)
+    lnl = log_likelihood(params, star, interpolators)
     if not sp.isfinite(lnl) or not sp.isfinite(lp):
         return -sp.inf
     return lp + lnl
