@@ -13,6 +13,7 @@ order = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
 
 
 def build_params(theta, coordinator):
+    """Build the parameter vector that goes into the model."""
     params = sp.zeros(6)
 
     for i, k in enumerate(order):
@@ -86,8 +87,23 @@ def model_grid(theta, star, interpolators):
     return model
 
 
-def log_prior(theta, prior_dict, coordinator):
+def get_residuals(theta, star, interpolators):
+    """Calculate residuals of the model."""
+    model_dict = model_grid(theta, star, interpolators)
+    inflation = theta[-1]
+    residuals = []
+    errs = []
+    for f in star.filters:
+        residuals.append(star.flux[f] - model_dict[f])
+        errs.append(star.flux_er[f])
+    residuals = sp.array(residuals)
+    errs = sp.array(errs)
+    # errs = sp.sqrt(errs ** 2 + inflation ** 2)
+    return residuals, errs
 
+
+def log_prior(theta, prior_dict, coordinator):
+    """Calculate prior."""
     teff, logg, z, dist, rad, Av = theta
     lp = 0
 
@@ -127,27 +143,17 @@ def log_prior(theta, prior_dict, coordinator):
 
 
 def log_likelihood(theta, star, interpolators):
-    """flux is a dictionary where key = filter."""
-    model_dict = model_grid(theta, star, interpolators)
-    inflation = theta[-1]
-    residuals = []
-    errs = []
-    for f in star.filters:
-        residuals.append(star.flux[f] - model_dict[f])
-        errs.append(star.flux_er[f])
-
-    residuals = sp.array(residuals)
-    errs = sp.array(errs)
-    # errs = sp.sqrt(errs ** 2 + inflation ** 2)
+    """Calculate log likelihood of the model."""
+    residuals, errs = get_residuals(theta, star, interpolators)
 
     c = sp.log(2 * sp.pi * errs ** 2)
-
     lnl = (c + (residuals ** 2 / errs ** 2)).sum()
 
     return -.5 * lnl
 
 
 def log_probability(theta, star, prior_dict, coordinator, interpolators):
+    """Calculate unnormalized posterior probability of the model."""
     params = build_params(theta, coordinator)
     lp = log_prior(params, prior_dict, coordinator)
     lnl = log_likelihood(params, star, interpolators)
