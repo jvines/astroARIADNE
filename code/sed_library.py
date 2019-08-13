@@ -3,6 +3,7 @@
 import astropy.units as u
 import scipy as sp
 from extinction import apply, fitzpatrick99
+from scipy.special import ndtr
 
 from phot_utils import *
 from Star import *
@@ -15,16 +16,13 @@ order = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
 def build_params(theta, coordinator):
     """Build the parameter vector that goes into the model."""
     params = sp.zeros(6)
-
     for i, k in enumerate(order):
-        if k in coordinator.keys():
-            params[i] = coordinator[k]
-        else:
-            params[i] = theta[i]
+        # params[i] = coordinator[k]
+        params[i] = theta[i]
     return params
 
 
-def get_interpolated_flux(temp, logg, z, filt, interpolators):
+def get_interpolated_flux(temp, logg, z, star, interpolators):
     """Interpolate the grid of fluxes in a given teff, logg and z.
 
     Parameters
@@ -48,7 +46,11 @@ def get_interpolated_flux(temp, logg, z, filt, interpolators):
 
     """
     values = (temp, logg, z)
-    flux = interpolators[filt](values)
+    mask = star.filter_mask
+    flux = sp.zeros(mask.shape[0])
+    intps = interpolators[mask]
+    for i, f in enumerate(intps):
+        flux[i] = f(values)
     return flux
 
 
@@ -75,30 +77,25 @@ def model_grid(theta, star, interpolators):
 
     dist = (dist * u.pc).to(u.solRad).value
     Rv = 3.1  # For extinction.
-    for f in star.filters:
-        wav = star.wave[f]  # wavelength in um.
-        wav *= 1e4  # um to AA, the unit required for extinction.
-        wav = sp.array([wav])
-        ext = fitzpatrick99(wav, Av, Rv)  # Calculate extinction.
-        model[f] = apply(ext, get_interpolated_flux(
-            teff, logg, z, f, interpolators) * (rad / dist) ** 2)[0]
-        # model[f] = star.get_interpolated_flux(
-        #     teff, logg, z, f) * (rad / dist) ** 2
+
+    mask = star.filter_mask
+    flux = get_interpolated_flux(teff, logg, z, star, interpolators)
+
+    wav = star.wave[mask] * 1e4
+    ext = fitzpatrick99(wav, Av, Rv)
+    model = apply(ext, flux) * (rad / dist) ** 2
     return model
 
 
 def get_residuals(theta, star, interpolators):
     """Calculate residuals of the model."""
-    model_dict = model_grid(theta, star, interpolators)
-    inflation = theta[-1]
+    model = model_grid(theta, star, interpolators)
+    # inflation = theta[-1]
     residuals = []
     errs = []
-    for f in star.filters:
-        residuals.append(star.flux[f] - model_dict[f])
-        errs.append(star.flux_er[f])
-    residuals = sp.array(residuals)
-    errs = sp.array(errs)
-    # errs = sp.sqrt(errs ** 2 + inflation ** 2)
+    mask = star.filter_mask
+    residuals = star.flux[mask] - model
+    errs = star.flux_er[mask]
     return residuals, errs
 
 
@@ -122,22 +119,12 @@ def log_prior(theta, prior_dict, coordinator):
     # if not 0 < sigma < 1:
     #     return -sp.inf
 
-    for k in prior_dict.keys():
-        if k not in coordinator.keys():
-            if k == 'teff':
-                lp += sp.log(prior_dict[k].pdf(teff))
-            elif k == 'logg':
-                lp += sp.log(prior_dict[k].pdf(logg))
-            elif k == 'z':
-                lp += sp.log(prior_dict[k].pdf(z))
-            elif k == 'rad':
-                lp += sp.log(prior_dict[k].pdf(rad))
-            elif k == 'dist':
-                lp += sp.log(prior_dict[k].pdf(dist))
-            elif k == 'extinction':
-                lp += sp.log(prior_dict[k].pdf(Av))
-            # elif k == 'inflation':
-            #     lp += prior_dict[k].pdf(sigma)
+    lp += sp.log(prior_dict['teff'].pdf(teff))
+    lp += sp.log(prior_dict['logg'].pdf(logg))
+    lp += sp.log(prior_dict['z'].pdf(z))
+    lp += sp.log(prior_dict['dist'].pdf(dist))
+    lp += sp.log(prior_dict['rad'].pdf(rad))
+    lp += sp.log(prior_dict['Av'].pdf(Av))
 
     return lp
 
@@ -160,3 +147,31 @@ def log_probability(theta, star, prior_dict, coordinator, interpolators):
     if not sp.isfinite(lnl) or not sp.isfinite(lp):
         return -sp.inf
     return lp + lnl
+
+
+def prior_transform_dynesty(u, star, prior_dict):
+    u2 = sp.array(u)
+
+    if star.get_temp or star.temp:
+        u2[0] = prior_dict['teff'].ppf(u[0])
+    else:
+        u2[0] = prior_dict['teff'](u[0])
+    u2[1] = prior_dict['logg'](u[1])
+    u2[2] = prior_dict['z'].ppf(u[2])
+    u2[3] = prior_dict['dist'].ppf(u[3])
+    u2[4] = prior_dict['rad'].ppf(u[4])
+    u2[5] = prior_dict['Av'].ppf(u[5])
+    return u2
+
+
+def prior_transform_multinest(u, star, prior_dict):
+    if star.get_temp or star.temp:
+        u[0] = prior_dict['teff'].ppf(u[0])
+    else:
+        u[0] = prior_dict['teff'](u[0])
+    u[1] = prior_dict['logg'](u[1])
+    u[2] = prior_dict['z'].ppf(u[2])
+    u[3] = prior_dict['dist'].ppf(u[3])
+    u[4] = prior_dict['rad'].ppf(u[4])
+    u[5] = prior_dict['Av'].ppf(u[5])
+    pass

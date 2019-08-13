@@ -1,16 +1,15 @@
 """Star.py contains the Star class which contains the data regarding a star."""
 from __future__ import division, print_function
 
+import pickle
+
 import astropy.units as u
 import scipy as sp
 from astropy.coordinates import Angle, SkyCoord
 from astroquery.gaia import Gaia
 from astroquery.vizier import Vizier
-from scipy.interpolate import LinearNDInterpolator
-from scipy.spatial import Delaunay
+from scipy.interpolate import RegularGridInterpolator
 from tqdm import tqdm
-
-import pickle
 
 from phot_utils import *
 
@@ -173,6 +172,10 @@ class Star:
         self.get_plx = get_plx
         self.get_temp = get_temp
 
+        self.filters = sp.zeros(self.filter_names.shape[0])
+        self.mags = sp.zeros(self.filter_names.shape[0])
+        self.mag_errs = sp.zeros(self.filter_names.shape[0])
+
         # Grid stuff
         self.full_grid = sp.loadtxt('model_grid_fix.dat')
         self.teff = self.full_grid[:, 0]
@@ -189,28 +192,40 @@ class Star:
         self.ra = ra
         self.dec = dec
 
+        filters = []
+        mags = []
+        errors = []
+
         if not mag_dict:
             self.get_magnitudes()
         else:
-            mags = []
-            errors = []
-            filters = []
             for k in mag_dict.keys():
+                filt_idx = sp.where(k == self.filter_names)[0]
+                self.filters[filt_idx] = 1
+                self.mags[filt_idx] = mag_dict[k][0]
+                self.mag_errs[filt_idx] = mag_dict[k][1]
+
                 filters.append(k)
                 mags.append(mag_dict[k][0])
                 errors.append(mag_dict[k][1])
-            self.filters = sp.array(filters)
-            self.magnitudes = sp.array(mags)
-            self.errors = sp.array(errors)
+            filters = sp.array(filters)
+            magnitudes = sp.array(mags)
+            errors = sp.array(errors)
+        self.filter_mask = sp.where(self.filters == 1)[0]
 
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
-            self.magnitudes, self.errors, self.filters)
+            magnitudes, errors, filters)
 
-        self.wave = wave
-        self.flux = flux
-        self.flux_er = flux_er
-        self.bandpass = bandpass
+        self.wave = sp.zeros(self.filter_names.shape[0])
+        self.flux = sp.zeros(self.filter_names.shape[0])
+        self.flux_er = sp.zeros(self.filter_names.shape[0])
+
+        for k in wave.keys():
+            filt_idx = sp.where(k == self.filter_names)[0]
+            self.wave[filt_idx] = wave[k]
+            self.flux[filt_idx] = flux[k]
+            self.flux_er[filt_idx] = flux_er[k]
 
         # Do the interpolation
         # self.interpolate(grid)
@@ -218,22 +233,32 @@ class Star:
         self.get_stellar_params(plx, plx_e, rad, rad_e, temp, temp_e)
         self.calculate_distance()
 
-    def interpolate(self, grid):
+    def interpolate(self):
         """Create interpolation grids for later evaluation."""
         if self.verbose:
             print('Interpolating grids for filters:')
-        interpolators = dict()
-        tri = Delaunay(grid)
-        for i, f in enumerate(self.filter_names):
-            # if f in self.filters:
+        interpolators = sp.zeros(self.filter_names.shape[0], dtype=object)
+        ut = sp.unique(self.full_grid[:, 0])
+        ug = sp.unique(self.full_grid[:, 1])
+        uz = sp.unique(self.full_grid[:, 2])
+        for ii, f in enumerate(self.filter_names):
+            cube = sp.zeros((ut.shape[0], ug.shape[0], uz.shape[0]))
             if self.verbose:
                 print(f)
-            interpolators[f] = LinearNDInterpolator(
-                tri, self.full_grid[:, 3 + i]
-            )
+            for i, t in enumerate(ut):
+                t_idx = self.full_grid[:, 0] == t
+                for j, g in enumerate(ug):
+                    g_idx = self.full_grid[:, 1] == g
+                    for k, z in enumerate(uz):
+                        z_idx = self.full_grid[:, 2] == z
+                        flx = self.full_grid[:, 3 + ii][t_idx * g_idx * z_idx]
+                        insert = flx[0] if len(flx) == 1 else 0
+                        cube[i, j, k] = insert
+            filt_idx = sp.where(f == self.filter_names)[0]
+            interpolators[filt_idx] = RegularGridInterpolator(
+                (ut, ug, uz), cube, bounds_error=False)
         with open('interpolations.pkl', 'wb') as jar:
             pickle.dump(interpolators, jar)
-        # self.interpolators = interpolators
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -248,10 +273,6 @@ class Star:
 
         cats = self.get_catalogs()
 
-        filters = []
-        magnitudes = []
-        errors = []
-
         for c in tqdm(self.catalogs.keys()):
             # load magnitude names, filter names and error names of
             # current catalog
@@ -262,20 +283,18 @@ class Star:
                 for m, e, f in current:
                     if sp.ma.is_masked(current_cat[m][0]):
                         continue
-                    filters.append(f)
-                    magnitudes.append(current_cat[m][0])
-                    errors.append(current_cat[e][0])
+                    filt_idx = sp.where(f == self.filter_names)[0]
+                    self.filters[filt_idx] = 1
+                    self.mags[filt_idx] = current_cat[m][0]
+                    self.mag_errs[filt_idx] = current_cat[e][0]
             except Exception as e:
                 print('Star is not available in catalog', end=' ')
                 print(c)
 
-        self.filters = sp.array(filters)
-        self.magnitudes = sp.array(magnitudes)
-        self.errors = sp.array(errors)
-
     def get_stellar_params(self, plx=None, plx_e=None, rad=None, rad_e=None,
                            temp=None, temp_e=None):
         """Retrieve stellar parameters from Gaia if available.
+
         The retrieved stellar parameters are parallax, radius and effective
         temperature.
 
