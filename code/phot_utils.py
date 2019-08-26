@@ -29,11 +29,11 @@ def extract_info(magnitudes, errors, filters):
         mag_err = err
         # get flux, flux error and bandpass
         flx, flx_err = mag_to_flux(mag, mag_err, band)
-        bp_l, bp_u = get_bandpass(band)
+        bp = get_bandpass(band)
         flux[band] = flx  # * leff
         flux_er[band] = flx_err  # * leff
         wave[band] = leff
-        bandpass[band] = [leff - bp_l, bp_u - leff]
+        bandpass[band] = bp
 
         # print('Flux in band', end=' ')
         # print(band, end=': ')
@@ -54,13 +54,12 @@ def convert_jansky_to_ergs(j):
 
 def convert_jansky_to_ergs_lambda(j, l):
     """Convert flux from jansky to erg s-2 cm-2 lambda-1 in the units of l."""
-    # TODO: fix the constant and use astropy constans instead
-    return j * 2.99792458E-05 / l ** 2
+    return j * const.c.to(u.micrometer / u.s).value / l ** 2
 
 
 def convert_f_lambda_to_f_nu(f, l):
     """Convert flux from erg s-1 cm-2 lambda-1 to erg s-1 cm-2 Hz-1."""
-    return sed / const.c.to(u.micrometer / u.s).value * l ** 2
+    return f / const.c.to(u.micrometer / u.s).value * l ** 2
 
 
 def convert_f_nu_to_f_lambda(f, l):
@@ -101,10 +100,11 @@ def flux_to_mag(flux, flux_err, band):
 
     The flux is expected to be in the units of erg s-1 cm-2 um-1
     """
-    # if 'PS1_' in band or 'SDSS_' in band:
     leff = get_effective_wavelength(band)
-    # flux = convert_f_lambda_to_f_nu(flux, leff)
-    f0 = get_band_info(band)
+    if 'PS1_' in band or 'SDSS_' in band:
+        f0 = convert_f_nu_to_f_lambda(3.631e-20, leff)
+    else:
+        f0 = get_band_info(band)
     mag = -2.5 * sp.log10(flux / f0)
     return mag
 
@@ -133,14 +133,15 @@ def get_bandpass(band):
     # Load photometry filter library
     filt = pyphot.get_library()[band]
     # Get lower and upper bandpass in um
-    bp_low = filt.wavelength[0].to('um').magnitude
-    bp_up = filt.wavelength[-1].to('um').magnitude
-    return bp_low, bp_up
+    leff = get_effective_wavelength(band)
+    width = filt.fwhm.to('um').magnitude
+    bp = width
+    return bp / 2
 
 
 def mag_to_flux_AB(mag, mag_err):
     """Calculate flux in erg s-1 cm-2 Hz-1."""
-    flux = 10 ** (-.4 * (mag + 48.57))
+    flux = 10 ** (-.4 * (mag + 48.6))
     flux_err = abs(-.4 * flux * sp.log(10) * mag_err)
     return flux, flux_err
 

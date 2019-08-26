@@ -10,15 +10,17 @@ from Star import *
 
 # GLOBAL VARIABLES
 
-order = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
 
 
-def build_params(theta, coordinator):
+def build_params(theta, coordinator, fixed):
     """Build the parameter vector that goes into the model."""
-    params = sp.zeros(6)
-    for i, k in enumerate(order):
-        # params[i] = coordinator[k]
-        params[i] = theta[i]
+    params = sp.zeros(7)
+    i = 0
+    for j, k in enumerate(order):
+        params[j] = theta[i] if not coordinator[j] else fixed[j]
+        if not coordinator[j]:
+            i += 1
     return params
 
 
@@ -72,7 +74,7 @@ def model_grid(theta, star, interpolators):
         interpolated fluxes
 
     """
-    teff, logg, z, dist, rad, Av = theta
+    teff, logg, z, dist, rad, Av, inflation = theta
     model = dict()
 
     dist = (dist * u.pc).to(u.solRad).value
@@ -90,18 +92,17 @@ def model_grid(theta, star, interpolators):
 def get_residuals(theta, star, interpolators):
     """Calculate residuals of the model."""
     model = model_grid(theta, star, interpolators)
-    # inflation = theta[-1]
-    residuals = []
-    errs = []
+    inflation = theta[-1]
     mask = star.filter_mask
-    residuals = star.flux[mask] - model
+    residuals = model - star.flux[mask]
     errs = star.flux_er[mask]
+    errs = sp.sqrt(errs ** 2 * (1 + inflation ** 2))
     return residuals, errs
 
 
 def log_prior(theta, prior_dict, coordinator):
     """Calculate prior."""
-    teff, logg, z, dist, rad, Av = theta
+    teff, logg, z, dist, rad, Av, inflation = theta
     lp = 0
 
     if not 2300 <= teff <= 12000:
@@ -116,8 +117,8 @@ def log_prior(theta, prior_dict, coordinator):
         return -sp.inf
     if not 0 < Av < .032:
         return -sp.inf
-    # if not 0 < sigma < 1:
-    #     return -sp.inf
+    if not 0 < inflation < 5:
+        return -sp.inf
 
     lp += sp.log(prior_dict['teff'].pdf(teff))
     lp += sp.log(prior_dict['logg'].pdf(logg))
@@ -139,9 +140,10 @@ def log_likelihood(theta, star, interpolators):
     return -.5 * lnl
 
 
-def log_probability(theta, star, prior_dict, coordinator, interpolators):
+def log_probability(theta, star, prior_dict, coordinator, interpolators,
+                    fixed):
     """Calculate unnormalized posterior probability of the model."""
-    params = build_params(theta, coordinator)
+    params = build_params(theta, coordinator, fixed)
     lp = log_prior(params, prior_dict, coordinator)
     lnl = log_likelihood(params, star, interpolators)
     if not sp.isfinite(lnl) or not sp.isfinite(lp):
@@ -150,6 +152,7 @@ def log_probability(theta, star, prior_dict, coordinator, interpolators):
 
 
 def prior_transform_dynesty(u, star, prior_dict):
+    """Transform the prior from the unit cube to the parameter space."""
     u2 = sp.array(u)
 
     if star.get_temp or star.temp:
@@ -161,17 +164,28 @@ def prior_transform_dynesty(u, star, prior_dict):
     u2[3] = prior_dict['dist'].ppf(u[3])
     u2[4] = prior_dict['rad'].ppf(u[4])
     u2[5] = prior_dict['Av'].ppf(u[5])
+    u2[6] = prior_dict['inflation'].ppf(u[6])
     return u2
 
 
-def prior_transform_multinest(u, star, prior_dict):
-    if star.get_temp or star.temp:
-        u[0] = prior_dict['teff'].ppf(u[0])
-    else:
-        u[0] = prior_dict['teff'](u[0])
-    u[1] = prior_dict['logg'](u[1])
-    u[2] = prior_dict['z'].ppf(u[2])
-    u[3] = prior_dict['dist'].ppf(u[3])
-    u[4] = prior_dict['rad'].ppf(u[4])
-    u[5] = prior_dict['Av'].ppf(u[5])
+def prior_transform_multinest(u, star, prior_dict, coordinator):
+    """Transform the prior from the unit cube to the parameter space."""
+    i = 0
+    for fixed, par in zip(coordinator, order):
+        if fixed:
+            continue
+        if par == 'logg':
+            try:
+                u[i] = prior_dict['logg'](u[i])
+            except TypeError:
+                u[i] = prior_dict['logg'].ppf(u[i])
+            i += 1
+            continue
+        if par == 'teff':
+            u[i] = prior_dict['teff'].ppf(
+                u[i]) if star.get_temp else prior_dict['teff'](u[i])
+            i += 1
+            continue
+        u[i] = prior_dict[par].ppf(u[i])
+        i += 1
     pass

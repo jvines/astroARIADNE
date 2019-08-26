@@ -172,7 +172,7 @@ class Star:
         self.get_plx = get_plx
         self.get_temp = get_temp
 
-        self.filters = sp.zeros(self.filter_names.shape[0])
+        self.used_filters = sp.zeros(self.filter_names.shape[0])
         self.mags = sp.zeros(self.filter_names.shape[0])
         self.mag_errs = sp.zeros(self.filter_names.shape[0])
 
@@ -201,31 +201,34 @@ class Star:
         else:
             for k in mag_dict.keys():
                 filt_idx = sp.where(k == self.filter_names)[0]
-                self.filters[filt_idx] = 1
+                self.used_filters[filt_idx] = 1
                 self.mags[filt_idx] = mag_dict[k][0]
                 self.mag_errs[filt_idx] = mag_dict[k][1]
 
                 filters.append(k)
-                mags.append(mag_dict[k][0])
-                errors.append(mag_dict[k][1])
-            filters = sp.array(filters)
-            magnitudes = sp.array(mags)
-            errors = sp.array(errors)
-        self.filter_mask = sp.where(self.filters == 1)[0]
+                # mags.append(mag_dict[k][0])
+            #     errors.append(mag_dict[k][1])
+            # filters = sp.array(filters)
+            # magnitudes = sp.array(mags)
+            # errors = sp.array(errors)
+        self.filter_mask = sp.where(self.used_filters == 1)[0]
 
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
-            magnitudes, errors, filters)
+            self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
+            self.filter_names[self.filter_mask])
 
         self.wave = sp.zeros(self.filter_names.shape[0])
         self.flux = sp.zeros(self.filter_names.shape[0])
         self.flux_er = sp.zeros(self.filter_names.shape[0])
+        self.bandpass = sp.zeros((self.filter_names.shape[0], 2))
 
         for k in wave.keys():
             filt_idx = sp.where(k == self.filter_names)[0]
             self.wave[filt_idx] = wave[k]
             self.flux[filt_idx] = flux[k]
             self.flux_er[filt_idx] = flux_er[k]
+            self.bandpass[filt_idx] = bandpass[k]
 
         # Do the interpolation
         # self.interpolate(grid)
@@ -282,9 +285,15 @@ class Star:
                 current_cat = cats[self.catalogs[c][0]]
                 for m, e, f in current:
                     if sp.ma.is_masked(current_cat[m][0]):
+                        print('No magnitude found for filter', end=' ')
+                        print(f, end='. Skipping\n')
+                        continue
+                    if sp.ma.is_masked(current_cat[e][0]):
+                        print('Retrieved error for filter', end=' ')
+                        print(f, end=' is 0. Skipping\n')
                         continue
                     filt_idx = sp.where(f == self.filter_names)[0]
-                    self.filters[filt_idx] = 1
+                    self.used_filters[filt_idx] = 1
                     self.mags[filt_idx] = current_cat[m][0]
                     self.mag_errs[filt_idx] = current_cat[e][0]
             except Exception as e:

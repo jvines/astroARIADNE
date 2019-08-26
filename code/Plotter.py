@@ -13,6 +13,7 @@ from phot_utils import *
 from sed_library import *
 from Star import *
 
+order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
 with open('interpolations.pkl', 'rb') as intp:
     interpolators = pickle.load(intp)
 
@@ -24,8 +25,15 @@ class SEDPlotter:
         self.fitter = fitter
 
         self.__extract_info()
-        self.__extract_params()
+        # self.__extract_params()
         self.read_config()
+
+        if self.fitter.engine == 'multinest':
+            out = pickle.load(open('multinest_out.pkl', 'rb'))
+            theta = out['best_fit']['parameters']
+            self.theta = build_params(
+                theta, self.fitter.coordinator, self.fitter.fixed
+            )
 
         self.model = model_grid(
             self.theta, self.fitter.star, interpolators)
@@ -42,14 +50,20 @@ class SEDPlotter:
         self.wave = []
         self.bandpass = []
 
-        for _, f in self.fitter.star.flux.items():
-            self.flux.append(f)
-        for _, e in self.fitter.star.flux_er.items():
-            self.flux_er.append(e)
-        for _, w in self.fitter.star.wave.items():
-            self.wave.append(w)
-        for _, bp in self.fitter.star.bandpass.items():
-            self.bandpass.append(bp)
+        for i, f in zip(self.fitter.star.used_filters, self.fitter.star.flux):
+            if i:
+                self.flux.append(f)
+        for i, e in zip(self.fitter.star.used_filters,
+                        self.fitter.star.flux_er):
+            if i:
+                self.flux_er.append(e)
+        for i, w in zip(self.fitter.star.used_filters, self.fitter.star.wave):
+            if i:
+                self.wave.append(w)
+        for i, bp in zip(self.fitter.star.used_filters,
+                         self.fitter.star.bandpass):
+            if i:
+                self.bandpass.append(bp)
 
         self.flux = sp.array(self.flux)
         self.flux_er = sp.array(self.flux_er)
@@ -64,12 +78,6 @@ class SEDPlotter:
         ymin = (self.flux * self.wave).min()
         ymax = (self.flux * self.wave).max()
 
-        # Calculate model
-        mod_f = []
-        for k in self.model.keys():
-            mod_f.append(self.model[k])
-        mod_f = sp.array(mod_f)
-
         # Get models residuals
         residuals, errors = get_residuals(
             self.theta, self.fitter.star, interpolators)
@@ -80,7 +88,7 @@ class SEDPlotter:
         # Create plot layout
 
         f = plt.figure(figsize=self.figsize)
-        gs = GridSpec(2, 1, height_ratios=[3, 0.5], hspace=0)
+        gs = GridSpec(2, 1, height_ratios=[3, 0.5], hspace=0.05)
 
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
@@ -99,7 +107,7 @@ class SEDPlotter:
                    s=self.scatter_size,
                    alpha=self.scatter_alpha)
 
-        ax.scatter(self.wave, mod_f * self.wave,
+        ax.scatter(self.wave, self.model * self.wave,
                    marker='D',
                    edgecolors=self.marker_colors_model,
                    s=self.scatter_size,
@@ -107,15 +115,15 @@ class SEDPlotter:
                    lw=3)
 
         # Residual plot
-        ax_r.axhline(y=0, lw=2, ls='--', c='k')
+        ax_r.axhline(y=0, lw=2, ls='--', c='k', alpha=.7)
 
-        ax_r.errorbar(self.wave, self.flux * self.wave / errors,
+        ax_r.errorbar(self.wave, sp.zeros(self.wave.shape[0]),
                       xerr=self.bandpass, yerr=self.flux_er,
                       fmt=',',
                       # ecolor=self.error_color,
                       # color='turquoise',
                       marker=None)
-        ax_r.scatter(self.wave, self.flux * self.wave / errors,
+        ax_r.scatter(self.wave, sp.zeros(self.wave.shape[0]),
                      edgecolors=self.edgecolors,
                      c=self.marker_colors,
                      s=self.scatter_size,
@@ -129,11 +137,12 @@ class SEDPlotter:
                      zorder=10)
 
         # Formatting
+        res_std = norm_res.std()
         ax.set_ylim([ymin * .8, ymax * 1.1])
-        xmin, xmax = ax.get_xlim()
-        print(xmin)
-        print(xmax)
-        # ax_r.set_xlim([1, xmax])
+        # ax_r.set_ylim([-5, 5])
+        # ax.set_xlim([0.18, 10])
+        # ax_r.set_xlim([0.18, 10])
+        ax_r.set_ylim([-4 * res_std, 4 * res_std])
         ax.set_xscale('log', nonposx='clip')
         ax.set_yscale('log', nonposy='clip')
         ax_r.set_xscale('log', nonposx='clip')
@@ -145,8 +154,11 @@ class SEDPlotter:
                       fontsize=self.fontsize,
                       fontname=self.fontname
                       )
-        ax_r.set_xticks(range(1, 11))
-        ax_r.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
+        ax_r.set_ylabel('Residuals\n$(\\sigma)$',
+                        fontsize=self.fontsize,
+                        fontname=self.fontname
+                        )
+
         ax.tick_params(
             axis='both', which='major',
             labelsize=self.tick_labelsize
@@ -155,6 +167,14 @@ class SEDPlotter:
             axis='both', which='major',
             labelsize=self.tick_labelsize
         )
+        ax_r.set_xticks(sp.linspace(1, 10, 10))
+        ax_r.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
+        ax.set_xticks(sp.linspace(1, 10, 10))
+        ax.get_xaxis().set_major_formatter(ticker.NullFormatter())
+        ylocmin = ticker.LinearLocator(numticks=4)
+
+        ax_r.yaxis.set_minor_locator(ylocmin)
+        ax_r.yaxis.set_minor_formatter(ticker.NullFormatter())
 
         labels = [item.get_text() for item in ax.get_xticklabels()]
 
@@ -168,18 +188,69 @@ class SEDPlotter:
         for tick in ax_r.get_xticklabels():
             tick.set_fontname(self.fontname)
 
-        plt.savefig('test.png', bbox_inches='tight')
+        plt.savefig('plots/test.png', bbox_inches='tight')
         pass
 
     def plot_chains(self):
         """Plot SED chains."""
+        if self.fitter.engine == 'multinest':
+            out = pickle.load(open('multinest_out.pkl', 'rb'))
+            samples = out['posterior_samples']
+        for i, param in enumerate(order):
+            if not self.fitter.coordinator[i]:
+                mx_prob = sp.argmax(samples['loglike'])
+                f, ax = plt.subplots(figsize=(12, 4))
+                ax.step(range(len(samples[param])), samples[param],
+                        color='k', alpha=0.8)
+                ax.set_ylabel(param,
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+                ax.set_xlabel('Steps',
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+                ax.axhline(samples[param][mx_prob], color='gray', lw=2)
+                ax.tick_params(
+                    axis='both', which='major',
+                    labelsize=self.tick_labelsize
+                )
+                plt.savefig('plots/sample_' + param + '.png',
+                            bbox_inches='tight')
+        pass
+
+    def plot_like(self):
+        """Plot Likelihoods."""
+        if self.fitter.engine == 'multinest':
+            out = pickle.load(open('multinest_out.pkl', 'rb'))
+            samples = out['posterior_samples']
+        for i, param in enumerate(order):
+            if not self.fitter.coordinator[i]:
+                mx_prob = sp.argmax(samples['loglike'])
+                f, ax = plt.subplots(figsize=(12, 4))
+                ax.scatter(samples[param], samples['loglike'], alpha=0.5, s=40)
+                ax.axvline(samples[param][mx_prob], color='red', lw=1.5)
+                ax.set_ylabel('log likelihood',
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+                ax.set_xlabel(param,
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+                ax.tick_params(
+                    axis='both', which='major',
+                    labelsize=self.tick_labelsize
+                )
+                plt.savefig('plots/likelihood_' + param + '.png',
+                            bbox_inches='tight')
         pass
 
     def read_config(self):
         self.figsize = (12, 8)
 
         # SCATTER
-        self.scatter_size = 80
+        self.scatter_size = 60
         self.edgecolors = 'k'
         self.marker_colors = 'deepskyblue'
         self.marker_colors_model = 'mediumvioletred'
