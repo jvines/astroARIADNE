@@ -1,7 +1,9 @@
 """Main driver of the fitting routine."""
 from __future__ import division, print_function
 
+import os
 import pickle
+import random
 import time
 from multiprocessing import Pool, cpu_count
 
@@ -9,32 +11,41 @@ import astropy.units as u
 import dill
 import scipy as sp
 import scipy.stats as st
-from extinction import apply, fitzpatrick99
+from termcolor import colored
 
-import emcee
 import pymultinest
 from phot_utils import *
 from sed_library import *
 
 # GLOBAL VARIABLES
 
-order = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
 with open('interpolations.pkl', 'rb') as intp:
     interpolators = pickle.load(intp)
 
 
 class Fitter:
 
-    def __init__(self, star, setup, priorfile=None, engine='emcee'):
-        global prior_dict
+    def __init__(self, star, setup, priorfile=None, engine='multinest',
+                 out_folder=None, verbose=True):
+        global prior_dict, coordinator, fixed
+        # Global settings
+        self.start = time.time()
         self.star = star
-        # Interpolations
-        # with open('interpolations.pkl', 'rb') as intp:
-        #     self.interpolators = pickle.load(intp)
+        self.engine = engine
+        self.verbose = verbose
+
+        if engine == 'multinest' or engine == 'dynesty':
+            self.live_points = setup[0]
+            self.dlogz = setup[1]
+
         # Parameter coordination.
         # Order for the parameters are:
         # tef, logg, z, dist, rad, Av
-        self.coordinator = sp.zeros(6)  # 1 for fixed params
+        self.coordinator = sp.zeros(7)  # 1 for fixed params
+        self.fixed = sp.zeros(7)
+        coordinator = self.coordinator
+        fixed = self.fixed
 
         # Setup priors.
         self.default_priors = self._default_priors()
@@ -42,68 +53,69 @@ class Fitter:
         self.create_priors(priorfile)
         prior_dict = self.priors
 
-        # Global settings
+        # Get dimensions.
         self.ndim = self.get_ndim()
 
-        if engine == 'emcee':
-            # emcee settings
-            self.nwalkers = setup[0]
-            self.nsteps = setup[1]
-            if len(setup) == 3:
-                self.burnout = setup[2]
-            else:
-                self.burnout = nsteps // 2
-            self.cores = cpu_count()
-        if engine == 'multinest' or engine == 'dynesty':
-            # Nested sampling settings
-            self.live_points = setup[0]
-            with open('logg_ppf.pkl', 'rb') as jar:
-                prior_dict['logg'] = pickle.load(jar)
-            if not self.star.get_temp or not self.star.temp:
-                with open('teff_ppf.pkl', 'rb') as jar:
-                    prior_dict['teff'] = pickle.load(jar)
+        self.display()
 
-    def create_artist(self):
-        """Instantiate the plotter here."""
-        pass
+        if out_folder is None:
+            self.out_folder = self.star.starname + '/'
+        else:
+            self.out_folder = out_folder
+
+        try:
+            os.mkdir(self.out_folder)
+        except OSError:
+            print("Creation of the directory {:s} failed".format(
+                self.out_folder))
+        else:
+            print("Created the directory {:s} ".format(self.out_folder))
 
     def get_ndim(self):
         """Calculate number of dimensions."""
-        ndim = 6 - self.coordinator.sum()
+        ndim = 7 - self.coordinator.sum()
         return int(ndim)
 
     def _default_priors(self):
         defaults = dict()
-        with open('logg_kde.pkl', 'rb') as pkl:
-            logg_prior = pickle.load(pkl)
-        if self.star.get_temp or self.star.temp:
+        # Logg prior setup.
+        if self.engine == 'multinest' or self.engine == 'dynesty':
+            with open('logg_ppf.pkl', 'rb') as jar:
+                defaults['logg'] = pickle.load(jar)
+        else:
+            with open('logg_kde.pkl', 'rb') as jar:
+                defaults = pickle.load(jar)['logg_prior']
+        # Teff prior setup.
+        if self.star.get_temp:
             defaults['teff'] = st.norm(
                 loc=self.star.temp, scale=self.star.temp_e)
+        elif self.engine == 'multinest' or self.engine == 'dynesty':
+            with open('teff_ppf.pkl', 'rb') as jar:
+                defaults['teff'] = pickle.load(jar)
         else:
-            with open('teff_kde.pkl', 'rb') as pkl:
-                teff_prior = pickle.load(pkl)
+            with open('teff_kde.pkl', 'rb') as jar:
+                teff_prior = pickle.load(jar)
             defaults['teff'] = teff_prior['teff']
-        defaults['logg'] = logg_prior['logg']
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
         defaults['dist'] = st.norm(
             loc=self.star.dist, scale=self.star.dist_e)
         defaults['rad'] = st.norm(
             loc=self.star.rad, scale=self.star.rad_e)
         defaults['Av'] = st.uniform(loc=0, scale=.032)
-        # defaults['inflation'] = st.norm(loc=0, scale=.05)
+        up, low = (5 - 0.5) / 0.5, (0 - 0.5) / 0.5
+        defaults['inflation'] = st.truncnorm(a=low, b=up, loc=0.5, scale=0.5)
         return defaults
 
     def create_priors(self, priorfile):
         """Read the prior file.
 
-        Returns a dictionary with the pdfs of each parameter/prior
+        Returns a dictionary with each parameter's prior
         """
         if priorfile:
             param, prior, bounds = sp.loadtxt(
-                priorfile, usecols=[0, 1, 2], unpack=True)
-        # Dict with priors.
-        prior_dict = dict()
-        if priorfile:
+                priorfile, usecols=[0, 1, 2], unpack=True, dtype=object)
+            # Dict with priors.
+            prior_dict = dict()
             for par, pri, bo in zip(param, prior, bounds):
                 if pri.lower() == 'uniform':
                     a, b = bo.split(',')
@@ -123,101 +135,234 @@ class Fitter:
                 elif pri.lower() == 'default':
                     prior_dict[par] = self.default_priors[par]
                 elif pri.lower() == 'fixed':
-                    self.coordinator[par] = bo
+                    idx = sp.where(par == order)[0]
+                    self.coordinator[idx] = 1
+                    self.fixed[idx] = float(bo)
             self.priors = prior_dict
         else:
             print('No priorfile detected. Using default priors.')
             self.priors = self.default_priors
-
-    def pos(self):
-        """Set initial position of the walkers."""
-        p0 = sp.empty(self.nwalkers)
-
-        for i, k in enumerate(order):
-            flag = True if self.coordinator[i] else False
-
-            if flag:
-                continue
-            if k == 'logg' and not self.priorfile:
-                p0 = sp.vstack((p0, self.priors[k].resample(self.nwalkers)))
-            elif k == 'teff' and not self.priorfile and \
-                    not self.star.get_temp and self.star.temp is None:
-                p0 = sp.vstack((p0, self.priors[k].resample(self.nwalkers)))
-            else:
-                p0 = sp.vstack((p0, self.priors[k].rvs(size=self.nwalkers)))
-        self.p0 = p0.T[:, 1:]
-
-    def save_self(self):
-        with open('test.pkl', 'wb') as jar:
-            dill.dump(self, jar)
         pass
 
-    def fit_emcee(self):
-        """Run emcee."""
-        # Randomize starting position for the walkers.
-        self.pos()
+    def save_multinest(self):
+        """Analyze and save multinest output and relevant information.
 
-        with Pool(cpu_count()) as pool:
-            self.sampler = emcee.EnsembleSampler(
-                self.nwalkers, self.ndim, log_prob,
-                args=[
-                    self.star,
-                    self.coordinator,
-                ],
-                pool=pool
-            )
-            self.sampler.run_mcmc(self.p0, self.nsteps + self.burnout,
-                                  progress=True)
-        flat_samples = self.sampler.get_chain(
-            discard=self.burnout, thin=1, flat=True)
-        self.chain = flat_samples
-        self.save_self()
+        Saves a dictionary as a pickle file. The dictionary contains the
+        following:
+
+        out : the whole multinest output, raw.
+        lnZ : The global evidence
+        lnZerr : The global evidence error
+        posterior_samples : A dictionary containing the sampls of each
+                            parameter (even if it's fixed) and the
+                            log likelihood for each set of sampled parameters.
+        fixed : An array with the fixed parameter values
+        coordinator : An array with the status of each parameter (1 for fixed
+                      0 for free)
+        best_fit : The best fit according to multinest. This corresponds to
+                   finding the set of parameters that corresponds to the
+                   highest log likelihood
+        star : The Star object containing the information of the star (name,
+               magnitudes, fluxes, coordinates, etc)
+        engine : The fitting engine used (i.e. MultiNest or Dynesty)
+
+        """
+        path = self.out_folder + 'multinest/'
+        out = dict()
+        output = pymultinest.Analyzer(outputfiles_basename=path,
+                                      n_params=self.ndim)
+        posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
+        out['out'] = output
+        out['lnZ'] = output.get_stats()['global evidence']
+        out['lnZerr'] = output.get_stats()['global evidence error']
+        out['posterior_samples'] = dict()
+        j = 0
+        for i, param in enumerate(order):
+            if not self.coordinator[i]:
+                out['posterior_samples'][param] = posterior_samples[:, j]
+                j += 1
+            else:
+                out['posterior_samples'][param] = self.fixed[i]
+        out['posterior_samples']['loglike'] = sp.zeros(
+            posterior_samples.shape[0])
+        for i in range(posterior_samples.shape[0]):
+            theta = build_params(posterior_samples[i, :], coordinator, fixed)
+            out['posterior_samples']['loglike'][i] = log_likelihood(
+                theta, self.star, interpolators)
+        out['fixed'] = self.fixed
+        out['coordinator'] = self.coordinator
+        out['best_fit'] = output.get_best_fit()
+        out['star'] = self.star
+        out['engine'] = self.engine
+        pickle.dump(out, open(self.out_folder + '/multinest_out.pkl', 'wb'))
+        pass
 
     def fit_multinest(self):
         """Run MuiltiNest."""
         global star
-        out = dict()
         star = self.star
+        path = self.out_folder + 'multinest/'
+        try:
+            os.mkdir(path)
+        except OSError:
+            print("Creation of the directory {:s} failed".format(path))
+        else:
+            print("Created the directory {:s} ".format(path))
         pymultinest.run(
             log_like, pt_multinest, self.ndim,
             n_params=self.ndim,
             sampling_efficiency=0.8,
-            evidence_tolerance=0.01,
+            evidence_tolerance=self.dlogz,
             n_live_points=self.live_points,
-            outputfiles_basename='test/chains',
-            verbose=True,
+            outputfiles_basename=path,
+            verbose=self.verbose,
             resume=False
         )
-        output = pymultinest.Analyzer(outputfiles_basename='test/',
-                                      n_params=self.ndim)
-        posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
-        out['lnZ'] = output.get_stats()['global evidence']
-        out['lnZerr'] = output.get_stats()['global evidence error']
-        out['posterior_samples'] = dict()
-        for i, param in enumerate(order):
-            out['posterior_samples'][param] = posterior_samples[:, i]
-        out['posterior_samples']['loglike'] = sp.zeros(
-            posterior_samples.shape[0])
-        for i in range(posterior_samples.shape[0]):
-            out['posterior_samples']['log_like'][i] = log_likelihood(
-                posterior_samples[i, :], self.star, interpolators)
+        self.save_multinest()
+        elapsed_time = self.execution_time()
+        self.end(elapsed_time)
+        pass
 
-        pickle.dump(out, open('multinest_out.pkl', 'wb'))
+    def fit_dynesty(self):
+        """Run dynesty."""
+        # TODO: implement
+        pass
+
+    def execution_time(self):
+        """Calculate run execution time."""
+        end = time.time() - self.start
+        weeks, rest0 = end // 604800, end % 604800
+        days, rest1 = rest0 // 86400, rest0 % 86400
+        hours, rest2 = rest1 // 3600, rest1 % 3600
+        minutes, seconds = rest2 // 60, rest2 % 60
+        elapsed = ''
+        if weeks == 0:
+            if days == 0:
+                if hours == 0:
+                    if minutes == 0:
+                        elapsed = '{:f} seconds'.format(seconds)
+                    else:
+                        elapsed = '{:f} minutes'.format(minutes)
+                        elapsed += ' and {:f} seconds'.format(seconds)
+                else:
+                    elapsed = '{:f} hours'.format(hours)
+                    elapsed += ', {:f} minutes'.format(minutes)
+                    elapsed += ' and {:f} seconds'.format(seconds)
+            else:
+                elapsed = '{:f} days'.format(days)
+                elapsed += ', {:f} hours'.format(hours)
+                elapsed += ', {:f} minutes'.format(minutes)
+                elapsed += ' and {:f} seconds'.format(seconds)
+        else:
+            elapsed = '{:f} weeks'.format(weeks)
+            elapsed += ', {:f} days'.format(days)
+            elapsed += ', {:f} hours'.format(hours)
+            elapsed += ', {:f} minutes'.format(minutes)
+            elapsed += ' and {:f} seconds'.format(seconds)
+        return elapsed
+
+    def display(self):
+        """Display program information.
+
+        What is displayed is:
+        Program name
+        Program author
+        Star selected
+        Algorithm used (i.e. Multinest or Dynesty)
+        Setup used (i.e. Live points, dlogz tolerance)
+        """
+        colors = [
+            'red', 'green', 'blue', 'yellow',
+            'grey', 'magenta', 'cyan', 'white'
+        ]
+        c = random.choice(colors)
+        if self.engine == 'multinest':
+            engine = 'MultiNest'
+        if self.engine == 'dynesty':
+            engine = 'Dynesty'
+        temp, temp_e = self.star.temp, self.star.temp_e
+        rad, rad_e = self.star.rad, self.star.rad_e
+        plx, plx_e = self.star.plx, self.star.plx_e
+        lum, lum_e = self.star.lum, self.star.lum_e
+        print(colored('\n\t\t####################################', c))
+        print(colored('\t\t##          PLACEHOLDER           ##', c))
+        print(colored('\t\t####################################', c))
+        print(colored('\n\t\t\tAuthor: Jose Vines', c))
+        print(colored('\t\t\tStar : ', c), end='')
+        print(colored(self.star.starname, c))
+        print(colored('\t\t\tEffective temperature : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(temp, temp_e), c))
+        print(colored('\t\t\tStellar radius : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
+        print(colored('\t\t\tStellar Luminosity : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
+        print(colored('\t\t\tParallax : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
+        print(colored('\t\t\tSelected engine : ', c), end='')
+        print(colored(engine, c))
+        print(colored('\t\t\tLive points : ', c), end='')
+        print(colored(str(self.live_points), c))
+        print(colored('\t\t\tlog Evidence tolerance : ', c), end='')
+        print(colored(str(self.dlogz), c))
+        print(colored('\t\t\tFree parameters : ', c), end='')
+        print(colored(str(self.ndim), c))
+        pass
+
+    def end(self, elapsed_time):
+        """Display end of run information.
+
+        What is displayed is:
+        best fit parameters
+        elapsed time
+        Spectral type (TODO)
+        """
+        out = pickle.load(open(self.out_folder + '/multinest_out.pkl', 'rb'))
+        theta = out['best_fit']['parameters']
+        theta = build_params(theta, self.coordinator, self.fixed)
+        uncert = []
+        lglk = out['best_fit']['log_likelihood']
+        z, z_err = out['lnZ'], out['lnZerr']
+        for i, param in enumerate(order):
+            if not self.coordinator[i]:
+                _, lo, up = credibility_interval(
+                    out['posterior_samples'][param])
+                uncert.append([abs(theta[i] - lo), abs(up - theta[i])])
+            else:
+                uncert.append('fixed')
+        print('\t\tFitting finished.')
+        print('\t\tBest fit parameters are:')
+        for i, p in enumerate(order):
+            print('\t\t' + p, end=' : ')
+            print('{:.4f}'.format(theta[i]), end=' ')
+            if not self.coordinator[i]:
+                print('+ {:.4f}'.format(uncert[i][1]), end=' - ')
+                print('{:.4f}'.format(uncert[i][0]))
+            else:
+                print('fixed')
+        print('\t\tLog Likelihood of best fit : ', end='')
+        print('{:.3f}'.format(lglk))
+        print('\t\tlog Bayesian evidence : ', end='')
+        print('{:.3f}'.format(z), end=' +/- ')
+        print('{:.3f}'.format(z_err))
+        print('\t\tElapsed time : ', end='')
+        print(elapsed_time)
+        pass
 #####################
 
 
 def log_like(cube, ndim, nparams):
     """Multinest log likelihood wrapper."""
-    # import pdb; pdb.set_trace()
     theta = [cube[i] for i in range(ndim)]
+    theta = build_params(theta, coordinator, fixed)
     return log_likelihood(theta, star, interpolators)
 
 
 def pt_multinest(cube, ndim, nparams):
     """Multinest prior transform."""
-    prior_transform_multinest(cube, star, prior_dict)
+    prior_transform_multinest(cube, star, prior_dict, coordinator)
 
 
-def log_prob(theta, star, coordinator):
+def log_prob(theta, star):
     """Wrap for sed_library.log_probability."""
-    return log_probability(theta, star, prior_dict, coordinator, interpolators)
+    return log_probability(theta, star, prior_dict, coordinator, interpolators,
+                           fixed)
