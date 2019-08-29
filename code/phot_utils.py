@@ -144,8 +144,3 @@ def mag_to_flux_AB(mag, mag_err):
     flux = 10 ** (-.4 * (mag + 48.6))
     flux_err = abs(-.4 * flux * sp.log(10) * mag_err)
     return flux, flux_err
-
-
-def flux_to_mag_AB(flux, flux_err):
-    """Calculate magnitudes from flux."""
-    pass
