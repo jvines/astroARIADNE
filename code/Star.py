@@ -30,7 +30,7 @@ class Star:
 
     coord_search : bool
         If True uses coordinates to search for the object in the catalogs.
-        Else it uses the object's name. 
+        Else it uses the object's name.
 
     get_plx : bool, optional
         Set to True in order to query Gaia DR2 (or Hipparcos if for some reason
@@ -99,11 +99,10 @@ class Star:
     filter_names = sp.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
         'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
-        'GROUND_COUSINS_R', 'GROUND_COUSINS_I',
         'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
         'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
-        'WISE_RSR_W1', 'WISE_RSR_W2'
+        'WISE_RSR_W1', 'WISE_RSR_W2', 'GALEX_FUV', 'GALEX_NUV'
     ])
 
     def __init__(self, starname, ra, dec,
