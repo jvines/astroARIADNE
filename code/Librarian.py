@@ -8,17 +8,19 @@ from tqdm import tqdm
 
 
 class Librarian:
+    """Docstring."""
 
     # pyphot filter names: currently unused are U R I PS1_w
 
     filter_names = sp.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
+        'GROUND_BESSELL_H', 'GROUND_BESSELL_J', 'GROUND_BESSELL_K',
         'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
         'GROUND_COUSINS_R', 'GROUND_COUSINS_I',
         'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
         'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
-        'WISE_RSR_W1', 'WISE_RSR_W2'
+        'WISE_RSR_W1', 'WISE_RSR_W2', 'GALEX_FUV', 'GALEX_NUV'
     ])
 
     # Catalogs magnitude names
@@ -45,6 +47,9 @@ class Librarian:
     # __sdss_errs = ['e_umag', 'e_zmag']
     __sdss_filters = ['SDSS_u']
     # __sdss_filters = ['SDSS_u', 'SDSS_z']
+    __galex_mags = ['FUV', 'NUV']
+    __galex_errs = ['e_FUV', 'e_NUV']
+    __galex_filters = ['GALEX_FUV', 'GALEX_NUV']
 
     # APASS DR9, WISE, PAN-STARRS DR1, GAIA DR2, 2MASS, SDSS DR9
     catalogs = {
@@ -53,7 +58,7 @@ class Librarian:
             zip(__apass_mags, __apass_errs, __apass_filters)
         ],
         'Wise': [
-            'II/311/wise',
+            'II/328/allwise',
             zip(__wise_mags, __wise_errs, __wise_filters)
         ],
         'Pan-STARRS':
@@ -70,7 +75,12 @@ class Librarian:
             'II/246/out',
             zip(__twomass_mags, __twomass_errs, __twomass_filters)
         ],
-        'SDSS': ['V/147/sdss12', zip(__sdss_mags, __sdss_errs, __sdss_filters)]
+        'SDSS': [
+            'V/147/sdss12', zip(__sdss_mags, __sdss_errs, __sdss_filters)
+        ],
+        'GALEX': [
+            'II/312/ais', zip(__galex_mags, __galex_errs, __galex_filters)
+        ]
     }
 
     def __init__(self, starname, ra, dec, get_plx, get_rad, get_temp, get_lum,
