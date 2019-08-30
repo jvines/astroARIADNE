@@ -14,9 +14,7 @@ class Librarian:
 
     filter_names = sp.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
-        'GROUND_BESSELL_H', 'GROUND_BESSELL_J', 'GROUND_BESSELL_K',
         'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
-        'GROUND_COUSINS_R', 'GROUND_COUSINS_I',
         'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
         'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
