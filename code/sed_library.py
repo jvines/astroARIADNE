@@ -211,6 +211,8 @@ def credibility_interval(post, alpha=.68):
         Upper part of the credibility interval.
 
     """
+    er_msg = 'Cannot calculate credibility interval of a single element.'
+    assert len(post) > 1, er_msg
     lower_percentile = 100 * (1 - alpha) / 2
     upper_percentile = 100 * (1 + alpha) / 2
     low, med, up = sp.percentile(
