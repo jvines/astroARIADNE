@@ -1,5 +1,4 @@
 """Main driver of the fitting routine."""
-from __future__ import division, print_function
 
 import os
 import pickle
@@ -73,7 +72,8 @@ class Fitter:
         # Get dimensions.
         self.ndim = self.get_ndim()
 
-        self.display()
+        display(self.engine, self.star, self.live_points,
+                self.dlogz, self.ndim)
 
     def get_ndim(self):
         """Calculate number of dimensions."""
@@ -254,7 +254,7 @@ class Fitter:
         )
         self.save_multinest()
         elapsed_time = self.execution_time()
-        self.end(elapsed_time)
+        end(self.coordinator, elapsed_time, self.out_folder)
         pass
 
     def fit_dynesty(self):
@@ -295,100 +295,7 @@ class Fitter:
             elapsed += ' and {:f} seconds'.format(seconds)
         return elapsed
 
-    def display(self):
-        """Display program information.
 
-        What is displayed is:
-        Program name
-        Program author
-        Star selected
-        Algorithm used (i.e. Multinest or Dynesty)
-        Setup used (i.e. Live points, dlogz tolerance)
-        """
-        colors = [
-            'red', 'green', 'blue', 'yellow',
-            'grey', 'magenta', 'cyan', 'white'
-        ]
-        c = random.choice(colors)
-        if self.engine == 'multinest':
-            engine = 'MultiNest'
-        if self.engine == 'dynesty':
-            engine = 'Dynesty'
-        temp, temp_e = self.star.temp, self.star.temp_e
-        rad, rad_e = self.star.rad, self.star.rad_e
-        plx, plx_e = self.star.plx, self.star.plx_e
-        lum, lum_e = self.star.lum, self.star.lum_e
-        print(colored('\n\t\t####################################', c))
-        print(colored('\t\t##          PLACEHOLDER           ##', c))
-        print(colored('\t\t####################################', c))
-        print(colored('\n\t\t\tAuthor: Jose Vines', c))
-        print(colored('\t\t\tStar : ', c), end='')
-        print(colored(self.star.starname, c))
-        print(colored('\t\t\tEffective temperature : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(temp, temp_e), c))
-        print(colored('\t\t\tStellar radius : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
-        print(colored('\t\t\tStellar Luminosity : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
-        print(colored('\t\t\tParallax : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
-        print(colored('\t\t\tEstimated Av : ', c), end='')
-        print(colored('{:.3f}'.format(self.star.Av), c))
-        print(colored('\t\t\tSelected engine : ', c), end='')
-        print(colored(engine, c))
-        print(colored('\t\t\tLive points : ', c), end='')
-        print(colored(str(self.live_points), c))
-        print(colored('\t\t\tlog Evidence tolerance : ', c), end='')
-        print(colored(str(self.dlogz), c))
-        print(colored('\t\t\tFree parameters : ', c), end='')
-        print(colored(str(self.ndim), c))
-        pass
-
-    def end(self, elapsed_time):
-        """Display end of run information.
-
-        What is displayed is:
-        best fit parameters
-        elapsed time
-        Spectral type (TODO)
-        """
-        out = pickle.load(open(self.out_folder + '/multinest_out.pkl', 'rb'))
-        theta = sp.zeros(order.shape[0])
-        for i, param in enumerate(order):
-            if param != 'likelihood':
-                theta[i] = out['best_fit'][param]
-        # theta = build_params(theta, self.coordinator, self.fixed)
-        uncert = []
-        # lglk = out['best_fit']['log_likelihood']
-        lglk = out['best_fit']['likelihood']
-        z, z_err = out['lnZ'], out['lnZerr']
-        for i, param in enumerate(order):
-            if not self.coordinator[i]:
-                _, lo, up = credibility_interval(
-                    out['posterior_samples'][param])
-                uncert.append([abs(theta[i] - lo), abs(up - theta[i])])
-            else:
-                uncert.append('fixed')
-        print('\t\tFitting finished.')
-        print('\t\tBest fit parameters are:')
-        for i, p in enumerate(order):
-            if p == 'z':
-                p = '[Fe/H]'
-            print('\t\t' + p, end=' : ')
-            print('{:.4f}'.format(theta[i]), end=' ')
-            if not self.coordinator[i]:
-                print('+ {:.4f}'.format(uncert[i][1]), end=' - ')
-                print('{:.4f}'.format(uncert[i][0]))
-            else:
-                print('fixed')
-        print('\t\tLog Likelihood of best fit : ', end='')
-        print('{:.3f}'.format(lglk))
-        print('\t\tlog Bayesian evidence : ', end='')
-        print('{:.3f}'.format(z), end=' +/- ')
-        print('{:.3f}'.format(z_err))
-        print('\t\tElapsed time : ', end='')
-        print(elapsed_time)
-        pass
 #####################
 
 
