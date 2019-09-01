@@ -1,6 +1,7 @@
 """Star.py contains the Star class which contains the data regarding a star."""
 
 import pickle
+from contextlib import closing
 
 import astropy.units as u
 import scipy as sp
@@ -291,7 +292,7 @@ class Star:
             filt_idx = sp.where(f == self.filter_names)[0]
             interpolators[filt_idx] = RegularGridInterpolator(
                 (ut, ug, uz), cube, bounds_error=False)
-        with open('interpolations.pkl', 'wb') as jar:
+        with closing(open('interpolations.pkl', 'wb')) as jar:
             pickle.dump(interpolators, jar)
 
     def get_interpolated_flux(self, temp, logg, z, filt):

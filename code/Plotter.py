@@ -4,6 +4,7 @@
 import copy
 import glob
 import os
+from contextlib import closing
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -16,13 +17,13 @@ from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
 
 import corner
-from utils import *
 from phot_utils import *
 from sed_library import *
 from Star import *
+from utils import *
 
 order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
-with open('interpolations.pkl', 'rb') as intp:
+with closing(open('interpolations.pkl', 'rb')) as intp:
     interpolators = pickle.load(intp)
 
 

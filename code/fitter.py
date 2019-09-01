@@ -1,9 +1,9 @@
 """Main driver of the fitting routine."""
-# TODO: Add a log file
 import os
 import pickle
 import random
 import time
+from contextlib import closing
 from multiprocessing import Pool, cpu_count
 
 import astropy.units as u
@@ -18,10 +18,12 @@ from phot_utils import *
 from sed_library import *
 from utils import *
 
+# TODO: Add a log file
+
 # GLOBAL VARIABLES
 
 order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
-with open('interpolations.pkl', 'rb') as intp:
+with closing(open('interpolations.pkl', 'rb')) as intp:
     interpolators = pickle.load(intp)
 
 
@@ -42,13 +44,7 @@ class Fitter:
         else:
             self.out_folder = out_folder
 
-        try:
-            os.mkdir(self.out_folder)
-        except OSError:
-            print("Creation of the directory {:s} failed".format(
-                self.out_folder))
-        else:
-            print("Created the directory {:s} ".format(self.out_folder))
+        create_dir(self.out_folder)  # Create output folder.
 
         if engine == 'multinest' or engine == 'dynesty':
             self.live_points = setup[0]
@@ -83,7 +79,7 @@ class Fitter:
         defaults = dict()
         # Logg prior setup.
         if not estimate_logg:
-            with open('../Datafiles/logg_ppf.pkl', 'rb') as jar:
+            with closing(open('../Datafiles/logg_ppf.pkl', 'rb')) as jar:
                 defaults['logg'] = pickle.load(jar)
         else:
             params = dict()  # params for isochrones.
@@ -115,7 +111,7 @@ class Fitter:
             defaults['teff'] = st.norm(
                 loc=self.star.temp, scale=self.star.temp_e)
         else:
-            with open('../Datafiles/teff_ppf.pkl', 'rb') as jar:
+            with closing(open('../Datafiles/teff_ppf.pkl', 'rb')) as jar:
                 defaults['teff'] = pickle.load(jar)
             defaults['teff'] = teff_prior['teff']
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
@@ -243,6 +239,7 @@ class Fitter:
             evidence_tolerance=self.dlogz,
             n_live_points=self.live_points,
             outputfiles_basename=path + 'chains',
+            max_modes=100,
             verbose=self.verbose,
             resume=False
         )
@@ -254,6 +251,7 @@ class Fitter:
     def fit_dynesty(self):
         """Run dynesty."""
         # TODO: implement
+        sampler = dynesty.NestedSampler
         pass
 
     def execution_time(self):
