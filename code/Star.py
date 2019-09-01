@@ -6,6 +6,7 @@ import pickle
 import astropy.units as u
 import scipy as sp
 from astropy.coordinates import SkyCoord
+from dustmaps.sfd import SFDQuery
 from scipy.interpolate import RegularGridInterpolator
 
 from Librarian import Librarian
@@ -28,17 +29,58 @@ class Star:
     dec : float
         DEC coordinate of the object in degrees.
 
-    coord_search : bool
-        If True uses coordinates to search for the object in the catalogs.
-        Else it uses the object's name.
-
     get_plx : bool, optional
-        Set to True in order to query Gaia DR2 (or Hipparcos if for some reason
-        the Gaia parallax is unavailable) for the stellar parallax.
+        Set to True in order to query Gaia DR2 for the stellar parallax.
+
+    plx : float, optional
+        The parallax of the star in case no internet connection is available
+        or if no parallax can be found on Gaia DR2.
+
+    plx_e : float, optional
+        The error on the parallax.
 
     get_rad : bool, optional
         Set to True in order to query Gaia DR2 for the stellar radius, if
         available.
+
+    rad : float, optional
+        The radius of the star in case no internet connection is available
+        or if no radius can be found on Gaia DR2.
+
+    rad_e : float, optional
+        The error on the stellar radius.
+
+    get_temp : bool, optional
+        Set to True in order to query Gaia DR2 for the effective temperature,
+        if available.
+
+    temp : float, optional
+        The effective temperature of the star in case no internet connection
+        is available or if no effective temperature can be found on Gaia DR2.
+
+    temp_e : float, optional
+        The error on the effective temperature.
+
+    get_lum : bool, optional
+        Set to True in order to query Gaia DR2 for the stellar luminosity,
+        if available.
+
+    lum : float, optional
+        The stellar luminosity in case no internet connection
+        is available or if no luminosity can be found on Gaia DR2.
+
+    lum_e : float, optional
+        The error on the stellar luminosity.
+
+    mag_dict : dictionary, optional
+        A dictionary with the filter names as keys (names must correspond to
+        those in the filter_names attribute) and with a tuple containing the
+        magnitude and error for that filter as the value. Provide in case no
+        internet connection is available.
+
+    coordinate_search : bool
+        If True uses coordinates to search for the object in the catalogs.
+        Else it uses the object's name.
 
     verbose : bool, optional
         Set to False to supress printed outputs.
@@ -190,6 +232,11 @@ class Star:
                 filters.append(k)
         self.filter_mask = sp.where(self.used_filters == 1)[0]
 
+        # Get max Av
+        sfd = SFDQuery()
+        coords = SkyCoord(self.ra, self.dec, unit=(u.deg, u.deg), frame='icrs')
+        ebv = sfd(coords)
+        self.Av = ebv * self.mags[4]
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
@@ -207,10 +254,6 @@ class Star:
             self.flux_er[filt_idx] = flux_er[k]
             self.bandpass[filt_idx] = bandpass[k]
 
-        # Do the interpolation
-        # self.interpolate(grid)
-
-        # self.get_stellar_params(plx, plx_e, rad, rad_e, temp, temp_e)
         self.calculate_distance()
 
     def ra_dec_to_deg(self, ra, dec):
