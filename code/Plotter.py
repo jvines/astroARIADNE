@@ -442,7 +442,7 @@ class SEDPlotter:
             if param == 'z':
                 new_titles[i] = r'        [Fe/H] ='
             if param == 'dist':
-                new_titles[i] = r'  D ='
+                new_titles[i] = r'    D ='
             if param == 'rad':
                 new_titles[i] = r'R ='
             if param == 'Av':
@@ -450,8 +450,8 @@ class SEDPlotter:
             if param == 'inflation':
                 new_titles[i] = r'$\sigma$ ='
             new_titles[i] += '{:.2f}'.format(theta[i])
-            new_titles[i] += r'$^{+' + '{:.2f}'.format(theta_up[i])
-            new_titles[i] += r'}_{-' + '{:.2f}'.format(theta_lo[i])
+            new_titles[i] += r'$^{+' + '{:.2f}'.format(theta_up[i] - theta[i])
+            new_titles[i] += r'}_{-' + '{:.2f}'.format(theta[i] - theta_lo[i])
             new_titles[i] += r'}$'
         return new_titles
 
