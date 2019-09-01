@@ -95,8 +95,8 @@ class Fitter:
                 params['radius'] = (self.star.rad, self.star.rad_e)
             if self.star.get_plx:
                 params['parallax'] = (self.star.plx, self.star.plx_e)
-            mask = sp.array([1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1,
-                             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1])
+            mask = sp.array([1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0,
+                             0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0])
             mags = self.star.mags[mask == 1]
             mags_e = self.star.mag_errs[mask == 1]
             bands = ['H', 'J', 'K', 'G', 'RP', 'BP', 'W1', 'W2']
