@@ -1,0 +1,15 @@
+# Template priorfile.
+#teff    Normal             mu,sig
+#logg    Uniform            a,b
+#z       Fixed              Z
+#dist    TruncatedNormal    mu,sig,upper,lower
+#radius  default            ---
+#Av      Normal             mu,sig
+#inflation      Normal             mu,sig
+teff  default ----
+logg  default ----
+z default ----
+dist  default ----
+rad  default ----
+Av  default ----
+inflation default ----
