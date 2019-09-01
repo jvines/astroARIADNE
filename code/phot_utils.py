@@ -48,7 +48,7 @@ def extract_info(magnitudes, errors, filters):
 
 
 def convert_jansky_to_ergs(j):
-    """Convert flux from jansky to erg s-1 cm-2."""
+    """Convert flux from jansky to erg s-1 cm-2 Hz-1."""
     return j * 1e-23
 
 
@@ -79,7 +79,7 @@ def mag_to_flux(mag, mag_err, band):
     If the filter is from PanSTARRS or SDSS, then the magnitude is in the AB
     system. Else it's in the Vega system.
     """
-    if 'PS1_' in band or 'SDSS_' in band:
+    if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band:
         # Get flux from AB mag
         flux, flux_err = mag_to_flux_AB(mag, mag_err)
         # Get effective wavelength for bandpass
@@ -101,7 +101,7 @@ def flux_to_mag(flux, flux_err, band):
     The flux is expected to be in the units of erg s-1 cm-2 um-1
     """
     leff = get_effective_wavelength(band)
-    if 'PS1_' in band or 'SDSS_' in band:
+    if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band:
         f0 = convert_f_nu_to_f_lambda(3.631e-20, leff)
     else:
         f0 = get_band_info(band)
