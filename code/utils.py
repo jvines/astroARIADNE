@@ -3,6 +3,7 @@
 Here go various utilities that don't belong directly in any class,
 photometry utils module nor or SED model module.
 """
+import scipy as sp
 
 
 def credibility_interval(post, alpha=.68):
