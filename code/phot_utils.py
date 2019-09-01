@@ -7,9 +7,6 @@ It uses the module pyphot to get the fluxes and bandpasses of different
 broadband filters.
 """
 
-
-from __future__ import division, print_function
-
 import astropy.constants as const
 import astropy.units as u
 import pyphot

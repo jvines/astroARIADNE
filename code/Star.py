@@ -1,5 +1,4 @@
 """Star.py contains the Star class which contains the data regarding a star."""
-from __future__ import division, print_function
 
 import pickle
 
