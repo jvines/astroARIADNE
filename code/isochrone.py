@@ -4,7 +4,7 @@ import os
 
 from isochrones import SingleStarModel, get_ichrone
 
-from sed_library import credibility_interval
+from utils import credibility_interval
 
 
 def estimate(bands, params):

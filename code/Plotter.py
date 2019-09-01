@@ -18,6 +18,7 @@ from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
 
 import corner
+from utils import *
 from phot_utils import *
 from sed_library import *
 from Star import *

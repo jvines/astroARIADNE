@@ -18,6 +18,7 @@ import pymultinest
 from isochrone import estimate
 from phot_utils import *
 from sed_library import *
+from utils import *
 
 # GLOBAL VARIABLES
 
