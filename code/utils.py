@@ -96,10 +96,13 @@ def end(coordinator, elapsed_time, out_folder):
     What is displayed is:
     best fit parameters
     elapsed time
-    Spectral type (TODO)
+    Spectral type
     """
     order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
     out = pickle.load(open(out_folder + '/multinest_out.pkl', 'rb'))
+    mamajek_spt = sp.loadtxt(
+        '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
+    mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
     theta = sp.zeros(order.shape[0])
     for i, param in enumerate(order):
         if param != 'likelihood':
@@ -126,6 +129,10 @@ def end(coordinator, elapsed_time, out_folder):
             print('{:.4f}'.format(uncert[i][0]))
         else:
             print('fixed')
+    spt_idx = sp.argmin(abs(mamajek_temp - theta[0]))
+    spt = mamajek_spt[spt_idx]
+    print('\t\tMamajek Spectral Type : ', end='')
+    print(spt)
     print('\t\tLog Likelihood of best fit : ', end='')
     print('{:.3f}'.format(lglk))
     print('\t\tlog Bayesian evidence : ', end='')
