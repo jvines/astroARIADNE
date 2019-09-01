@@ -83,7 +83,7 @@ class Fitter:
         defaults = dict()
         # Logg prior setup.
         if not estimate_logg:
-            with open('logg_ppf.pkl', 'rb') as jar:
+            with open('../Datafiles/logg_ppf.pkl', 'rb') as jar:
                 defaults['logg'] = pickle.load(jar)
         else:
             params = dict()  # params for isochrones.
@@ -115,7 +115,7 @@ class Fitter:
             defaults['teff'] = st.norm(
                 loc=self.star.temp, scale=self.star.temp_e)
         else:
-            with open('teff_ppf.pkl', 'rb') as jar:
+            with open('../Datafiles/teff_ppf.pkl', 'rb') as jar:
                 defaults['teff'] = pickle.load(jar)
             defaults['teff'] = teff_prior['teff']
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)

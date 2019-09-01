@@ -180,7 +180,7 @@ class Star:
         self.get_mags = True if mag_dict is None else False
 
         # Grid stuff
-        self.full_grid = sp.loadtxt('model_grid_fix.dat')
+        self.full_grid = sp.loadtxt('../Datafiles/model_grid_fix.dat')
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
         self.z = self.full_grid[:, 2]
