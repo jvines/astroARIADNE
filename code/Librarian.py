@@ -83,7 +83,6 @@ class Librarian:
 
     def __init__(self, starname, ra, dec, get_plx, get_rad, get_temp, get_lum,
                  verbose=True):
-        """See class docstring."""
         self.starname = starname
         self.ra = ra
         self.dec = dec
@@ -188,7 +187,7 @@ class Librarian:
         if get_temp:
             self.get_temperature(catalog)
         if get_lum:
-            self.get_lumnosity(catalog)
+            self.get_luminosity(catalog)
         pass
 
     def get_parallax(self, catalog):
@@ -207,7 +206,7 @@ class Librarian:
                 print(self.plx, end=' +- ')
                 print(self.plx_e, end=' mas\n')
         except Exception as e:
-            raise('No Gaia parallax found for this star.')
+            raise Exception('No Gaia parallax found for this star.')
         pass
 
     def get_radius(self, catalog):
@@ -230,7 +229,7 @@ class Librarian:
                 print(self.rad, end=' +- ')
                 print(self.rad_e, end=' R_sun\n')
         except Exception as e:
-            raise('No radius value found.')
+            raise Exception('No radius value found.')
         pass
 
     def get_temperature(self, catalog):
@@ -252,10 +251,10 @@ class Librarian:
                 print(self.temp, end=' +- ')
                 print(self.temp_e, end=' K\n')
         except Exception as e:
-            raise('No effective temperature value found.')
+            raise Exception('No effective temperature value found.')
         pass
 
-    def get_lumnosity(self, catalog):
+    def get_luminosity(self, catalog):
         """Retrieve the lumnosity from Gaia if available."""
         if self.verbose:
             print('Searching for luminosity in Gaia...')
@@ -274,5 +273,5 @@ class Librarian:
                 print(self.lum, end=' +- ')
                 print(self.lum_e, end=' L_Sol\n')
         except Exception as e:
-            raise('No luminosity value found.')
+            raise Exception('No luminosity value found.')
         pass
