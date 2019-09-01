@@ -32,15 +32,6 @@ def extract_info(magnitudes, errors, filters):
         wave[band] = leff
         bandpass[band] = bp
 
-        # print('Flux in band', end=' ')
-        # print(band, end=': ')
-        # print(flx, end=' ')
-        # print(r'erg/cm2/s/um', end='; ')
-        # print('Central wavelength:', end=' ')
-        # print('{:2.3f}'.format(leff), end=' ')
-        # print('Bandpass:', end=' ')
-        # print('{:2.3f}'.format(bp_u - bp_l))
-
     return wave, flux, flux_er, bandpass
 
 
