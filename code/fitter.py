@@ -11,9 +11,11 @@ import astropy.units as u
 import dill
 import scipy as sp
 import scipy.stats as st
+from isochrones import SingleStarModel, get_ichrone
 from termcolor import colored
 
 import pymultinest
+from isochrone import estimate
 from phot_utils import *
 from sed_library import *
 
@@ -26,37 +28,15 @@ with open('interpolations.pkl', 'rb') as intp:
 
 class Fitter:
 
-    def __init__(self, star, setup, priorfile=None, engine='multinest',
-                 out_folder=None, verbose=True):
+    def __init__(self, star, setup, priorfile=None, estimate_logg=False,
+                 engine='multinest', out_folder=None,
+                 verbose=True):
         global prior_dict, coordinator, fixed
         # Global settings
         self.start = time.time()
         self.star = star
         self.engine = engine
         self.verbose = verbose
-
-        if engine == 'multinest' or engine == 'dynesty':
-            self.live_points = setup[0]
-            self.dlogz = setup[1]
-
-        # Parameter coordination.
-        # Order for the parameters are:
-        # tef, logg, z, dist, rad, Av
-        self.coordinator = sp.zeros(7)  # 1 for fixed params
-        self.fixed = sp.zeros(7)
-        coordinator = self.coordinator
-        fixed = self.fixed
-
-        # Setup priors.
-        self.default_priors = self._default_priors()
-        self.priorfile = priorfile
-        self.create_priors(priorfile)
-        prior_dict = self.priors
-
-        # Get dimensions.
-        self.ndim = self.get_ndim()
-
-        self.display()
 
         if out_folder is None:
             self.out_folder = self.star.starname + '/'
@@ -71,37 +51,79 @@ class Fitter:
         else:
             print("Created the directory {:s} ".format(self.out_folder))
 
+        if engine == 'multinest' or engine == 'dynesty':
+            self.live_points = setup[0]
+            self.dlogz = setup[1]
+
+        # Parameter coordination.
+        # Order for the parameters are:
+        # tef, logg, z, dist, rad, Av
+        self.coordinator = sp.zeros(7)  # 1 for fixed params
+        self.fixed = sp.zeros(7)
+        coordinator = self.coordinator
+        fixed = self.fixed
+
+        # Setup priors.
+        self.default_priors = self._default_priors(estimate_logg)
+        self.priorfile = priorfile
+        self.create_priors(priorfile)
+        prior_dict = self.priors
+
+        # Get dimensions.
+        self.ndim = self.get_ndim()
+
+        self.display()
+
     def get_ndim(self):
         """Calculate number of dimensions."""
         ndim = 7 - self.coordinator.sum()
         return int(ndim)
 
-    def _default_priors(self):
+    def _default_priors(self, estimate_logg):
         defaults = dict()
         # Logg prior setup.
-        if self.engine == 'multinest' or self.engine == 'dynesty':
+        if not estimate_logg:
             with open('logg_ppf.pkl', 'rb') as jar:
                 defaults['logg'] = pickle.load(jar)
         else:
-            with open('logg_kde.pkl', 'rb') as jar:
-                defaults = pickle.load(jar)['logg_prior']
+            params = dict()  # params for isochrones.
+            if self.star.get_temp:
+                params['Teff'] = (self.star.temp, self.star.temp_e)
+            if self.star.get_lum:
+                params['LogL'] = (self.star.lum, self.star.lum_e)
+            if self.star.get_rad:
+                params['radius'] = (self.star.rad, self.star.rad_e)
+            if self.star.get_plx:
+                params['parallax'] = (self.star.plx, self.star.plx_e)
+            mask = sp.array([1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1,
+                             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1])
+            mags = self.star.mags[mask == 1]
+            mags_e = self.star.mag_errs[mask == 1]
+            bands = ['H', 'J', 'K', 'G', 'RP', 'BP', 'W1', 'W2']
+            used_bands = []
+            for m, e, b in zip(mags, mags_e, bands):
+                if m != 0:
+                    params[b] = (m, e)
+                    used_bands.append(b)
+            if self.verbose and estimate_logg:
+                print('*** ESTIMATING LOGG USING MIST ISOCHRONES ***')
+            logg_est = estimate(used_bands, params)
+            if logg_est is not None:
+                defaults['logg'] = st.norm(loc=logg_est[0], scale=logg_est[1])
         # Teff prior setup.
         if self.star.get_temp:
             defaults['teff'] = st.norm(
                 loc=self.star.temp, scale=self.star.temp_e)
-        elif self.engine == 'multinest' or self.engine == 'dynesty':
+        else:
             with open('teff_ppf.pkl', 'rb') as jar:
                 defaults['teff'] = pickle.load(jar)
-        else:
-            with open('teff_kde.pkl', 'rb') as jar:
-                teff_prior = pickle.load(jar)
             defaults['teff'] = teff_prior['teff']
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
         defaults['dist'] = st.norm(
             loc=self.star.dist, scale=self.star.dist_e)
         defaults['rad'] = st.norm(
             loc=self.star.rad, scale=self.star.rad_e)
-        defaults['Av'] = st.uniform(loc=0, scale=.032)
+        defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
         up, low = (5 - 0.5) / 0.5, (0 - 0.5) / 0.5
         defaults['inflation'] = st.truncnorm(a=low, b=up, loc=0.5, scale=0.5)
         return defaults
@@ -169,7 +191,7 @@ class Fitter:
         """
         path = self.out_folder + 'multinest/'
         out = dict()
-        output = pymultinest.Analyzer(outputfiles_basename=path,
+        output = pymultinest.Analyzer(outputfiles_basename=path + 'chains',
                                       n_params=self.ndim)
         posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
         out['out'] = output
@@ -191,7 +213,18 @@ class Fitter:
                 theta, self.star, interpolators)
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
-        out['best_fit'] = output.get_best_fit()
+        out['best_fit'] = dict()
+        best_theta = sp.zeros(order.shape[0])
+        j = 0
+        for i, param in enumerate(order):
+            if not self.coordinator[i]:
+                out['best_fit'][param] = sp.median(posterior_samples[:, j])
+                j += 1
+            else:
+                out['best_fit'][param] = self.fixed[i]
+            best_theta[i] = out['best_fit'][param]
+        out['best_fit']['likelihood'] = log_likelihood(
+            best_theta, self.star, interpolators)
         out['star'] = self.star
         out['engine'] = self.engine
         pickle.dump(out, open(self.out_folder + '/multinest_out.pkl', 'wb'))
@@ -214,7 +247,7 @@ class Fitter:
             sampling_efficiency=0.8,
             evidence_tolerance=self.dlogz,
             n_live_points=self.live_points,
-            outputfiles_basename=path,
+            outputfiles_basename=path + 'chains',
             verbose=self.verbose,
             resume=False
         )
@@ -298,6 +331,8 @@ class Fitter:
         print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
         print(colored('\t\t\tParallax : ', c), end='')
         print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
+        print(colored('\t\t\tEstimated Av : ', c), end='')
+        print(colored('{:.3f}'.format(self.star.Av), c))
         print(colored('\t\t\tSelected engine : ', c), end='')
         print(colored(engine, c))
         print(colored('\t\t\tLive points : ', c), end='')
@@ -317,10 +352,14 @@ class Fitter:
         Spectral type (TODO)
         """
         out = pickle.load(open(self.out_folder + '/multinest_out.pkl', 'rb'))
-        theta = out['best_fit']['parameters']
-        theta = build_params(theta, self.coordinator, self.fixed)
+        theta = sp.zeros(order.shape[0])
+        for i, param in enumerate(order):
+            if param != 'likelihood':
+                theta[i] = out['best_fit'][param]
+        # theta = build_params(theta, self.coordinator, self.fixed)
         uncert = []
-        lglk = out['best_fit']['log_likelihood']
+        # lglk = out['best_fit']['log_likelihood']
+        lglk = out['best_fit']['likelihood']
         z, z_err = out['lnZ'], out['lnZerr']
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -332,6 +371,8 @@ class Fitter:
         print('\t\tFitting finished.')
         print('\t\tBest fit parameters are:')
         for i, p in enumerate(order):
+            if p == 'z':
+                p = '[Fe/H]'
             print('\t\t' + p, end=' : ')
             print('{:.4f}'.format(theta[i]), end=' ')
             if not self.coordinator[i]:
