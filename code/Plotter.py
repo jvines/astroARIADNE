@@ -64,8 +64,12 @@ class SEDPlotter:
         self.fixed = out['fixed']
 
         # Get best fit parameters.
-        theta = out['best_fit']['parameters']
-        self.theta = build_params(theta, self.coordinator, self.fixed)
+        theta = sp.zeros(order.shape[0])
+        for i, param in enumerate(order):
+            if param != 'likelihood':
+                theta[i] = out['best_fit'][param]
+        self.theta = theta
+        # self.theta = build_params(theta, self.coordinator, self.fixed)
 
         # Calculate best fit model.
         self.model = model_grid(self.theta, self.star, interpolators)
@@ -317,8 +321,8 @@ class SEDPlotter:
             if not self.coordinator[i]:
                 _, lo, up = credibility_interval(
                     samples[param])
-                theta_lo.append(abs(theta[i] - lo))
-                theta_up.append(abs(up - theta[i]))
+                theta_lo.append(lo)
+                theta_up.append(up)
                 all_samps.append(samples[param])
 
         corner_samp = sp.vstack(all_samps)
