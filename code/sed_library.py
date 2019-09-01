@@ -151,20 +151,28 @@ def log_probability(theta, star, prior_dict, coordinator, interpolators,
     return lp + lnl
 
 
-def prior_transform_dynesty(u, star, prior_dict):
+def prior_transform_dynesty(u, star, prior_dict, coordinator):
     """Transform the prior from the unit cube to the parameter space."""
     u2 = sp.array(u)
 
-    if star.get_temp or star.temp:
-        u2[0] = prior_dict['teff'].ppf(u[0])
-    else:
-        u2[0] = prior_dict['teff'](u[0])
-    u2[1] = prior_dict['logg'](u[1])
-    u2[2] = prior_dict['z'].ppf(u[2])
-    u2[3] = prior_dict['dist'].ppf(u[3])
-    u2[4] = prior_dict['rad'].ppf(u[4])
-    u2[5] = prior_dict['Av'].ppf(u[5])
-    u2[6] = prior_dict['inflation'].ppf(u[6])
+    i = 0
+    for fixed, par in zip(coordinator, order):
+        if fixed:
+            continue
+        if par == 'logg':
+            try:
+                u2[i] = prior_dict['logg'](u2[i])
+            except TypeError:
+                u2[i] = prior_dict['logg'].ppf(u2[i])
+            i += 1
+            continue
+        if par == 'teff':
+            u2[i] = prior_dict['teff'].ppf(
+                u2[i]) if star.get_temp else prior_dict['teff'](u2[i])
+            i += 1
+            continue
+        u2[i] = prior_dict[par].ppf(u2[i])
+        i += 1
     return u2
 
 
