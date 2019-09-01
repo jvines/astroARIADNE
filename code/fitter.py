@@ -1,5 +1,5 @@
 """Main driver of the fitting routine."""
-
+# TODO: Add a log file
 import os
 import pickle
 import random
@@ -7,12 +7,11 @@ import time
 from multiprocessing import Pool, cpu_count
 
 import astropy.units as u
-import dill
 import scipy as sp
 import scipy.stats as st
 from isochrones import SingleStarModel, get_ichrone
-from termcolor import colored
 
+import dynesty
 import pymultinest
 from isochrone import estimate
 from phot_utils import *
@@ -236,12 +235,7 @@ class Fitter:
         global star
         star = self.star
         path = self.out_folder + 'multinest/'
-        try:
-            os.mkdir(path)
-        except OSError:
-            print("Creation of the directory {:s} failed".format(path))
-        else:
-            print("Created the directory {:s} ".format(path))
+        create_dir(path)  # Create multinest path.
         pymultinest.run(
             log_like, pt_multinest, self.ndim,
             n_params=self.ndim,

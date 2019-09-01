@@ -3,6 +3,7 @@
 Here go various utilities that don't belong directly in any class,
 photometry utils module nor or SED model module.
 """
+import os
 import random
 
 import scipy as sp
@@ -140,4 +141,15 @@ def end(coordinator, elapsed_time, out_folder):
     print('{:.3f}'.format(z_err))
     print('\t\tElapsed time : ', end='')
     print(elapsed_time)
+    pass
+
+
+def create_dir(path):
+    """Create a directory."""
+    try:
+        os.mkdir(path)
+    except OSError:
+        print("Creation of the directory {:s} failed".format(path))
+    else:
+        print("Created the directory {:s} ".format(path))
     pass

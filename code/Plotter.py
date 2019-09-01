@@ -1,7 +1,5 @@
 """plot_utils module for plotting SEDs."""
-# TODO: Add a log file
 # TODO: create settings file
-from __future__ import division, print_function
 
 import copy
 import glob
@@ -39,17 +37,11 @@ class SEDPlotter:
         self.png = png
 
         # Create target folders
-        try:
-            chains = out_folder + '/chains'
-            likelihoods = out_folder + '/likelihoods'
-            os.mkdir(out_folder)
-            os.mkdir(chains)
-            os.mkdir(likelihoods)
-        except OSError:
-            print('Creation of one of the directories failed.', end=' ')
-            print('Maybe they already exist?')
-        else:
-            print('Created the directories succesfully.')
+        chains = out_folder + '/chains'
+        likelihoods = out_folder + '/likelihoods'
+        create_dir(out_folder)
+        create_dir(chains)
+        create_dir(likelihoods)
 
         self.out_folder = out_folder
         self.chain_out = chains
