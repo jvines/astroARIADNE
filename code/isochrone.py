@@ -14,5 +14,5 @@ def estimate(bands, params):
     model.fit(resume=False, verbose=False)
     logg_samples = model.derived_samples['logg']
     med, lo, up = credibility_interval(logg_samples)
-    med_e = 3 * max([med - lo, up - med])
+    med_e = 2 * max([med - lo, up - med])
     return med, med_e
