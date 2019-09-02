@@ -70,7 +70,7 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
     print(colored('\t\t##          PLACEHOLDER           ##', c))
     print(colored('\t\t####################################', c))
     print(colored('\n\t\t\tAuthor: Jose Vines', c))
-    print(colored('\t\t\tContact : jose [.] vines at ug [.] uchile [.] cl', c))
+    print(colored('\t\t\tContact : jose . vines at ug . uchile . cl', c))
     print(colored('\t\t\tStar : ', c), end='')
     print(colored(star.starname, c))
     print(colored('\t\t\tEffective temperature : ', c), end='')
