@@ -270,9 +270,9 @@ class Fitter:
         out = dict()
         out_file = self.out_folder + '/' + self.engine + '_out.pkl'
         if self.engine == 'multinest':
-            lnz, lnzer, posterior_samples = multinest_results()
+            lnz, lnzer, posterior_samples = self.multinest_results()
         else:
-            lnz, lnzer, posterior_samples = dynesty_results(results)
+            lnz, lnzer, posterior_samples = self.dynesty_results(results)
 
         out['lnZ'] = lnz
         out['lnZerr'] = lnzer
@@ -332,13 +332,13 @@ class Fitter:
 #####################
 def dynesty_log_like(cube):
     """Dynesty log likelihood wrapper."""
-    theta = build_params(theta, coordinator, fixed)
+    theta = build_params(cube, coordinator, fixed)
     return log_likelihood(theta, star, interpolators)
 
 
 def pt_dynesty(cube):
     """Dynesty prior transform."""
-    prior_transform_dynesty(cube, star, prior_dict, coordinator)
+    return prior_transform_dynesty(cube, star, prior_dict, coordinator)
 
 
 def multinest_log_like(cube, ndim, nparams):
