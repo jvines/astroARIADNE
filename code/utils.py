@@ -4,9 +4,10 @@ Here go various utilities that don't belong directly in any class,
 photometry utils module nor or SED model module.
 """
 import os
+import pickle
 import random
 import time
-
+from contextlib import closing
 import scipy as sp
 from termcolor import colored
 
@@ -91,7 +92,7 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
     print(colored(str(dlogz), c))
     print(colored('\t\t\tFree parameters : ', c), end='')
     print(colored(str(ndim), c))
-    if engine == 'dynesty':
+    if engine == 'Dynesty':
         print(colored('\t\t\tBounding : ', c), end='')
         print(colored(bound, c))
         print(colored('\t\t\tSampling : ', c), end='')
@@ -103,7 +104,7 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
     pass
 
 
-def end(coordinator, elapsed_time, out_folder):
+def end(coordinator, elapsed_time, out_folder, engine):
     """Display end of run information.
 
     What is displayed is:
@@ -112,7 +113,9 @@ def end(coordinator, elapsed_time, out_folder):
     Spectral type
     """
     order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
-    out = pickle.load(open(out_folder + '/multinest_out.pkl', 'rb'))
+    res_dir = out_folder + '/' + engine + '_out.pkl'
+    with closing(open(res_dir, 'rb')) as jar:
+        out = pickle.load(jar)
     mamajek_spt = sp.loadtxt(
         '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
     mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
