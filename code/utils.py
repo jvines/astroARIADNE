@@ -5,6 +5,7 @@ photometry utils module nor or SED model module.
 """
 import os
 import random
+import time
 
 import scipy as sp
 from termcolor import colored
@@ -153,3 +154,37 @@ def create_dir(path):
     else:
         print("Created the directory {:s} ".format(path))
     pass
+
+
+def execution_time(start):
+    """Calculate run execution time."""
+    end = time.time() - start
+    weeks, rest0 = end // 604800, end % 604800
+    days, rest1 = rest0 // 86400, rest0 % 86400
+    hours, rest2 = rest1 // 3600, rest1 % 3600
+    minutes, seconds = rest2 // 60, rest2 % 60
+    elapsed = ''
+    if weeks == 0:
+        if days == 0:
+            if hours == 0:
+                if minutes == 0:
+                    elapsed = '{:f} seconds'.format(seconds)
+                else:
+                    elapsed = '{:f} minutes'.format(minutes)
+                    elapsed += ' and {:f} seconds'.format(seconds)
+            else:
+                elapsed = '{:f} hours'.format(hours)
+                elapsed += ', {:f} minutes'.format(minutes)
+                elapsed += ' and {:f} seconds'.format(seconds)
+        else:
+            elapsed = '{:f} days'.format(days)
+            elapsed += ', {:f} hours'.format(hours)
+            elapsed += ', {:f} minutes'.format(minutes)
+            elapsed += ' and {:f} seconds'.format(seconds)
+    else:
+        elapsed = '{:f} weeks'.format(weeks)
+        elapsed += ', {:f} days'.format(days)
+        elapsed += ', {:f} hours'.format(hours)
+        elapsed += ', {:f} minutes'.format(minutes)
+        elapsed += ' and {:f} seconds'.format(seconds)
+    return elapsed

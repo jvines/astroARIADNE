@@ -143,6 +143,7 @@ def log_likelihood(theta, star, interpolators):
 def log_probability(theta, star, prior_dict, coordinator, interpolators,
                     fixed):
     """Calculate unnormalized posterior probability of the model."""
+    # DEPRECATED
     params = build_params(theta, coordinator, fixed)
     lp = log_prior(params, prior_dict, coordinator)
     lnl = log_likelihood(params, star, interpolators)
