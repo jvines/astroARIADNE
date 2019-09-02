@@ -13,6 +13,7 @@ from isochrones import SingleStarModel, get_ichrone
 
 import dynesty
 import pymultinest
+from dynesty.utils import resample_equal
 from isochrone import estimate
 from phot_utils import *
 from sed_library import *
@@ -162,37 +163,108 @@ class Fitter:
             self.priors = self.default_priors
         pass
 
-    def save_multinest(self):
+    def fit(self):
+        """Run fitting routine."""
+        global star
+        star = self.star
+        if self.engine == 'multinest':
+            self.fit_multinest()
+        else:
+            self.fit_dynesty()
+        elapsed_time = self.execution_time()
+        end(self.coordinator, elapsed_time, self.out_folder)
+        pass
+
+    def fit_multinest(self):
+        """Run MuiltiNest."""
+        path = self.out_folder + 'multinest/'
+        create_dir(path)  # Create multinest path.
+        pymultinest.run(
+            multinest_log_like, pt_multinest, self.ndim,
+            n_params=self.ndim,
+            sampling_efficiency=0.8,
+            evidence_tolerance=self.dlogz,
+            n_live_points=self.live_points,
+            outputfiles_basename=path + 'chains',
+            max_modes=100,
+            verbose=self.verbose,
+            resume=False
+        )
+        self.save()
+        pass
+
+    def fit_dynesty(self):
+        """Run dynesty."""
+        if self.dynamic:
+            if self.nthreads > 1:
+                with closing(Pool(self.nthreads)) as executor:
+                    sampler = dynesty.DynamicNestedSampler(
+                        dynesty_log_like, pt_dynesty, self.ndim,
+                        bound=self.bound, sample=self.sample, pool=executor,
+                        queue_size=self.nthreads - 1
+                    )
+                    sampler.run_nested(dlogz_init=self.dlogz,
+                                       nlive_init=self.live_points)
+            else:
+                sampler = dynesty.DynamicNestedSampler(
+                    dynesty_log_like, pt_dynesty, self.ndim,
+                    bound=self.bound, sample=self.sample
+
+                )
+                sampler.run_nested(dlogz_init=self.dlogz,
+                                   nlive_init=self.live_points)
+        else:
+            if self.nthreads > 1:
+                with closing(Pool(self.nthreads)) as executor:
+                    sampler = dynesty.NestedSampler(
+                        dynesty_log_like, pt_dynesty, self.ndim,
+                        nlive=self.live_points, bound=self.bound,
+                        sample=self.sample, pool=executor,
+                        queue_size=self.nthreads - 1
+                    )
+                    sampler.run_nested(dlogz=self.dlogz)
+            else:
+                sampler = dynesty.NestedSampler(
+                    dynesty_log_like, pt_dynesty, self.ndim,
+                    nlive=self.live_points, bound=self.bound,
+                    sample=self.sample
+                )
+                sampler.run_nested(dlogz=self.dlogz)
+        results = sampler.results
+        self.save(results=results)
+        pass
+
+    def save(self, results=None):
         """Analyze and save multinest output and relevant information.
 
         Saves a dictionary as a pickle file. The dictionary contains the
         following:
 
-        out : the whole multinest output, raw.
         lnZ : The global evidence
         lnZerr : The global evidence error
-        posterior_samples : A dictionary containing the sampls of each
+        posterior_samples : A dictionary containing the samples of each
                             parameter (even if it's fixed) and the
                             log likelihood for each set of sampled parameters.
         fixed : An array with the fixed parameter values
         coordinator : An array with the status of each parameter (1 for fixed
                       0 for free)
-        best_fit : The best fit according to multinest. This corresponds to
-                   finding the set of parameters that corresponds to the
-                   highest log likelihood
+        best_fit : The best fit is chosen to be the median of each sample.
+                   It also includes the log likelihood of the best fit.
         star : The Star object containing the information of the star (name,
                magnitudes, fluxes, coordinates, etc)
         engine : The fitting engine used (i.e. MultiNest or Dynesty)
 
         """
-        path = self.out_folder + 'multinest/'
         out = dict()
-        output = pymultinest.Analyzer(outputfiles_basename=path + 'chains',
-                                      n_params=self.ndim)
-        posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
-        out['out'] = output
-        out['lnZ'] = output.get_stats()['global evidence']
-        out['lnZerr'] = output.get_stats()['global evidence error']
+        out_file = self.out_folder + '/' + self.engine + '_out.pkl'
+        if self.engine == 'multinest':
+            lnz, lnzer, posterior_samples = multinest_results()
+        else:
+            lnz, lnzer, posterior_samples = dynesty_results(results)
+
+        out['lnZ'] = lnz
+        out['lnZerr'] = lnzer
+
         out['posterior_samples'] = dict()
         j = 0
         for i, param in enumerate(order):
@@ -223,36 +295,26 @@ class Fitter:
             best_theta, self.star, interpolators)
         out['star'] = self.star
         out['engine'] = self.engine
-        pickle.dump(out, open(self.out_folder + '/multinest_out.pkl', 'wb'))
+        pickle.dump(out, open(out_file, 'wb'))
         pass
 
-    def fit_multinest(self):
-        """Run MuiltiNest."""
-        global star
-        star = self.star
+    def multinest_results(self):
+        """Extract posterior samples, global evidence and its error."""
         path = self.out_folder + 'multinest/'
-        create_dir(path)  # Create multinest path.
-        pymultinest.run(
-            log_like, pt_multinest, self.ndim,
-            n_params=self.ndim,
-            sampling_efficiency=0.8,
-            evidence_tolerance=self.dlogz,
-            n_live_points=self.live_points,
-            outputfiles_basename=path + 'chains',
-            max_modes=100,
-            verbose=self.verbose,
-            resume=False
-        )
-        self.save_multinest()
-        elapsed_time = self.execution_time()
-        end(self.coordinator, elapsed_time, self.out_folder)
-        pass
+        output = pymultinest.Analyzer(outputfiles_basename=path + 'chains',
+                                      n_params=self.ndim)
+        posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
+        lnz = output.get_stats()['global evidence']
+        lnzer = output.get_stats()['global evidence error']
+        return lnz, lnzer, posterior_samples
 
-    def fit_dynesty(self):
-        """Run dynesty."""
-        # TODO: implement
-        sampler = dynesty.NestedSampler
-        pass
+    def dynesty_results(self, results):
+        """Extract posterior samples, global evidence and its error."""
+        weights = sp.exp(results['logwt'] - results['logz'][-1])
+        posterior_samples = resample_equal(results.samples, weights)
+        lnz = results.logz[-1]
+        lnzer = results.logzerr[-1]
+        return lnz, lnzer, posterior_samples
 
     def execution_time(self):
         """Calculate run execution time."""
@@ -289,9 +351,18 @@ class Fitter:
 
 
 #####################
+def dynesty_log_like(cube):
+    """Dynesty log likelihood wrapper."""
+    theta = build_params(theta, coordinator, fixed)
+    return log_likelihood(theta, star, interpolators)
 
 
-def log_like(cube, ndim, nparams):
+def pt_dynesty(cube):
+    """Dynesty prior transform."""
+    prior_transform_dynesty(cube, star, prior_dict, coordinator)
+
+
+def multinest_log_like(cube, ndim, nparams):
     """Multinest log likelihood wrapper."""
     theta = [cube[i] for i in range(ndim)]
     theta = build_params(theta, coordinator, fixed)
@@ -305,5 +376,6 @@ def pt_multinest(cube, ndim, nparams):
 
 def log_prob(theta, star):
     """Wrap for sed_library.log_probability."""
+    # DEPRECATED
     return log_probability(theta, star, prior_dict, coordinator, interpolators,
                            fixed)
