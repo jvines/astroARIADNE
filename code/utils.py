@@ -42,7 +42,8 @@ def credibility_interval(post, alpha=.68):
     return med, low, up
 
 
-def display(engine, star, live_points, dlogz, ndim):
+def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
+            nthreads=None, dynamic=None):
     """Display program information.
 
     What is displayed is:
@@ -69,6 +70,7 @@ def display(engine, star, live_points, dlogz, ndim):
     print(colored('\t\t##          PLACEHOLDER           ##', c))
     print(colored('\t\t####################################', c))
     print(colored('\n\t\t\tAuthor: Jose Vines', c))
+    print(colored('\t\t\tContact : jose [.] vines at ug [.] uchile [.] cl', c))
     print(colored('\t\t\tStar : ', c), end='')
     print(colored(star.starname, c))
     print(colored('\t\t\tEffective temperature : ', c), end='')
@@ -89,6 +91,15 @@ def display(engine, star, live_points, dlogz, ndim):
     print(colored(str(dlogz), c))
     print(colored('\t\t\tFree parameters : ', c), end='')
     print(colored(str(ndim), c))
+    if engine == 'dynesty':
+        print(colored('\t\t\tBounding : ', c), end='')
+        print(colored(bound, c))
+        print(colored('\t\t\tSampling : ', c), end='')
+        print(colored(sample, c))
+        print(colored('\t\t\tN threads : ', c), end='')
+        print(colored(nthreads, c))
+        if dynamic:
+            print(colored('\t\t\tRunning the Dynamic Nested Sampler', c))
     pass
 
 
