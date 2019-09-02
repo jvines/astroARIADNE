@@ -184,7 +184,7 @@ class Fitter:
         else:
             self.fit_dynesty()
         elapsed_time = execution_time(self.start)
-        end(self.coordinator, elapsed_time, self.out_folder)
+        end(self.coordinator, elapsed_time, self.out_folder, self.engine)
         pass
 
     def fit_multinest(self):
