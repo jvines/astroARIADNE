@@ -47,9 +47,16 @@ class Fitter:
 
         create_dir(self.out_folder)  # Create output folder.
 
-        if engine == 'multinest' or engine == 'dynesty':
+        if engine == 'multinest':
             self.live_points = setup[0]
             self.dlogz = setup[1]
+        if engine == 'dynesty':
+            self.live_points = setup[0]
+            self.dlogz = setup[1]
+            self.bound = setup[2]
+            self.sample = setup[3]
+            self.nthreads = setup[4]
+            self.dynamic = setup[5]
 
         # Parameter coordination.
         # Order for the parameters are:
@@ -68,8 +75,13 @@ class Fitter:
         # Get dimensions.
         self.ndim = self.get_ndim()
 
-        display(self.engine, self.star, self.live_points,
-                self.dlogz, self.ndim)
+        if engine == 'multinest':
+            display(self.engine, self.star, self.live_points,
+                    self.dlogz, self.ndim)
+        if engine == 'dynesty':
+            display(self.engine, self.star, self.live_points,
+                    self.dlogz, self.ndim, self.bound, self.sample,
+                    self.nthreads, self.dynamic)
 
     def get_ndim(self):
         """Calculate number of dimensions."""
@@ -171,7 +183,7 @@ class Fitter:
             self.fit_multinest()
         else:
             self.fit_dynesty()
-        elapsed_time = self.execution_time()
+        elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time, self.out_folder)
         pass
 
@@ -315,39 +327,6 @@ class Fitter:
         lnz = results.logz[-1]
         lnzer = results.logzerr[-1]
         return lnz, lnzer, posterior_samples
-
-    def execution_time(self):
-        """Calculate run execution time."""
-        end = time.time() - self.start
-        weeks, rest0 = end // 604800, end % 604800
-        days, rest1 = rest0 // 86400, rest0 % 86400
-        hours, rest2 = rest1 // 3600, rest1 % 3600
-        minutes, seconds = rest2 // 60, rest2 % 60
-        elapsed = ''
-        if weeks == 0:
-            if days == 0:
-                if hours == 0:
-                    if minutes == 0:
-                        elapsed = '{:f} seconds'.format(seconds)
-                    else:
-                        elapsed = '{:f} minutes'.format(minutes)
-                        elapsed += ' and {:f} seconds'.format(seconds)
-                else:
-                    elapsed = '{:f} hours'.format(hours)
-                    elapsed += ', {:f} minutes'.format(minutes)
-                    elapsed += ' and {:f} seconds'.format(seconds)
-            else:
-                elapsed = '{:f} days'.format(days)
-                elapsed += ', {:f} hours'.format(hours)
-                elapsed += ', {:f} minutes'.format(minutes)
-                elapsed += ' and {:f} seconds'.format(seconds)
-        else:
-            elapsed = '{:f} weeks'.format(weeks)
-            elapsed += ', {:f} days'.format(days)
-            elapsed += ', {:f} hours'.format(hours)
-            elapsed += ', {:f} minutes'.format(minutes)
-            elapsed += ' and {:f} seconds'.format(seconds)
-        return elapsed
 
 
 #####################
