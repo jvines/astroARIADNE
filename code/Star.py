@@ -196,15 +196,11 @@ class Star:
         # Lookup archival magnitudes, radius, temperature, luminosity
         # and parallax
         lookup = self.get_rad + self.get_temp + self.get_plx + self.get_mags
-
         if lookup:
             lib = Librarian(starname, self.ra, self.dec,
                             self.get_plx, self.get_rad,
                             self.get_temp, self.get_lum,
                             verbose)
-            lib.get_magnitudes(coordinate_search)
-            lib.get_stellar_params(
-                self.get_plx, self.get_rad, self.get_temp, self.get_lum)
             if self.get_plx:
                 self.plx = lib.plx
                 self.plx_e = lib.plx_e
@@ -218,11 +214,15 @@ class Star:
                 self.lum = lib.lum
                 self.lum_e = lib.lum_e
             if self.get_mags:
+                lib.get_magnitudes(coordinate_search)
                 self.used_filters = lib.used_filters
                 self.mags = lib.mags
                 self.mag_errs = lib.mag_errs
-        else:
+        if not self.get_mags:
             filters = []
+            self.used_filters = sp.zeros(self.filter_names.shape[0])
+            self.mags = sp.zeros(self.filter_names.shape[0])
+            self.mag_errs = sp.zeros(self.filter_names.shape[0])
             for k in mag_dict.keys():
                 filt_idx = sp.where(k == self.filter_names)[0]
                 self.used_filters[filt_idx] = 1
@@ -262,8 +262,8 @@ class Star:
             self.ra = ra
             self.dec = dec
             return
-
         c = SkyCoord(ra, dec, frame='icrs')
+
         self.ra = c.ra.deg
         self.dec = c.dec.deg
         pass
