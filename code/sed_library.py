@@ -137,6 +137,9 @@ def log_likelihood(theta, star, interpolators):
     c = sp.log(2 * sp.pi * errs ** 2)
     lnl = (c + (residuals ** 2 / errs ** 2)).sum()
 
+    if sp.isnan(lnl):
+        return -sp.inf
+
     return -.5 * lnl
 
 
