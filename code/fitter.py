@@ -3,6 +3,7 @@ import os
 import pickle
 import random
 import time
+import warnings
 from contextlib import closing
 from multiprocessing import Pool, cpu_count
 
@@ -18,8 +19,6 @@ from isochrone import estimate
 from phot_utils import *
 from sed_library import *
 from utils import *
-
-# TODO: Add a log file
 
 # GLOBAL VARIABLES
 
@@ -98,17 +97,18 @@ class Fitter:
             params = dict()  # params for isochrones.
             if self.star.get_temp:
                 params['Teff'] = (self.star.temp, self.star.temp_e)
-            if self.star.get_lum:
-                params['LogL'] = (self.star.lum, self.star.lum_e)
-            if self.star.get_rad:
+            if self.star.get_lum and self.star.lum is not None:
+                params['LogL'] = (sp.log10(self.star.lum),
+                                  sp.log10(self.star.lum_e))
+            if self.star.get_rad and self.star.rad is not None:
                 params['radius'] = (self.star.rad, self.star.rad_e)
             if self.star.get_plx:
                 params['parallax'] = (self.star.plx, self.star.plx_e)
-            mask = sp.array([1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0,
-                             0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0])
+            mask = sp.array([1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0])
             mags = self.star.mags[mask == 1]
             mags_e = self.star.mag_errs[mask == 1]
-            bands = ['H', 'J', 'K', 'G', 'RP', 'BP', 'W1', 'W2']
+            bands = ['H', 'J', 'Ks', 'G', 'RP', 'BP', 'W1', 'W2']
             used_bands = []
             for m, e, b in zip(mags, mags_e, bands):
                 if m != 0:
@@ -130,9 +130,18 @@ class Fitter:
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
         defaults['dist'] = st.norm(
             loc=self.star.dist, scale=self.star.dist_e)
-        defaults['rad'] = st.norm(
-            loc=self.star.rad, scale=self.star.rad_e)
-        defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
+        if self.star.rad is not None:
+            defaults['rad'] = st.norm(
+                loc=self.star.rad, scale=self.star.rad_e)
+        else:
+            warnings.warn('No radius found, using default radius prior.')
+            defaults['rad'] = st.uniform(0.1, 10)
+        if self.star.Av == 0.:
+            self.coordinator[-2] = 1
+            self.fixed[-2] = 0
+            defaults['Av'] = None
+        else:
+            defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
         up, low = (5 - 0.5) / 0.5, (0 - 0.5) / 0.5
         defaults['inflation'] = st.truncnorm(a=low, b=up, loc=0.5, scale=0.5)
         return defaults
@@ -247,7 +256,7 @@ class Fitter:
         pass
 
     def save(self, results=None):
-        """Analyze and save multinest output and relevant information.
+        """Save multinest/dynesty output and relevant information.
 
         Saves a dictionary as a pickle file. The dictionary contains the
         following:
@@ -266,9 +275,14 @@ class Fitter:
                magnitudes, fluxes, coordinates, etc)
         engine : The fitting engine used (i.e. MultiNest or Dynesty)
 
+        Also creates a log file with the best fit parameters and 1 sigma
+        error bars.
+
         """
         out = dict()
+        logdat = 'Parameter\tmedian\tupper\tlower\n'
         out_file = self.out_folder + '/' + self.engine + '_out.pkl'
+        log_out = self.out_folder + '/' + 'best_fit.dat'
         if self.engine == 'multinest':
             lnz, lnzer, posterior_samples = self.multinest_results()
         else:
@@ -281,7 +295,9 @@ class Fitter:
         j = 0
         for i, param in enumerate(order):
             if not self.coordinator[i]:
-                out['posterior_samples'][param] = posterior_samples[:, j]
+                sample_n = posterior_samples[:, j].shape[0]
+                out_removed = posterior_samples[sample_n // 4:, j]
+                out['posterior_samples'][param] = out_removed
                 j += 1
             else:
                 out['posterior_samples'][param] = self.fixed[i]
@@ -298,15 +314,25 @@ class Fitter:
         j = 0
         for i, param in enumerate(order):
             if not self.coordinator[i]:
-                out['best_fit'][param] = sp.median(posterior_samples[:, j])
+                sample_n = posterior_samples[:, j].shape[0]
+                out_removed = posterior_samples[sample_n // 4:, j]
+                out['posterior_samples'][param] = out_removed
+                out['best_fit'][param] = sp.median(out_removed)
+                logdat += param + '\t{:.4f}\t'.format(sp.median(out_removed))
+                _, lo, up = credibility_interval(out_removed)
+                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
                 j += 1
             else:
                 out['best_fit'][param] = self.fixed[i]
+                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
+                logdat += 'FIXED\n'
             best_theta[i] = out['best_fit'][param]
         out['best_fit']['likelihood'] = log_likelihood(
             best_theta, self.star, interpolators)
         out['star'] = self.star
         out['engine'] = self.engine
+        with closing(open(log_out, 'w')) as logfile:
+            logfile.write(logdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
 
