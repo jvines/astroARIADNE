@@ -76,10 +76,12 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
     print(colored(star.starname, c))
     print(colored('\t\t\tEffective temperature : ', c), end='')
     print(colored('{:.3f} +/- {:.3f}'.format(temp, temp_e), c))
-    print(colored('\t\t\tStellar radius : ', c), end='')
-    print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
-    print(colored('\t\t\tStellar Luminosity : ', c), end='')
-    print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
+    if rad is not None:
+        print(colored('\t\t\tStellar radius : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
+    if lum is not None:
+        print(colored('\t\t\tStellar Luminosity : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
     print(colored('\t\t\tParallax : ', c), end='')
     print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
     print(colored('\t\t\tEstimated Av : ', c), end='')
