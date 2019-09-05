@@ -216,6 +216,10 @@ class Librarian:
 
         try:
             rad = catalog['radius_val'][0]
+            if sp.ma.is_masked(rad):
+                self.rad = None
+                self.rad_e = None
+                return
             rad_upper = catalog['radius_percentile_upper'][0]
             rad_lower = catalog['radius_percentile_lower'][0]
             e_up = rad_upper - rad
@@ -261,6 +265,10 @@ class Librarian:
 
         try:
             lum = catalog['lum_val'][0]
+            if sp.ma.is_masked(lum):
+                self.lum = None
+                self.lum_e = None
+                return
             lum_upper = catalog['lum_percentile_upper'][0]
             lum_lower = catalog['lum_percentile_lower'][0]
             e_up = lum_upper - lum
