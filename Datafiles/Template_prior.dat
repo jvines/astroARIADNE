@@ -3,13 +3,14 @@
 #logg    Uniform            a,b
 #z       Fixed              Z
 #dist    TruncatedNormal    mu,sig,upper,lower
-#radius  default            ---
+#rad  default            ---
 #Av      Normal             mu,sig
 #inflation      Normal             mu,sig
 teff  default ----
 logg  default ----
 z default ----
-dist  default ----
-rad  default ----
+# norm  default ----  # Uncomment this line to use normalization constant
+dist  default ----  # Comment if using normalization constant
+rad  default ----  # Comment if using normalization constant
 Av  default ----
 inflation default ----
