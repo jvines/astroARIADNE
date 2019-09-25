@@ -106,7 +106,7 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
     pass
 
 
-def end(coordinator, elapsed_time, out_folder, engine):
+def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     """Display end of run information.
 
     What is displayed is:
@@ -114,7 +114,12 @@ def end(coordinator, elapsed_time, out_folder, engine):
     elapsed time
     Spectral type
     """
-    order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
+    if use_norm:
+        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+    else:
+        order = sp.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
+        )
     res_dir = out_folder + '/' + engine + '_out.pkl'
     with closing(open(res_dir, 'rb')) as jar:
         out = pickle.load(jar)
