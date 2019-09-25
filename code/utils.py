@@ -143,6 +143,15 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     print('\t\tFitting finished.')
     print('\t\tBest fit parameters are:')
     for i, p in enumerate(order):
+        if p == 'norm':
+            p = '(R/D)^2'
+            print('\t\t' + p, end=' : ')
+            print('{:.4e}'.format(theta[i]), end=' ')
+            if not coordinator[i]:
+                print('+ {:.4e}'.format(uncert[i][1]), end=' - ')
+                print('{:.4e}'.format(uncert[i][0]))
+            else:
+                print('fixed')
         if p == 'z':
             p = '[Fe/H]'
         print('\t\t' + p, end=' : ')

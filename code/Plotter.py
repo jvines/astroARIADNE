@@ -452,6 +452,8 @@ class SEDPlotter:
                 new_titles[i] = r'    D ='
             if param == 'rad':
                 new_titles[i] = r'R ='
+            if param == 'norm':
+                new_titles[i] = r'    (R/D)$^2$ ='
             if param == 'Av':
                 new_titles[i] = r'Av ='
             if param == 'inflation':
@@ -475,6 +477,8 @@ class SEDPlotter:
                 new_labels[i] = r'D (pc)'
             if param == 'rad':
                 new_labels[i] = r'R $($R$_\odot)$'
+            if param == 'norm':
+                new_labels[i] = r'(R/D)'
             if param == 'Av':
                 new_labels[i] = r'Av'
             if param == 'inflation':

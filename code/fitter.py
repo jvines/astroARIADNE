@@ -311,7 +311,8 @@ class Fitter:
                 warnings.warn(wrn_msg)
                 defaults['rad'] = st.uniform(0.1, 10)
         else:
-            defaults['norm'] = st.uniform(0, 1)
+            up = 1 / 1e-20
+            defaults['norm'] = st.truncnorm(a=0, b=up, loc=0, scale=1e-20)
         if self.star.Av == 0.:
             self.coordinator[-2] = 1
             self.fixed[-2] = 0
