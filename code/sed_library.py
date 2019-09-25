@@ -8,14 +8,17 @@ from scipy.special import ndtr
 from phot_utils import *
 from Star import *
 
-# GLOBAL VARIABLES
 
-order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
-
-
-def build_params(theta, coordinator, fixed):
+def build_params(theta, coordinator, fixed, use_norm):
     """Build the parameter vector that goes into the model."""
-    params = sp.zeros(7)
+    if use_norm:
+        params = sp.zeros(6)
+        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+    else:
+        params = sp.zeros(7)
+        order = sp.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
+        )
     i = 0
     for j, k in enumerate(order):
         params[j] = theta[i] if not coordinator[j] else fixed[j]
@@ -56,7 +59,7 @@ def get_interpolated_flux(temp, logg, z, star, interpolators):
     return flux
 
 
-def model_grid(theta, star, interpolators):
+def model_grid(theta, star, interpolators, use_norm):
     """Return the model grid in the selected filters.
 
     Parameters:
@@ -67,6 +70,13 @@ def model_grid(theta, star, interpolators):
     star : Star
         The Star object containing all relevant information regarding the star.
 
+    interpolators : dict
+        A dictionary with the interpolated grid.
+
+    use_norm : bool
+        False for a full fit  (including radius and distance). True to fit
+        for a normalization constant instead.
+
     Returns
     -------
     model : dict
@@ -74,24 +84,30 @@ def model_grid(theta, star, interpolators):
         interpolated fluxes
 
     """
-    teff, logg, z, dist, rad, Av, inflation = theta
     model = dict()
-
-    dist = (dist * u.pc).to(u.solRad).value
     Rv = 3.1  # For extinction.
-
     mask = star.filter_mask
+
+    if use_norm:
+        teff, logg, z, norm, Av, inflation = theta
+    else:
+        teff, logg, z, dist, rad, Av, inflation = theta
+        dist = (dist * u.pc).to(u.solRad).value
+
     flux = get_interpolated_flux(teff, logg, z, star, interpolators)
 
     wav = star.wave[mask] * 1e4
     ext = fitzpatrick99(wav, Av, Rv)
-    model = apply(ext, flux) * (rad / dist) ** 2
+    if use_norm:
+        model = apply(ext, flux) * norm
+    else:
+        model = apply(ext, flux) * (rad / dist) ** 2
     return model
 
 
-def get_residuals(theta, star, interpolators):
+def get_residuals(theta, star, interpolators, use_norm):
     """Calculate residuals of the model."""
-    model = model_grid(theta, star, interpolators)
+    model = model_grid(theta, star, interpolators, use_norm)
     inflation = theta[-1]
     mask = star.filter_mask
     residuals = model - star.flux[mask]
@@ -102,6 +118,7 @@ def get_residuals(theta, star, interpolators):
 
 def log_prior(theta, prior_dict, coordinator):
     """Calculate prior."""
+    # DEPRECATED
     teff, logg, z, dist, rad, Av, inflation = theta
     lp = 0
 
@@ -130,9 +147,9 @@ def log_prior(theta, prior_dict, coordinator):
     return lp
 
 
-def log_likelihood(theta, star, interpolators):
+def log_likelihood(theta, star, interpolators, use_norm):
     """Calculate log likelihood of the model."""
-    residuals, errs = get_residuals(theta, star, interpolators)
+    residuals, errs = get_residuals(theta, star, interpolators, use_norm)
 
     c = sp.log(2 * sp.pi * errs ** 2)
     lnl = (c + (residuals ** 2 / errs ** 2)).sum()
@@ -155,9 +172,15 @@ def log_probability(theta, star, prior_dict, coordinator, interpolators,
     return lp + lnl
 
 
-def prior_transform_dynesty(u, star, prior_dict, coordinator):
+def prior_transform_dynesty(u, star, prior_dict, coordinator, use_norm):
     """Transform the prior from the unit cube to the parameter space."""
     u2 = sp.array(u)
+    if use_norm:
+        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+    else:
+        order = sp.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
+        )
 
     i = 0
     for fixed, par in zip(coordinator, order):
@@ -180,8 +203,14 @@ def prior_transform_dynesty(u, star, prior_dict, coordinator):
     return u2
 
 
-def prior_transform_multinest(u, star, prior_dict, coordinator):
+def prior_transform_multinest(u, star, prior_dict, coordinator, use_norm):
     """Transform the prior from the unit cube to the parameter space."""
+    if use_norm:
+        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+    else:
+        order = sp.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
+        )
     i = 0
     for fixed, par in zip(coordinator, order):
         if fixed:
