@@ -1,9 +1,31 @@
 """Error handling module."""
+import sys
 
 
 class Error(Exception):
     """Base class for exceptions in this module."""
 
+    def __repr__(self):
+        """Error identification for logging."""
+        return self.errorname
+
+    def __str__(self):
+        """Error identification for logging."""
+        return self.errorname
+
+    def raise_(self):
+        """Raise an exception and print the error message."""
+        try:
+            raise self
+        except Error:
+            self.warn()
+            sys.exit()
+
+    def warn(self):
+        """Print error message."""
+        print('An exception was catched!', end=': ')
+        print(self, end='\nError message: ')
+        print(self.message)
     pass
 
 
@@ -18,6 +40,7 @@ class InputError(Error):
     """
 
     def __init__(self, expression, message):
+        self.errorname = 'InputError'
         self.expression = expression
         self.message = message
 
@@ -34,9 +57,10 @@ class InstanceError(Error):
     """
 
     def __init__(self, in_inst, exp_inst):
-        self.in_inst = in_inst
-        self.exp_inst = exp_inst
-        self.message = 'Input object is an instance of ' + in_inst.__class__
+        self.errorname = 'InstanceError'
+        self.in_inst = in_inst.__repr__()
+        self.exp_inst = exp_inst.__repr__()
+        self.message = 'Input object is an instance of ' + in_inst
         self.message += ' expected class is ' + exp_inst
 
 
@@ -57,6 +81,9 @@ class PriorError(Error):
     """
 
     def __init__(self, par, type):
+        self.errorname = 'PriorError'
+        self.par = par
+        self.type = type
         self.message = 'Parameter ' + par
         if type == 0:
             self.message += " isn't recognized. The allowed parameters are: "
