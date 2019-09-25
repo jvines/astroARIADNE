@@ -22,10 +22,6 @@ from sed_library import *
 from Star import *
 from utils import *
 
-order = sp.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation'])
-with closing(open('interpolations.pkl', 'rb')) as intp:
-    interpolators = pickle.load(intp)
-
 
 class SEDPlotter:
 
@@ -56,17 +52,36 @@ class SEDPlotter:
         self.star = out['star']
         self.coordinator = out['coordinator']
         self.fixed = out['fixed']
+        self.norm = out['norm']
+        self.grid = out['model_grid']
+
+        if not self.norm:
+            self.order = sp.array(
+                [
+                    'teff', 'logg', 'z',
+                    'dist', 'rad', 'Av',
+                    'inflation'
+                ]
+            )
+        else:
+            self.order = sp.array(
+                ['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+
+        if self.grid == 'phoenix':
+            with closing(open('interpolations.pkl', 'rb')) as intp:
+                self.interpolators = pickle.load(intp)
 
         # Get best fit parameters.
-        theta = sp.zeros(order.shape[0])
-        for i, param in enumerate(order):
+        theta = sp.zeros(self.order.shape[0])
+        for i, param in enumerate(self.order):
             if param != 'likelihood':
                 theta[i] = out['best_fit'][param]
         self.theta = theta
         # self.theta = build_params(theta, self.coordinator, self.fixed)
 
         # Calculate best fit model.
-        self.model = model_grid(self.theta, self.star, interpolators)
+        self.model = model_grid(self.theta, self.star,
+                                self.interpolators, self.norm)
 
         # Get archival fluxes.
         self.__extract_info()
@@ -107,7 +122,8 @@ class SEDPlotter:
         ymax = (self.flux * self.wave).max()
 
         # Get models residuals
-        residuals, errors = get_residuals(self.theta, self.star, interpolators)
+        residuals, errors = get_residuals(
+            self.theta, self.star, self.interpolators, self.norm)
 
         # resdiuals = residuals / errors
         norm_res = residuals / errors
@@ -121,7 +137,7 @@ class SEDPlotter:
         ax_r = f.add_subplot(gs[1])
 
         # SED plot.
-        if True:
+        if False:
             Rv = 3.1  # For extinction.
             rad = self.theta[4]
             dist = self.theta[3] * u.pc.to(u.solRad)
@@ -253,9 +269,8 @@ class SEDPlotter:
     def plot_chains(self):
         """Plot SED chains."""
         samples = self.out['posterior_samples']
-        for i, param in enumerate(order):
+        for i, param in enumerate(self.order):
             if not self.coordinator[i]:
-                mx_prob = sp.argmax(samples['loglike'])
                 f, ax = plt.subplots(figsize=(12, 4))
                 ax.step(range(len(samples[param])), samples[param],
                         color='k', alpha=0.8)
@@ -267,7 +282,7 @@ class SEDPlotter:
                               fontsize=self.fontsize,
                               fontname=self.fontname
                               )
-                ax.axhline(samples[param][mx_prob], color='red', lw=2)
+                ax.axhline(sp.median(samples[param]), color='red', lw=2)
                 ax.tick_params(
                     axis='both', which='major',
                     labelsize=self.tick_labelsize
@@ -279,12 +294,11 @@ class SEDPlotter:
     def plot_like(self):
         """Plot Likelihoods."""
         samples = self.out['posterior_samples']
-        for i, param in enumerate(order):
+        for i, param in enumerate(self.order):
             if not self.coordinator[i]:
-                mx_prob = sp.argmax(samples['loglike'])
                 f, ax = plt.subplots(figsize=(12, 4))
                 ax.scatter(samples[param], samples['loglike'], alpha=0.5, s=40)
-                ax.axvline(samples[param][mx_prob], color='red', lw=1.5)
+                ax.axvline(sp.median(samples[param]), color='red', lw=1.5)
                 ax.set_ylabel('log likelihood',
                               fontsize=self.fontsize,
                               fontname=self.fontname
@@ -309,9 +323,9 @@ class SEDPlotter:
         theta_up = []
 
         theta = self.theta[self.coordinator == 0]
-        used_params = order[self.coordinator == 0]
+        used_params = self.order[self.coordinator == 0]
 
-        for i, param in enumerate(order):
+        for i, param in enumerate(self.order):
             if not self.coordinator[i]:
                 _, lo, up = credibility_interval(
                     samples[param])
