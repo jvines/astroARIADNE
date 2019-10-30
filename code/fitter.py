@@ -12,6 +12,7 @@ import astropy.units as u
 import scipy as sp
 import scipy.stats as st
 from tabulate import tabulate
+from scipy.stats import gaussian_kde
 
 import dynesty
 import Star
@@ -124,11 +125,18 @@ class Fitter:
 
     @grid.setter
     def grid(self, grid):
-        # TODO: change the interpolators name to the respective model grid.
-        assert grid == 'phoenix', 'The only available grid is Phoenix v2.'
+        assert type(grid) == str
         self._grid = grid
-        if grid == 'phoenix':
-            with closing(open('interpolations.pkl', 'rb')) as intp:
+        if grid.lower() == 'phoenix':
+            # with closing(open('interpolations.pkl', 'rb')) as intp:
+            #     self._interpolators = pickle.load(intp)
+            with closing(open('interpolations_Phoenix.pkl', 'rb')) as intp:
+                self._interpolators = pickle.load(intp)
+        if grid.lower() == 'btsettl':
+            with closing(open('interpolations_BTSettl.pkl', 'rb')) as intp:
+                self._interpolators = pickle.load(intp)
+        if grid.lower() == 'ck04':
+            with closing(open('interpolations_CK04.pkl', 'rb')) as intp:
                 self._interpolators = pickle.load(intp)
 
     @property
@@ -214,6 +222,8 @@ class Fitter:
         star = self.star
         interpolators = self._interpolators
         use_norm = self.norm
+        self.bayes_factor = 5
+        self.n_samples = 10000
 
         # Declare order of parameters.
         if not self.norm:
@@ -415,7 +425,8 @@ class Fitter:
                         queue_size=self._threads - 1
                     )
                     sampler.run_nested(dlogz_init=self._dlogz,
-                                       nlive_init=self._nlive)
+                                       nlive_init=self._nlive,
+                                       wt_kwargs={'pfrac': .95})
             else:
                 sampler = dynesty.DynamicNestedSampler(
                     dynesty_log_like, pt_dynesty, self.ndim,
@@ -423,7 +434,8 @@ class Fitter:
 
                 )
                 sampler.run_nested(dlogz_init=self._dlogz,
-                                   nlive_init=self._nlive)
+                                   nlive_init=self._nlive,
+                                   wt_kwargs={'pfrac': .95})
         else:
             if self._threads > 1:
                 with closing(Pool(self._threads)) as executor:
@@ -451,12 +463,13 @@ class Fitter:
         Saves a dictionary as a pickle file. The dictionary contains the
         following:
 
-        lnZ : The global evidence
-        lnZerr : The global evidence error
+        lnZ : The global evidence.
+        lnZerr : The global evidence error.
         posterior_samples : A dictionary containing the samples of each
-                            parameter (even if it's fixed) and the
-                            log likelihood for each set of sampled parameters.
-        fixed : An array with the fixed parameter values
+                            parameter (even if it's fixed), the evidence,
+                            log likelihood, the prior, and the posterior
+                            for each set of sampled parameters.
+        fixed : An array with the fixed parameter values.
         coordinator : An array with the status of each parameter (1 for fixed
                       0 for free)
         best_fit : The best fit is chosen to be the median of each sample.
@@ -478,9 +491,13 @@ class Fitter:
         else:
             lnz, lnzer, posterior_samples = self.dynesty_results(results)
 
-        out['lnZ'] = lnz
-        out['lnZerr'] = lnzer
+        # Save global evidence
+        if self._engine == 'dynesty':
+            out['dynesty'] = results
+        out['global_lnZ'] = lnz
+        out['global_lnZerr'] = lnzer
 
+        # Create raw samples holder
         out['posterior_samples'] = dict()
         j = 0
         for i, param in enumerate(order):
@@ -490,24 +507,50 @@ class Fitter:
             else:
                 out['posterior_samples'][param] = self.fixed[i]
         out['posterior_samples']['loglike'] = sp.zeros(
-            posterior_samples.shape[0])
+            posterior_samples.shape[0]
+        )
+        out['posterior_samples']['priors'] = sp.zeros(
+            posterior_samples.shape[0]
+        )
+        out['posterior_samples']['posteriors'] = sp.zeros(
+            posterior_samples.shape[0]
+        )
         for i in range(posterior_samples.shape[0]):
             theta = build_params(
                 posterior_samples[i, :], coordinator, fixed, self.norm)
             out['posterior_samples']['loglike'][i] = log_likelihood(
                 theta, self.star, interpolators, self.norm)
+            out['posterior_samples']['priors'][i] = log_prior(
+                theta, self.star, self.priors, self.coordinator, self.norm)
+        lnlike = out['posterior_samples']['loglike']
+        lnprior = out['posterior_samples']['priors']
+        out['posterior_samples']['posteriors'] = (lnlike + lnprior) - lnz
+
+        # Misc
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
+
+        # Best fit
+        # The logic is as follows:
+        # Calculate KDE for each marginalized posterior distributions
+        # Find peak
+        # peak is best fit.
         out['best_fit'] = dict()
         best_theta = sp.zeros(order.shape[0])
         j = 0
         for i, param in enumerate(order):
             if not self.coordinator[i]:
-                out['posterior_samples'][param] = posterior_samples[:, j]
-                out['best_fit'][param] = sp.median(posterior_samples[:, j])
+                samp = out['posterior_samples'][param]
+                kde = gaussian_kde(samp)
+                xmin = samp.min()
+                xmax = samp.max()
+                xx = sp.linspace(xmin, xmax, 100000)
+                kde = kde(xx)
+                best = xx[kde.argmax()]
+                out['best_fit'][param] = best
                 logdat += param + \
-                    '\t{:.4f}\t'.format(sp.median(posterior_samples[:, j]))
-                _, lo, up = credibility_interval(posterior_samples[:, j])
+                    '\t{:.4f}\t'.format(best)
+                _, lo, up = credibility_interval(samp)
                 logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
                 j += 1
             else:
@@ -515,8 +558,15 @@ class Fitter:
                 logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
                 logdat += 'FIXED\n'
             best_theta[i] = out['best_fit'][param]
-        out['best_fit']['likelihood'] = log_likelihood(
+
+        out['best_fit']['loglike'] = log_likelihood(
             best_theta, self.star, interpolators, self.norm)
+        out['best_fit']['prior'] = log_prior(
+            best_theta, self.star, self.priors, self.coordinator, self.norm)
+        lnlike = out['best_fit']['loglike']
+        lnprior = out['best_fit']['prior']
+        out['best_fit']['posterior'] = (lnlike + lnprior) - lnz
+
         out['star'] = self.star
         out['engine'] = self._engine
         out['norm'] = self.norm
