@@ -198,8 +198,8 @@ class Librarian:
         try:
             plx = catalog['parallax'][0]
             plx_e = catalog['parallax_error'][0]
-            self.plx = plx + 0.08  # offset stassusn torres 18
-            self.plx_e = 2 * plx_e
+            self.plx = plx - 0.082  # offset stassusn torres 18
+            self.plx_e = plx_e
 
             if self.verbose:
                 print('Parallax found!\nParallax value', end=': ')
@@ -226,7 +226,7 @@ class Librarian:
             e_lo = rad - rad_lower
             rad_e = max([e_up, e_lo])
             self.rad = rad
-            self.rad_e = 2 * rad_e
+            self.rad_e = rad_e
 
             if self.verbose:
                 print('Radius found!\nRadius value', end=': ')
@@ -249,7 +249,7 @@ class Librarian:
             e_lo = temp - temp_lower
             temp_e = max([e_up, e_lo])
             self.temp = temp
-            self.temp_e = 2 * temp_e
+            self.temp_e = temp_e
             if self.verbose:
                 print('Teff found!\nTeff value', end=': ')
                 print(self.temp, end=' +- ')
@@ -275,7 +275,7 @@ class Librarian:
             e_lo = lum - lum_lower
             lum_e = max([e_up, e_lo])
             self.lum = lum
-            self.lum_e = 2 * lum_e
+            self.lum_e = lum_e
             if self.verbose:
                 print('Luminosity found!\nLuminosity value', end=': ')
                 print(self.lum, end=' +- ')
