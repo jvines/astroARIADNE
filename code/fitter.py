@@ -50,6 +50,7 @@ class Fitter:
         self.grid = 'phoenix'
         self.estimate_logg = False
         self.priorfile = None
+        self.av_law = 'fitzpatrick'
 
     @property
     def star(self):
@@ -206,6 +207,38 @@ class Fitter:
             InputError(out_folder, err_msg).raise_()
         self._out_folder = out_folder
 
+    @property
+    def av_law(self):
+        """Select extinction law."""
+        return self._av_law
+
+    @av_law.setter
+    def av_law(self, law):
+        laws = [
+            'cardelli',
+            'odonnell',
+            'calzetti',
+            'fitzpatrick'
+        ]
+        law = law.lower()
+        if law not in laws:
+            err_msg = 'Extinction law {} not recognized. Available extinction'
+            err_msg += ' laws are: `cardelli`, `odonnell`'
+            err_msg += ', `calzetti`, and `fitzpatrick`'
+            err_msg.format(law)
+            InputError(law, err_msg).__raise__()
+        import extinction
+        law_f = None
+        if law == laws[0]:
+            law_f = extinction.ccm89
+        if law == laws[1]:
+            law_f = extinction.odonnell94
+        if law == laws[2]:
+            law_f = extinction.calzetti00
+        if law == laws[3]:
+            law_f = extinction.fitzpatrick99
+        self._av_law = law_f
+
     def initialize(self):
         """Initialize the fitter.
 
@@ -215,7 +248,7 @@ class Fitter:
         up global variables.
         """
         global prior_dict, coordinator, fixed, order, interpolators, star
-        global use_norm
+        global use_norm, av_law
         err_msg = 'No star is detected. Please create an instance of Star.'
         if self.star is None:
             InputError(self.star, err_msg).raise_()
@@ -224,6 +257,7 @@ class Fitter:
         use_norm = self.norm
         self.bayes_factor = 5
         self.n_samples = 10000
+        av_law = self._av_law
 
         # Declare order of parameters.
         if not self.norm:
@@ -519,7 +553,7 @@ class Fitter:
             theta = build_params(
                 posterior_samples[i, :], coordinator, fixed, self.norm)
             out['posterior_samples']['loglike'][i] = log_likelihood(
-                theta, self.star, interpolators, self.norm)
+                theta, self.star, interpolators, self.norm, av_law)
             out['posterior_samples']['priors'][i] = log_prior(
                 theta, self.star, self.priors, self.coordinator, self.norm)
         lnlike = out['posterior_samples']['loglike']
@@ -560,7 +594,7 @@ class Fitter:
             best_theta[i] = out['best_fit'][param]
 
         out['best_fit']['loglike'] = log_likelihood(
-            best_theta, self.star, interpolators, self.norm)
+            best_theta, self.star, interpolators, self.norm, av_law)
         out['best_fit']['prior'] = log_prior(
             best_theta, self.star, self.priors, self.coordinator, self.norm)
         lnlike = out['best_fit']['loglike']
@@ -571,6 +605,7 @@ class Fitter:
         out['engine'] = self._engine
         out['norm'] = self.norm
         out['model_grid'] = self.grid
+        out['av_law'] = av_law
         with closing(open(log_out, 'w')) as logfile:
             logfile.write(logdat)
         pickle.dump(out, open(out_file, 'wb'))
@@ -600,7 +635,7 @@ class Fitter:
 def dynesty_log_like(cube):
     """Dynesty log likelihood wrapper."""
     theta = build_params(cube, coordinator, fixed, use_norm)
-    return log_likelihood(theta, star, interpolators, use_norm)
+    return log_likelihood(theta, star, interpolators, use_norm, av_law)
 
 
 def pt_dynesty(cube):

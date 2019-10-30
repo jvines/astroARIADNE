@@ -59,6 +59,7 @@ class SEDPlotter:
         self.fixed = out['fixed']
         self.norm = out['norm']
         self.grid = out['model_grid']
+        self.av_law = out['av_law']
 
         self.star.load_grid(model)
 
@@ -94,7 +95,7 @@ class SEDPlotter:
 
         # Calculate best fit model.
         self.model = model_grid(self.theta, self.star,
-                                self.interpolators, self.norm)
+                                self.interpolators, self.norm, self.av_law)
 
         # Get archival fluxes.
         self.__extract_info()
@@ -136,7 +137,7 @@ class SEDPlotter:
 
         # Get models residuals
         residuals, errors = get_residuals(
-            self.theta, self.star, self.interpolators, self.norm)
+            self.theta, self.star, self.interpolators, self.norm, self.av_law)
 
         # resdiuals = residuals / errors
         norm_res = residuals / errors
@@ -150,7 +151,7 @@ class SEDPlotter:
         ax_r = f.add_subplot(gs[1])
 
         # SED plot.
-        if True:
+        if False:
             Rv = 3.1  # For extinction.
             rad = self.theta[4]
             dist = self.theta[3] * u.pc.to(u.solRad)

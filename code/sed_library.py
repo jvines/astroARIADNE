@@ -2,7 +2,7 @@
 
 import astropy.units as u
 import scipy as sp
-from extinction import apply, fitzpatrick99
+from extinction import apply
 from scipy.special import ndtr
 
 from phot_utils import *
@@ -59,7 +59,7 @@ def get_interpolated_flux(temp, logg, z, star, interpolators):
     return flux
 
 
-def model_grid(theta, star, interpolators, use_norm):
+def model_grid(theta, star, interpolators, use_norm, av_law):
     """Return the model grid in the selected filters.
 
     Parameters:
@@ -97,7 +97,7 @@ def model_grid(theta, star, interpolators, use_norm):
     flux = get_interpolated_flux(teff, logg, z, star, interpolators)
 
     wav = star.wave[mask] * 1e4
-    ext = fitzpatrick99(wav, Av, Rv)
+    ext = av_law(wav, Av, Rv)
     if use_norm:
         model = apply(ext, flux) * norm
     else:
@@ -105,9 +105,9 @@ def model_grid(theta, star, interpolators, use_norm):
     return model
 
 
-def get_residuals(theta, star, interpolators, use_norm):
+def get_residuals(theta, star, interpolators, use_norm, av_law):
     """Calculate residuals of the model."""
-    model = model_grid(theta, star, interpolators, use_norm)
+    model = model_grid(theta, star, interpolators, use_norm, av_law)
     inflation = theta[-1]
     mask = star.filter_mask
     residuals = model - star.flux[mask]
@@ -136,7 +136,7 @@ def log_prior(theta, star, prior_dict, coordinator, use_norm):
                 return -sp.inf
             try:
                 lp += prior_dict['logg'].pdf(theta[i])
-            except TypeError:
+            except AttributeError:
                 with closing(open('../Datafiles/logg_kde.pkl', 'rb')) as jar:
                     prior = pickle.load(jar)['logg']
                 lp += prior(theta[i])
@@ -167,12 +167,12 @@ def log_prior(theta, star, prior_dict, coordinator, use_norm):
     return lp
 
 
-def log_likelihood(theta, star, interpolators, use_norm):
+def log_likelihood(theta, star, interpolators, use_norm, av_law):
     """Calculate log likelihood of the model."""
-    residuals, errs = get_residuals(theta, star, interpolators, use_norm)
+    res, ers = get_residuals(theta, star, interpolators, use_norm, av_law)
 
-    c = sp.log(2 * sp.pi * errs ** 2)
-    lnl = (c + (residuals ** 2 / errs ** 2)).sum()
+    c = sp.log(2 * sp.pi * ers ** 2)
+    lnl = (c + (res ** 2 / ers ** 2)).sum()
 
     if sp.isnan(lnl):
         return -sp.inf
