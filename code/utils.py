@@ -128,11 +128,11 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
     theta = sp.zeros(order.shape[0])
     for i, param in enumerate(order):
-        if param != 'likelihood':
+        if param != 'loglike':
             theta[i] = out['best_fit'][param]
     uncert = []
-    lglk = out['best_fit']['likelihood']
-    z, z_err = out['lnZ'], out['lnZerr']
+    lglk = out['best_fit']['loglike']
+    z, z_err = out['global_lnZ'], out['global_lnZerr']
     for i, param in enumerate(order):
         if not coordinator[i]:
             _, lo, up = credibility_interval(
