@@ -1,3 +1,4 @@
+# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """Star.py contains the Star class which contains the data regarding a star."""
 
 import pickle
@@ -144,7 +145,8 @@ class Star:
         'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
         'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
-        'WISE_RSR_W1', 'WISE_RSR_W2', 'GALEX_FUV', 'GALEX_NUV'
+        'WISE_RSR_W1', 'WISE_RSR_W2',
+        'GALEX_FUV', 'GALEX_NUV'
     ])
 
     def __init__(self, starname, ra, dec,
@@ -178,16 +180,6 @@ class Star:
         self.get_temp = get_temp if temp is None else False
         self.get_lum = get_lum if lum is None else False
         self.get_mags = True if mag_dict is None else False
-
-        # Grid stuff
-        self.full_grid = sp.loadtxt('../Datafiles/model_grid_fix.dat')
-        self.teff = self.full_grid[:, 0]
-        self.logg = self.full_grid[:, 1]
-        self.z = self.full_grid[:, 2]
-        self.model_grid = dict()
-
-        # Create the grid to interpolate later.
-        grid = sp.vstack((self.teff, self.logg, self.z)).T
 
         # Star stuff
         self.starname = starname
@@ -268,7 +260,24 @@ class Star:
         self.dec = c.dec.deg
         pass
 
-    def interpolate(self):
+    def load_grid(self, model):
+        """Load the model grid for interpolation."""
+        # Grid stuff
+        # self.full_grid = sp.loadtxt('../Datafiles/model_grid_fix.dat')
+        if model.lower() == 'phoenix':
+            gridname = 'model_grid_Phoenixv2.dat'
+        if model.lower() == 'btsettl':
+            gridname = 'model_grid_BT_Settl.dat'
+        if model.lower() == 'ck04':
+            gridname = 'model_grid_CK04.dat'
+        self.full_grid = sp.loadtxt(gridname)
+        self.teff = self.full_grid[:, 0]
+        self.logg = self.full_grid[:, 1]
+        self.z = self.full_grid[:, 2]
+        if self.verbose:
+            print('Grid ' + model + ' loaded.')
+
+    def interpolate(self, out_name):
         """Create interpolation grids for later evaluation."""
         if self.verbose:
             print('Interpolating grids for filters:')
@@ -292,7 +301,7 @@ class Star:
             filt_idx = sp.where(f == self.filter_names)[0]
             interpolators[filt_idx] = RegularGridInterpolator(
                 (ut, ug, uz), cube, bounds_error=False)
-        with closing(open('interpolations.pkl', 'wb')) as jar:
+        with closing(open(out_name + '.pkl', 'wb')) as jar:
             pickle.dump(interpolators, jar)
 
     def get_interpolated_flux(self, temp, logg, z, filt):
