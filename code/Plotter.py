@@ -17,6 +17,7 @@ from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
 
 import corner
+from dynesty import plotting as dyplot
 from phot_utils import *
 from sed_library import *
 from Star import *
@@ -27,7 +28,8 @@ class SEDPlotter:
 
     wav_file = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
-    def __init__(self, input_files, out_folder, pdf=False, png=True):
+    def __init__(self, input_files, out_folder, pdf=False, png=True,
+                 model='phoenix'):
         # TODO: read settings file.
         # General setup
         self.pdf = pdf
@@ -36,14 +38,17 @@ class SEDPlotter:
         # Create target folders
         chains = out_folder + '/chains'
         likelihoods = out_folder + '/likelihoods'
+        posteriors = out_folder + '/posteriors'
         create_dir(out_folder)
         create_dir(chains)
         create_dir(likelihoods)
+        create_dir(posteriors)
 
         self.out_folder = out_folder
         self.chain_out = chains
         self.like_out = likelihoods
-        self.hdd = '/Volumes/JVines_ext/PHOENIXv2/'
+        self.post_out = posteriors
+        self.hdd = '/Volumes/JVines_ext/StellarAtmosphereModels/PHOENIXv2/'
 
         # Read output files.
         out = pickle.load(open(input_files, 'rb'))
@@ -54,6 +59,8 @@ class SEDPlotter:
         self.fixed = out['fixed']
         self.norm = out['norm']
         self.grid = out['model_grid']
+
+        self.star.load_grid(model)
 
         if not self.norm:
             self.order = sp.array(
@@ -67,8 +74,14 @@ class SEDPlotter:
             self.order = sp.array(
                 ['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
 
-        if self.grid == 'phoenix':
-            with closing(open('interpolations.pkl', 'rb')) as intp:
+        if self.grid.lower() == 'phoenix':
+            with closing(open('interpolations_Phoenix.pkl', 'rb')) as intp:
+                self.interpolators = pickle.load(intp)
+        if self.grid.lower() == 'btsettl':
+            with closing(open('interpolations_BTSettl.pkl', 'rb')) as intp:
+                self.interpolators = pickle.load(intp)
+        if self.grid.lower() == 'ck04':
+            with closing(open('interpolations_CK04.pkl', 'rb')) as intp:
                 self.interpolators = pickle.load(intp)
 
         # Get best fit parameters.
@@ -137,7 +150,7 @@ class SEDPlotter:
         ax_r = f.add_subplot(gs[1])
 
         # SED plot.
-        if False:
+        if True:
             Rv = 3.1  # For extinction.
             rad = self.theta[4]
             dist = self.theta[3] * u.pc.to(u.solRad)
@@ -282,13 +295,16 @@ class SEDPlotter:
                               fontsize=self.fontsize,
                               fontname=self.fontname
                               )
-                ax.axhline(sp.median(samples[param]), color='red', lw=2)
+                best = self.out['best_fit'][param]
+                # ax.axhline(sp.median(samples[param]), color='red', lw=2)
+                ax.axhline(best, color='red', lw=2)
                 ax.tick_params(
                     axis='both', which='major',
                     labelsize=self.tick_labelsize
                 )
                 plt.savefig(self.chain_out + '/' + param +
                             '.png', bbox_inches='tight')
+        plt.close('all')
         pass
 
     def plot_like(self):
@@ -298,7 +314,9 @@ class SEDPlotter:
             if not self.coordinator[i]:
                 f, ax = plt.subplots(figsize=(12, 4))
                 ax.scatter(samples[param], samples['loglike'], alpha=0.5, s=40)
-                ax.axvline(sp.median(samples[param]), color='red', lw=1.5)
+                best = self.out['best_fit'][param]
+                # ax.axvline(sp.median(samples[param]), color='red', lw=1.5)
+                ax.axvline(best, color='red', lw=1.5)
                 ax.set_ylabel('log likelihood',
                               fontsize=self.fontsize,
                               fontname=self.fontname
@@ -313,6 +331,42 @@ class SEDPlotter:
                 )
                 plt.savefig(self.like_out + '/' + param + '.png',
                             bbox_inches='tight')
+        plt.close('all')
+        if self.engine == 'dynesty':
+            fig, axes = dyplot.traceplot(
+                self.out['dynesty'],
+                truths=self.theta,
+                show_titles=True, trace_cmap='plasma',
+            )
+            plt.savefig(self.like_out + '/dynesty_trace.png')
+        pass
+
+    def plot_post(self):
+        """Plot posteriors."""
+        samples = self.out['posterior_samples']
+        for i, param in enumerate(self.order):
+            if not self.coordinator[i]:
+                f, ax = plt.subplots(figsize=(12, 4))
+                ax.scatter(samples[param], samples['posteriors'], alpha=0.5,
+                           s=40)
+                best = self.out['best_fit'][param]
+                # ax.axvline(sp.median(samples[param]), color='red', lw=1.5)
+                ax.axvline(best, color='red', lw=1.5)
+                ax.set_ylabel('log posterior',
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+                ax.set_xlabel(param,
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+                ax.tick_params(
+                    axis='both', which='major',
+                    labelsize=self.tick_labelsize
+                )
+                plt.savefig(self.post_out + '/' + param + '.png',
+                            bbox_inches='tight')
+        plt.close('all')
         pass
 
     def plot_corner(self):
