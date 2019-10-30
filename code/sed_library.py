@@ -116,33 +116,53 @@ def get_residuals(theta, star, interpolators, use_norm):
     return residuals, errs
 
 
-def log_prior(theta, prior_dict, coordinator):
+def log_prior(theta, star, prior_dict, coordinator, use_norm):
     """Calculate prior."""
     # DEPRECATED
-    teff, logg, z, dist, rad, Av, inflation = theta
+    if use_norm:
+        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+    else:
+        order = sp.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
+        )
+
     lp = 0
-
-    if not 2300 <= teff <= 12000:
-        return -sp.inf
-    if not -4 < logg <= 6:
-        return -sp.inf
-    if not -4 <= z <= 1:
-        return -sp.inf
-    if not 1 < dist <= 1500:
-        return -sp.inf
-    if not 0 < rad <= 15:
-        return -sp.inf
-    if not 0 < Av < .032:
-        return -sp.inf
-    if not 0 < inflation < 5:
-        return -sp.inf
-
-    lp += sp.log(prior_dict['teff'].pdf(teff))
-    lp += sp.log(prior_dict['logg'].pdf(logg))
-    lp += sp.log(prior_dict['z'].pdf(z))
-    lp += sp.log(prior_dict['dist'].pdf(dist))
-    lp += sp.log(prior_dict['rad'].pdf(rad))
-    lp += sp.log(prior_dict['Av'].pdf(Av))
+    i = 0
+    for fixed, par in zip(coordinator, order):
+        if fixed:
+            continue
+        if par == 'logg':
+            if not 0 <= theta[i] <= 5:
+                return -sp.inf
+            try:
+                lp += prior_dict['logg'].pdf(theta[i])
+            except TypeError:
+                with closing(open('../Datafiles/logg_kde.pkl', 'rb')) as jar:
+                    prior = pickle.load(jar)['logg']
+                lp += prior(theta[i])
+            i += 1
+            continue
+        if par == 'teff':
+            if not 3500 <= theta[i] <= 12000:
+                return -sp.inf
+            lp += prior_dict['teff'].pdf(
+                theta[i]) if star.get_temp else prior_dict['teff'](theta[i])
+            i += 1
+            continue
+        if par == 'z' and not (-1 <= theta[i] <= 1):
+            return -sp.inf
+        if par == 'dist' and not (1 <= theta[i]):
+            return -sp.inf
+        if par == 'rad' and not (0 < theta[i]):
+            return -sp.inf
+        if par == 'norm' and not (theta[i] < 0):
+            return -sp.inf
+        if par == 'Av' and not (0 <= theta[i] <= star.Av):
+            return -sp.inf
+        if par == 'inflation' and not (0 <= theta[i] <= 5):
+            return -sp.inf
+        lp += prior_dict[par].pdf(theta[i])
+        i += 1
 
     return lp
 
