@@ -198,7 +198,7 @@ class Librarian:
         try:
             plx = catalog['parallax'][0]
             plx_e = catalog['parallax_error'][0]
-            self.plx = plx - 0.082  # offset stassusn torres 18
+            self.plx = plx + 0.082  # offset stassusn torres 18
             self.plx_e = plx_e
 
             if self.verbose:
