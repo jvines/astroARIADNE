@@ -527,12 +527,14 @@ class Fitter:
             lnz, lnzer, posterior_samples = self.dynesty_results(results)
 
         # Save global evidence
+
         if self._engine == 'dynesty':
             out['dynesty'] = results
         out['global_lnZ'] = lnz
         out['global_lnZerr'] = lnzer
 
         # Create raw samples holder
+
         out['posterior_samples'] = dict()
         j = 0
         for i, param in enumerate(order):
@@ -541,7 +543,9 @@ class Fitter:
                 j += 1
             else:
                 out['posterior_samples'][param] = self.fixed[i]
+
         # Save loglike, priors and posteriors.
+
         out['posterior_samples']['loglike'] = sp.zeros(
             posterior_samples.shape[0]
         )
@@ -553,6 +557,7 @@ class Fitter:
         )
 
         # If normalization constant was fitted, create a distribution of radii.
+
         if use_norm:
             rad = self._get_rad(
                 out['posterior_samples']['norm'], star.dist, star.dist_e
@@ -560,6 +565,7 @@ class Fitter:
             out['posterior_samples']['rad'] = rad
 
         # Create a distribution of masses.
+
         logg_samp = out['posterior_samples']['logg']
         rad_samp = out['posterior_samples']['rad']
         mass_samp = self._get_mass(logg_samp, rad_samp)
@@ -576,16 +582,12 @@ class Fitter:
         lnprior = out['posterior_samples']['priors']
         out['posterior_samples']['posteriors'] = (lnlike + lnprior) - lnz
 
-        # Misc
-        out['fixed'] = self.fixed
-        out['coordinator'] = self.coordinator
-
-        # --------------------------------------------------------------- #
         # Best fit
         # The logic is as follows:
         # Calculate KDE for each marginalized posterior distributions
         # Find peak
         # peak is best fit.
+
         out['best_fit'] = dict()
         best_theta = sp.zeros(order.shape[0])
         j = 0
@@ -611,7 +613,9 @@ class Fitter:
                 logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
                 logdat += '(FIXED)\n'
             best_theta[i] = out['best_fit'][param]
+
         # Add derived mass to best fit dictionary.
+
         samp = out['posterior_samples']['mass']
         best = self._get_max_from_kde(samp)
         out['best_fit']['mass'] = best
@@ -629,8 +633,10 @@ class Fitter:
         lnprior = out['best_fit']['prior']
         out['best_fit']['posterior'] = (lnlike + lnprior) - lnz
 
-        # --------------------------------------------------------------- #
+        # Utilities for plotting.
 
+        out['fixed'] = self.fixed
+        out['coordinator'] = self.coordinator
         out['star'] = self.star
         out['engine'] = self._engine
         out['norm'] = self.norm
