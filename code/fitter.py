@@ -11,8 +11,8 @@ from multiprocessing import Pool, cpu_count
 import astropy.units as u
 import scipy as sp
 import scipy.stats as st
-from tabulate import tabulate
 from scipy.stats import gaussian_kde
+from tabulate import tabulate
 
 import dynesty
 import Star
@@ -26,7 +26,7 @@ from utils import *
 try:
     from isochrones import SingleStarModel, get_ichrone
 except ModuleNotFoundError:
-    wrn = 'Isochrones package not found. Mass, Age, and log g estimation '
+    wrn = 'Isochrones package not found. log g estimation '
     wrn += 'unavaliable'
     warnings.warn(wrn)
 try:
@@ -255,8 +255,9 @@ class Fitter:
         star = self.star
         interpolators = self._interpolators
         use_norm = self.norm
-        self.bayes_factor = 5
+        # To use with BMA
         self.n_samples = 10000
+        # Extinction law
         av_law = self._av_law
 
         # Declare order of parameters.
@@ -322,7 +323,7 @@ class Fitter:
                              0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0])
             mags = self.star.mags[mask == 1]
             mags_e = self.star.mag_errs[mask == 1]
-            bands = ['H', 'J', 'Ks', 'G', 'RP', 'BP', 'W1', 'W2']
+            bands = ['H', 'J', 'K', 'G', 'RP', 'BP', 'W1', 'W2']
             used_bands = []
             for m, e, b in zip(mags, mags_e, bands):
                 if m != 0:
@@ -540,6 +541,7 @@ class Fitter:
                 j += 1
             else:
                 out['posterior_samples'][param] = self.fixed[i]
+        # Save loglike, priors and posteriors.
         out['posterior_samples']['loglike'] = sp.zeros(
             posterior_samples.shape[0]
         )
@@ -549,6 +551,20 @@ class Fitter:
         out['posterior_samples']['posteriors'] = sp.zeros(
             posterior_samples.shape[0]
         )
+
+        # If normalization constant was fitted, create a distribution of radii.
+        if use_norm:
+            rad = self._get_rad(
+                out['posterior_samples']['norm'], star.dist, star.dist_e
+            )
+            out['posterior_samples']['rad'] = rad
+
+        # Create a distribution of masses.
+        logg_samp = out['posterior_samples']['logg']
+        rad_samp = out['posterior_samples']['rad']
+        mass_samp = self._get_mass(logg_samp, rad_samp)
+        out['posterior_samples']['mass'] = mass_samp
+
         for i in range(posterior_samples.shape[0]):
             theta = build_params(
                 posterior_samples[i, :], coordinator, fixed, self.norm)
@@ -564,6 +580,7 @@ class Fitter:
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
 
+        # --------------------------------------------------------------- #
         # Best fit
         # The logic is as follows:
         # Calculate KDE for each marginalized posterior distributions
@@ -575,23 +592,34 @@ class Fitter:
         for i, param in enumerate(order):
             if not self.coordinator[i]:
                 samp = out['posterior_samples'][param]
-                kde = gaussian_kde(samp)
-                xmin = samp.min()
-                xmax = samp.max()
-                xx = sp.linspace(xmin, xmax, 100000)
-                kde = kde(xx)
-                best = xx[kde.argmax()]
+                best = self._get_max_from_kde(samp)
                 out['best_fit'][param] = best
                 logdat += param + \
                     '\t{:.4f}\t'.format(best)
                 _, lo, up = credibility_interval(samp)
                 logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
                 j += 1
+            if param == 'norm':
+                samp = out['posterior_samples']['rad']
+                best = self._get_max_from_kde(samp)
+                out['best_fit']['rad'] = best
+                logdat += 'rad\t{:.4f}\t'.format(best)
+                _, lo, up = credibility_interval(samp)
+                logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
             else:
                 out['best_fit'][param] = self.fixed[i]
                 logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
-                logdat += 'FIXED\n'
+                logdat += '(FIXED)\n'
             best_theta[i] = out['best_fit'][param]
+        # Add derived mass to best fit dictionary.
+        samp = out['posterior_samples']['mass']
+        best = self._get_max_from_kde(samp)
+        out['best_fit']['mass'] = best
+        logdat += 'mass\t{:.4f}'.format(best)
+        _, lo, up = credibility_interval(samp)
+        logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
+
+        # Fill in best loglike, prior and posterior.
 
         out['best_fit']['loglike'] = log_likelihood(
             best_theta, self.star, interpolators, self.norm, av_law)
@@ -600,6 +628,8 @@ class Fitter:
         lnlike = out['best_fit']['loglike']
         lnprior = out['best_fit']['prior']
         out['best_fit']['posterior'] = (lnlike + lnprior) - lnz
+
+        # --------------------------------------------------------------- #
 
         out['star'] = self.star
         out['engine'] = self._engine
@@ -629,8 +659,37 @@ class Fitter:
         lnzer = results.logzerr[-1]
         return lnz, lnzer, posterior_samples
 
+    def _get_mass(self, logg, rad):
+        """Calculate mass from logg and radius."""
+        # Solar logg = 4.437
+        # g = g_Sol * M / R**2
+        mass = logg + 2 * sp.log10(rad) - 4.437
+        mass = 10**mass
+        return mass
+
+    def _get_rad(self, samples, dist, dist_e):
+        """Calculate radius from the normalization constant and distance."""
+        norm = samples
+        # Create a synthetic distribution for distance.
+        # N = (R / D) ** 2
+        d = st.norm(loc=dist, scale=dist_e).rvs(size=norm.shape[0])
+        n = sp.sqrt(norm)
+        r = n * d  # This is in pc
+        r *= u.pc.to(u.solRad)  # Transform to Solar radii
+        return r
+
+    def _get_max_from_kde(self, samp):
+        """Get maximum of the given distribution."""
+        kde = gaussian_kde(samp)
+        xmin = samp.min()
+        xmax = samp.max()
+        xx = sp.linspace(xmin, xmax, 100000)
+        kde = kde(xx)
+        best = xx[kde.argmax()]
+        return best
 
 #####################
+
 
 def dynesty_log_like(cube):
     """Dynesty log likelihood wrapper."""
