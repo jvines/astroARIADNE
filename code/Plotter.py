@@ -1,3 +1,4 @@
+# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """plot_utils module for plotting SEDs."""
 # TODO: create settings file
 
@@ -35,17 +36,11 @@ class SEDPlotter:
         # General setup
         self.pdf = pdf
         self.png = png
+        self.out_folder = out_folder
 
-        # Create target folders
         chains = out_folder + '/chains'
         likelihoods = out_folder + '/likelihoods'
         posteriors = out_folder + '/posteriors'
-        create_dir(out_folder)
-        create_dir(chains)
-        create_dir(likelihoods)
-        create_dir(posteriors)
-
-        self.out_folder = out_folder
         self.chain_out = chains
         self.like_out = likelihoods
         self.post_out = posteriors
@@ -59,8 +54,18 @@ class SEDPlotter:
         self.coordinator = out['coordinator']
         self.fixed = out['fixed']
         self.norm = out['norm']
-        self.grid = out['model_grid']
+        if self.engine != 'Bayesian Model Averaging':
+            self.grid = out['model_grid']
+        else:
+            self.grid = 'phoenix'
         self.av_law = out['av_law']
+
+        # Create target folders
+        create_dir(out_folder)
+        if self.engine != 'Bayesian Model Averaging':
+            create_dir(chains)
+            create_dir(likelihoods)
+            create_dir(posteriors)
 
         self.star.load_grid(model)
 
@@ -153,7 +158,7 @@ class SEDPlotter:
         ax_r = f.add_subplot(gs[1])
 
         # SED plot.
-        if False:
+        if True:
             Rv = 3.1  # For extinction.
             rad = self.theta[4]
             dist = self.theta[3] * u.pc.to(u.solRad)

@@ -32,6 +32,9 @@ def estimate(bands, params):
     logg_samples = model.derived_samples['logg']
     med, lo, up = credibility_interval(logg_samples)
     med_e = 2 * max([med - lo, up - med])
+    print('\nEstimated log g : ', end='')
+    print(med, end=' +/- ')
+    print(med_e)
     return med, med_e
 
 

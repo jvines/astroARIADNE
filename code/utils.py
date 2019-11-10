@@ -95,7 +95,7 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
     print(colored(str(dlogz), c))
     print(colored('\t\t\tFree parameters : ', c), end='')
     print(colored(str(ndim), c))
-    if engine == 'Dynesty':
+    if engine == 'Dynesty' or engine == 'Bayesian Model Averaging':
         print(colored('\t\t\tBounding : ', c), end='')
         print(colored(bound, c))
         print(colored('\t\t\tSampling : ', c), end='')
@@ -104,6 +104,7 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
         print(colored(nthreads, c))
         if dynamic:
             print(colored('\t\t\tRunning the Dynamic Nested Sampler', c))
+    print('')
     pass
 
 
@@ -126,8 +127,10 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         order = sp.array(
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
         )
-
-    res_dir = out_folder + '/' + engine + '_out.pkl'
+    if engine == 'Bayesian Model Averaging':
+        res_dir = out_folder + '/BMA_out.pkl'
+    else:
+        res_dir = out_folder + '/' + engine + '_out.pkl'
     with closing(open(res_dir, 'rb')) as jar:
         out = pickle.load(jar)
 
@@ -136,8 +139,9 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         if param != 'loglike':
             theta[i] = out['best_fit'][param]
     uncert = []
-    lglk = out['best_fit']['loglike']
-    z, z_err = out['global_lnZ'], out['global_lnZerr']
+    if engine != 'Bayesian Model Averaging':
+        lglk = out['best_fit']['loglike']
+        z, z_err = out['global_lnZ'], out['global_lnZerr']
     for i, param in enumerate(order):
         if not coordinator[i]:
             _, lo, up = credibility_interval(
@@ -145,6 +149,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             uncert.append([abs(theta[i] - lo), abs(up - theta[i])])
         else:
             uncert.append('fixed')
+    print('')
     print(colored('\t\t\tFitting finished.', c))
     print(colored('\t\t\tBest fit parameters are:', c))
     for i, p in enumerate(order):
@@ -187,11 +192,12 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     spt = out['spectral_type']
     print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
     print(colored(spt, c))
-    print(colored('\t\t\tLog Likelihood of best fit : ', c), end='')
-    print(colored('{:.3f}'.format(lglk), c))
-    print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
-    print(colored('{:.3f} +/-'.format(z), c), end=' ')
-    print(colored('{:.3f}'.format(z_err), c))
+    if engine != 'Bayesian Model Averaging':
+        print(colored('\t\t\tLog Likelihood of best fit : ', c), end='')
+        print(colored('{:.3f}'.format(lglk), c))
+        print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
+        print(colored('{:.3f} +/-'.format(z), c), end=' ')
+        print(colored('{:.3f}'.format(z_err), c))
     print(colored('\t\t\tElapsed time : ', c), end='')
     print(colored(elapsed_time, c))
     pass

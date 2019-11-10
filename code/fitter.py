@@ -6,7 +6,7 @@ import random
 import time
 import warnings
 from contextlib import closing
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, Process, cpu_count
 
 import astropy.units as u
 import scipy as sp
@@ -14,9 +14,7 @@ import scipy.stats as st
 from scipy.stats import gaussian_kde
 from tabulate import tabulate
 
-import dynesty
 import Star
-from dynesty.utils import resample_equal
 from Error import *
 from isochrone import estimate
 from phot_utils import *
@@ -24,11 +22,22 @@ from sed_library import *
 from utils import *
 
 try:
-    from isochrones import SingleStarModel, get_ichrone
+    import dynesty
+    from dynesty.utils import resample_equal
+    iso_flag = True
+    bma_flag = True
 except ModuleNotFoundError:
-    wrn = 'Isochrones package not found. log g estimation '
-    wrn += 'unavaliable'
+    wrn = 'Dynesty package not found. BMA and log g estimation unavailable.'
     warnings.warn(wrn)
+    iso_flag = False
+    bma_flag = False
+try:
+    from isochrones import SingleStarModel, get_ichrone
+    iso_flag *= True
+except ModuleNotFoundError:
+    wrn = 'Isochrones package not found. log g estimation unavailable.'
+    warnings.warn(wrn)
+    iso_flag = False
 try:
     import pymultinest
 except ModuleNotFoundError:
@@ -51,6 +60,7 @@ class Fitter:
         self.estimate_logg = False
         self.priorfile = None
         self.av_law = 'fitzpatrick'
+        self.n_samples = None
 
     @property
     def star(self):
@@ -79,7 +89,6 @@ class Fitter:
         defaults = False
         if len(setup) == 1:
             defaults = True
-            print('USING DEFAULT SETUP VALUES.')
         if self._engine == 'multinest':
             if defaults:
                 self._nlive = 500
@@ -132,13 +141,13 @@ class Fitter:
             # with closing(open('interpolations.pkl', 'rb')) as intp:
             #     self._interpolators = pickle.load(intp)
             with closing(open('interpolations_Phoenix.pkl', 'rb')) as intp:
-                self._interpolators = pickle.load(intp)
+                self._interpolator = pickle.load(intp)
         if grid.lower() == 'btsettl':
             with closing(open('interpolations_BTSettl.pkl', 'rb')) as intp:
-                self._interpolators = pickle.load(intp)
+                self._interpolator = pickle.load(intp)
         if grid.lower() == 'ck04':
             with closing(open('interpolations_CK04.pkl', 'rb')) as intp:
-                self._interpolators = pickle.load(intp)
+                self._interpolator = pickle.load(intp)
 
     @property
     def bma(self):
@@ -151,7 +160,34 @@ class Fitter:
 
     @bma.setter
     def bma(self, bma):
-        self._bma = bma
+        self._bma = bma if bma_flag else False
+
+    @property
+    def models(self):
+        """Models to be used in BMA."""
+        return self._bma_models
+
+    @models.setter
+    def models(self, mods):
+        self._bma_models = mods
+
+    @property
+    def sequential(self):
+        """Set to True to make BMA sequentially instead of parallel."""
+        return self._sequential
+
+    @sequential.setter
+    def sequential(self, sequential):
+        self._sequential = sequential
+
+    @property
+    def n_samples(self):
+        """Set number of samples for BMA."""
+        return self._nsamp
+
+    @n_samples.setter
+    def n_samples(self, nsamp):
+        self._nsamp = nsamp
 
     @property
     def estimate_logg(self):
@@ -166,7 +202,7 @@ class Fitter:
         err_msg = 'estimate_logg must be True or False.'
         if type(estimate_logg) is not bool:
             InputError(estimate_logg, err_msg).raise_()
-        self._estimate_logg = estimate_logg
+        self._estimate_logg = estimate_logg if iso_flag else False
 
     @property
     def verbose(self):
@@ -246,16 +282,16 @@ class Fitter:
         creation, creates output directory, initializes coordinators and sets
         up global variables.
         """
-        global prior_dict, coordinator, fixed, order, interpolators, star
+        global prior_dict, coordinator, fixed, order, star
         global use_norm, av_law
         err_msg = 'No star is detected. Please create an instance of Star.'
         if self.star is None:
             InputError(self.star, err_msg).raise_()
         star = self.star
-        interpolators = self._interpolators
+        if not self._bma:
+            global interpolator
+            interpolator = self._interpolator
         use_norm = self.norm
-        # To use with BMA
-        self.n_samples = 10000
         # Extinction law
         av_law = self._av_law
 
@@ -295,6 +331,29 @@ class Fitter:
         # Get dimensions.
         self.ndim = self.get_ndim()
 
+        # warnings
+        if len(self._setup) == 1:
+            print('USING DEFAULT SETUP VALUES.')
+
+        # BMA settings
+        # if BMA is used, load all interpolators requested.
+        if self._bma:
+            if self.n_samples is None:
+                self.n_samples = 'max'
+            self._grids = []
+            self._interpolators = []
+            for mod in self._bma_models:
+                if mod.lower() == 'phoenix':
+                    with open('interpolations_Phoenix.pkl', 'rb') as intp:
+                        self._interpolators.append(pickle.load(intp))
+                if mod.lower() == 'btsettl':
+                    with open('interpolations_BTSettl.pkl', 'rb') as intp:
+                        self._interpolators.append(pickle.load(intp))
+                if mod.lower() == 'ck04':
+                    with open('interpolations_CK04.pkl', 'rb') as intp:
+                        self._interpolators.append(pickle.load(intp))
+                self._grids.append(mod)
+
     def get_ndim(self):
         """Calculate number of dimensions."""
         ndim = 7 if not self.norm else 6
@@ -332,7 +391,7 @@ class Fitter:
                 print('*** ESTIMATING LOGG USING MIST ISOCHRONES ***')
             logg_est = estimate(used_bands, params)
             if logg_est is not None:
-                defaults['logg'] = st.norm(loc=logg_est[0], scale=logg_est[1])
+                defaults['logg'] = st.norm(loc=logg_est[0], scale=0.1)
         # Teff prior setup.
         if self.star.get_temp:
             defaults['teff'] = st.norm(
@@ -431,7 +490,130 @@ class Fitter:
 
         Only works with dynesty.
         """
-        raise NotImplementedError()
+        thr = self._threads if self._sequential else len(self._interpolators)
+        display('Bayesian Model Averaging', self.star, self._nlive,
+                self._dlogz, self.ndim, self._bound, self._sample,
+                thr, self._dynamic)
+        self.start = time.time()
+        if not self._sequential:
+            jobs = []
+            n_threads = len(self._interpolators)
+            for intp, gr in zip(self._interpolators, self._grids):
+                p = Process(target=self._bma_dynesty, args=([intp, gr]))
+                jobs.append(p)
+                p.start()
+            for p in jobs:
+                p.join()
+        else:
+            global interpolator
+            for intp, gr in zip(self._interpolators, self._grids):
+                interpolator = intp
+                out_file = self.out_folder + '/' + gr + '_out.pkl'
+                print('\t\t\tFITTING MODEL : ' + gr)
+                self.fit_dynesty(out_file=out_file)
+
+        # Now that the fitting finished, read the outputs and average
+        # the posteriors
+        outs = []
+        for g in self._grids:
+            in_folder = self.out_folder + '/' + gr + '_out.pkl'
+            with closing(open(in_folder, 'rb')) as out:
+                outs.append(pickle.load(out))
+
+        avgd = self.bayesian_model_average(outs, self._grids)
+        self.save_bma(avgd)
+
+        elapsed_time = execution_time(self.start)
+        end(self.coordinator, elapsed_time,
+            self.out_folder, 'Bayesian Model Averaging', self.norm)
+        pass
+
+    def bayesian_model_average(self, outputs, grids):
+        """Perform Bayesian Model Averaging."""
+        evidences = []
+        post_samples = []
+        for o in outputs:
+            evidences.append(o['global_lnZ'])
+            post_samples.append(o['posterior_samples'])
+        evidences = sp.array(evidences)
+        weights = evidences - evidences.min()
+        weights = [sp.exp(e) / sp.exp(weights).sum() for e in weights]
+        weights = sp.array(weights)
+        ban = ['loglike', 'priors', 'posteriors', 'mass']
+        if self._norm:
+            ban.append('rad')
+        out = dict()
+        out['averaged_samples'] = dict()
+        if self.n_samples == 'max':
+            lens = []
+            for o in post_samples:
+                lens.append(len(o['teff']))
+            lens = sp.array(lens)
+            self.n_samples = lens.min()
+        for k in post_samples[0].keys():
+            if k in ban:
+                continue
+            out['averaged_samples'][k] = sp.zeros(self.n_samples)
+            for i, o in enumerate(post_samples):
+                # Skip fixed params
+                try:
+                    len(o[k])
+                except TypeError:
+                    continue
+                out['averaged_samples'][k] += o[k] * weights[i]
+        out['evidences'] = dict()
+        for e, g in zip(evidences, grids):
+            out['evidences'][g] = e
+        return out
+
+    def _bma_dynesty(self, intp, grid):
+        # interpolator, grid = args
+        global interpolator
+        interpolator = intp
+
+        # Parallel parallelized routine experiment
+        if self.experimental:
+            if self._dynamic:
+                with closing(Pool(self._threads)) as executor:
+                    sampler = dynesty.DynamicNestedSampler(
+                        dynesty_loglike_bma, pt_dynesty, self.ndim,
+                        bound=self._bound, sample=self._sample, pool=executor,
+                        queue_size=self._threads, logl_args=([intp])
+                    )
+                    sampler.run_nested(dlogz_init=self._dlogz,
+                                       nlive_init=self._nlive,
+                                       wt_kwargs={'pfrac': .95})
+            else:
+                with closing(Pool(self._threads)) as executor:
+                    sampler = dynesty.NestedSampler(
+                        dynesty_loglike_bma, pt_dynesty, self.ndim,
+                        nlive=self._nlive, bound=self._bound,
+                        sample=self._sample, pool=executor,
+                        queue_size=self._threads, logl_args=([intp])
+                    )
+                    sampler.run_nested(dlogz=self._dlogz)
+
+        elif self._dynamic:
+            sampler = dynesty.DynamicNestedSampler(
+                dynesty_loglike_bma, pt_dynesty, self.ndim,
+                bound=self._bound, sample=self._sample, logl_args=([intp])
+
+            )
+            sampler.run_nested(dlogz_init=self._dlogz,
+                               nlive_init=self._nlive,
+                               wt_kwargs={'pfrac': .95})
+        else:
+            sampler = dynesty.NestedSampler(
+                dynesty_loglike_bma, pt_dynesty, self.ndim,
+                nlive=self._nlive, bound=self._bound,
+                sample=self._sample,
+                logl_args=([intp])
+            )
+            sampler.run_nested(dlogz=self._dlogz)
+
+        results = sampler.results
+        out_file = self.out_folder + '/' + grid + '_out.pkl'
+        self.save(results=results, out_file=out_file)
         pass
 
     def fit_multinest(self):
@@ -454,11 +636,12 @@ class Fitter:
         self.save(out_file=out_file)
         pass
 
-    def fit_dynesty(self):
+    def fit_dynesty(self, out_file=None):
         """Run dynesty."""
-        display(self._engine, self.star, self._nlive,
-                self._dlogz, self.ndim, self._bound, self._sample,
-                self._threads, self._dynamic)
+        if not self._bma:
+            display(self._engine, self.star, self._nlive,
+                    self._dlogz, self.ndim, self._bound, self._sample,
+                    self._threads, self._dynamic)
         if self._dynamic:
             if self._threads > 1:
                 with closing(Pool(self._threads)) as executor:
@@ -497,11 +680,12 @@ class Fitter:
                 )
                 sampler.run_nested(dlogz=self._dlogz)
         results = sampler.results
-        out_file = self.out_folder + '/' + self._engine + '_out.pkl'
-        self.save(results=results, out_file=out_file)
+        if out_file is None:
+            out_file = self.out_folder + '/' + self._engine + '_out.pkl'
+        self.save(out_file, results=results)
         pass
 
-    def save(self, results=None, out_file):
+    def save(self, out_file, results=None):
         """Save multinest/dynesty output and relevant information.
 
         Saves a dictionary as a pickle file. The dictionary contains the
@@ -583,7 +767,7 @@ class Fitter:
             theta = build_params(
                 posterior_samples[i, :], coordinator, fixed, self.norm)
             out['posterior_samples']['loglike'][i] = log_likelihood(
-                theta, self.star, interpolators, self.norm, av_law)
+                theta, self.star, interpolator, self.norm, av_law)
             out['posterior_samples']['priors'][i] = log_prior(
                 theta, self.star, self.priors, self.coordinator, self.norm)
         lnlike = out['posterior_samples']['loglike']
@@ -634,7 +818,7 @@ class Fitter:
         # Fill in best loglike, prior and posterior.
 
         out['best_fit']['loglike'] = log_likelihood(
-            best_theta, self.star, interpolators, self.norm, av_law)
+            best_theta, self.star, interpolator, self.norm, av_law)
         out['best_fit']['prior'] = log_prior(
             best_theta, self.star, self.priors, self.coordinator, self.norm)
         lnlike = out['best_fit']['loglike']
@@ -662,6 +846,126 @@ class Fitter:
         spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
         spt = mamajek_spt[spt_idx]
         out['spectral_type'] = spt
+        with closing(open(log_out, 'w')) as logfile:
+            logfile.write(logdat)
+        pickle.dump(out, open(out_file, 'wb'))
+        pass
+
+    def save_bma(self, avgd):
+        """Save BMA output and relevant information.
+
+        Saves a dictionary as a pickle file. The dictionary contains the
+        following:
+
+        lnZ : The global evidences.
+        posterior_samples : A dictionary containing the samples of each
+                            parameter (even if it's fixed), the evidence,
+                            log likelihood, the prior, and the posterior
+                            for each set of sampled parameters.
+        fixed : An array with the fixed parameter values.
+        coordinator : An array with the status of each parameter (1 for fixed
+                      0 for free)
+        best_fit : The best fit is chosen to be the median of each sample.
+                   It also includes the log likelihood of the best fit.
+        star : The Star object containing the information of the star (name,
+               magnitudes, fluxes, coordinates, etc)
+
+        Also creates a log file with the best fit parameters and 1 sigma
+        error bars.
+
+        """
+        out = dict()
+        logdat = 'Parameter\tmedian\tupper\tlower\n'
+        log_out = self.out_folder + '/' + 'best_fit.dat'
+
+        # Save global evidence of each model.
+        out['lnZ'] = avgd['evidences']
+
+        # Create raw samples holder
+        out['posterior_samples'] = dict()
+        j = 0
+        for i, par in enumerate(order):
+            if not self.coordinator[i]:
+                out['posterior_samples'][par] = avgd['averaged_samples'][par]
+                j += 1
+            else:
+                out['posterior_samples'][par] = self.fixed[i]
+
+        # If normalization constant was fitted, create a distribution of radii.
+
+        if use_norm:
+            rad = self._get_rad(
+                out['posterior_samples']['norm'], star.dist, star.dist_e
+            )
+            out['posterior_samples']['rad'] = rad
+
+        # Create a distribution of masses.
+
+        logg_samp = out['posterior_samples']['logg']
+        rad_samp = out['posterior_samples']['rad']
+        mass_samp = self._get_mass(logg_samp, rad_samp)
+        out['posterior_samples']['mass'] = mass_samp
+
+        # Best fit
+        # The logic is as follows:
+        # Calculate KDE for each marginalized posterior distributions
+        # Find peak
+        # peak is best fit.
+
+        out['best_fit'] = dict()
+        best_theta = sp.zeros(order.shape[0])
+        j = 0
+        for i, param in enumerate(order):
+            if not self.coordinator[i]:
+                samp = out['posterior_samples'][param]
+                best = self._get_max_from_kde(samp)
+                out['best_fit'][param] = best
+                logdat += param + \
+                    '\t{:.4f}\t'.format(best)
+                _, lo, up = credibility_interval(samp)
+                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
+                j += 1
+            elif param == 'norm':
+                samp = out['posterior_samples']['rad']
+                best = self._get_max_from_kde(samp)
+                out['best_fit']['rad'] = best
+                logdat += 'rad\t{:.4f}\t'.format(best)
+                _, lo, up = credibility_interval(samp)
+                logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
+            else:
+                out['best_fit'][param] = self.fixed[i]
+                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
+                logdat += '(FIXED)\n'
+            best_theta[i] = out['best_fit'][param]
+
+        # Add derived mass to best fit dictionary.
+
+        samp = out['posterior_samples']['mass']
+        best = self._get_max_from_kde(samp)
+        out['best_fit']['mass'] = best
+        logdat += 'mass\t{:.4f}\t'.format(best)
+        _, lo, up = credibility_interval(samp)
+        logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
+
+        out['fixed'] = self.fixed
+        out['coordinator'] = self.coordinator
+        out['star'] = self.star
+        out['norm'] = self.norm
+        out['engine'] = 'Bayesian Model Averaging'
+        out['av_law'] = av_law
+
+        # Spectral type
+
+        # Load Mamajek spt table
+        mamajek_spt = sp.loadtxt(
+            '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
+        mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
+
+        # Find spt
+        spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+        spt = mamajek_spt[spt_idx]
+        out['spectral_type'] = spt
+        out_file = self.out_folder + '/BMA_out.pkl'
         with closing(open(log_out, 'w')) as logfile:
             logfile.write(logdat)
         pickle.dump(out, open(out_file, 'wb'))
@@ -709,18 +1013,25 @@ class Fitter:
         kde = gaussian_kde(samp)
         xmin = samp.min()
         xmax = samp.max()
-        xx = sp.linspace(xmin, xmax, 100000)
+        xx = sp.linspace(xmin, xmax, 10000)
         kde = kde(xx)
         best = xx[kde.argmax()]
         return best
 
 #####################
+# Dynesty and multinest wrappers
+
+
+def dynesty_loglike_bma(cube, interpolator):
+    """Dynesty log likelihood wrapper for BMA."""
+    theta = build_params(cube, coordinator, fixed, use_norm)
+    return log_likelihood(theta, star, interpolator, use_norm, av_law)
 
 
 def dynesty_log_like(cube):
     """Dynesty log likelihood wrapper."""
     theta = build_params(cube, coordinator, fixed, use_norm)
-    return log_likelihood(theta, star, interpolators, use_norm, av_law)
+    return log_likelihood(theta, star, interpolator, use_norm, av_law)
 
 
 def pt_dynesty(cube):
