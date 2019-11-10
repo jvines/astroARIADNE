@@ -8,6 +8,7 @@ import pickle
 import random
 import time
 from contextlib import closing
+
 import scipy as sp
 from termcolor import colored
 
@@ -114,18 +115,22 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     elapsed time
     Spectral type
     """
+    colors = [
+        'red', 'green', 'blue', 'yellow',
+        'grey', 'magenta', 'cyan', 'white'
+    ]
+    c = random.choice(colors)
     if use_norm:
         order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
     else:
         order = sp.array(
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
         )
+
     res_dir = out_folder + '/' + engine + '_out.pkl'
     with closing(open(res_dir, 'rb')) as jar:
         out = pickle.load(jar)
-    mamajek_spt = sp.loadtxt(
-        '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
-    mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
+
     theta = sp.zeros(order.shape[0])
     for i, param in enumerate(order):
         if param != 'loglike':
@@ -140,38 +145,55 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             uncert.append([abs(theta[i] - lo), abs(up - theta[i])])
         else:
             uncert.append('fixed')
-    print('\t\tFitting finished.')
-    print('\t\tBest fit parameters are:')
+    print(colored('\t\t\tFitting finished.', c))
+    print(colored('\t\t\tBest fit parameters are:', c))
     for i, p in enumerate(order):
         if p == 'norm':
             p = '(R/D)^2'
-            print('\t\t' + p, end=' : ')
-            print('{:.4e}'.format(theta[i]), end=' ')
+            print(colored('\t\t\t' + p, c), end=' : ')
+            print(colored('{:.4e}'.format(theta[i]), c), end=' ')
             if not coordinator[i]:
-                print('+ {:.4e}'.format(uncert[i][1]), end=' - ')
-                print('{:.4e}'.format(uncert[i][0]))
+                print(colored('+ {:.4e}'.format(uncert[i][1]), c), end=' - ')
+                print(colored('{:.4e}'.format(uncert[i][0]), c))
             else:
-                print('fixed')
+                print(colored('fixed', c))
+            samp = out['posterior_samples']['rad']
+            rad = out['best_fit']['rad']
+            _, lo, up = credibility_interval(samp)
+            unlo = abs(rad - lo)
+            unhi = abs(rad - up)
+            print(colored('\t\t\trad', c), end=' : ')
+            print(colored('{:.4e}'.format(rad), c), end=' ')
+            print(colored('+ {:.4e}'.format(unhi), c), end=' - ')
+            print(colored('{:.4e}'.format(unlo), c))
         if p == 'z':
             p = '[Fe/H]'
-        print('\t\t' + p, end=' : ')
-        print('{:.4f}'.format(theta[i]), end=' ')
+        print(colored('\t\t\t' + p, c), end=' : ')
+        print(colored('{:.4f}'.format(theta[i]), c), end=' ')
         if not coordinator[i]:
-            print('+ {:.4f}'.format(uncert[i][1]), end=' - ')
-            print('{:.4f}'.format(uncert[i][0]))
+            print(colored('+ {:.4f}'.format(uncert[i][1]), c), end=' - ')
+            print(colored('{:.4f}'.format(uncert[i][0]), c))
         else:
-            print('fixed')
-    spt_idx = sp.argmin(abs(mamajek_temp - theta[0]))
-    spt = mamajek_spt[spt_idx]
-    print('\t\tMamajek Spectral Type : ', end='')
-    print(spt)
-    print('\t\tLog Likelihood of best fit : ', end='')
-    print('{:.3f}'.format(lglk))
-    print('\t\tlog Bayesian evidence : ', end='')
-    print('{:.3f}'.format(z), end=' +/- ')
-    print('{:.3f}'.format(z_err))
-    print('\t\tElapsed time : ', end='')
-    print(elapsed_time)
+            print(colored('fixed', c))
+    samp = out['posterior_samples']['mass']
+    mass = out['best_fit']['mass']
+    _, lo, up = credibility_interval(samp)
+    unlo = abs(mass - lo)
+    unhi = abs(mass - up)
+    print(colored('\t\t\tmass', c), end=' : ')
+    print(colored('{:.4e}'.format(mass), c), end=' ')
+    print(colored('+ {:.4e}'.format(unhi), c), end=' - ')
+    print(colored('{:.4e}'.format(unlo), c))
+    spt = out['spectral_type']
+    print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
+    print(colored(spt))
+    print(colored('\t\t\tLog Likelihood of best fit : ', c), end='')
+    print(colored('{:.3f}'.format(lglk)))
+    print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
+    print(colored('{:.3f}'.format(z), c), end=' +/- ')
+    print(colored('{:.3f}'.format(z_err), c))
+    print(colored('\t\t\tElapsed time : ', c), end='')
+    print(colored(elapsed_time, c))
     pass
 
 
@@ -198,23 +220,23 @@ def execution_time(start):
         if days == 0:
             if hours == 0:
                 if minutes == 0:
-                    elapsed = '{:f} seconds'.format(seconds)
+                    elapsed = '{:.2f} seconds'.format(seconds)
                 else:
-                    elapsed = '{:f} minutes'.format(minutes)
-                    elapsed += ' and {:f} seconds'.format(seconds)
+                    elapsed = '{:.0f} minutes'.format(minutes)
+                    elapsed += ' and {:.2f} seconds'.format(seconds)
             else:
-                elapsed = '{:f} hours'.format(hours)
-                elapsed += ', {:f} minutes'.format(minutes)
-                elapsed += ' and {:f} seconds'.format(seconds)
+                elapsed = '{:.0f} hours'.format(hours)
+                elapsed += ', {:.0f} minutes'.format(minutes)
+                elapsed += ' and {:.2f} seconds'.format(seconds)
         else:
-            elapsed = '{:f} days'.format(days)
-            elapsed += ', {:f} hours'.format(hours)
-            elapsed += ', {:f} minutes'.format(minutes)
-            elapsed += ' and {:f} seconds'.format(seconds)
+            elapsed = '{:.0f} days'.format(days)
+            elapsed += ', {:.0f} hours'.format(hours)
+            elapsed += ', {:.0f} minutes'.format(minutes)
+            elapsed += ' and {:.2f} seconds'.format(seconds)
     else:
-        elapsed = '{:f} weeks'.format(weeks)
-        elapsed += ', {:f} days'.format(days)
-        elapsed += ', {:f} hours'.format(hours)
-        elapsed += ', {:f} minutes'.format(minutes)
-        elapsed += ' and {:f} seconds'.format(seconds)
+        elapsed = '{:.0f} weeks'.format(weeks)
+        elapsed += ', {:.0f} days'.format(days)
+        elapsed += ', {:.0f} hours'.format(hours)
+        elapsed += ', {:.0f} minutes'.format(minutes)
+        elapsed += ' and {:.2f} seconds'.format(seconds)
     return elapsed
