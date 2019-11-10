@@ -151,8 +151,7 @@ class Fitter:
 
     @bma.setter
     def bma(self, bma):
-        # TODO: IMPLEMENT
-        raise NotImplementedError()
+        self._bma = bma
 
     @property
     def estimate_logg(self):
@@ -601,7 +600,7 @@ class Fitter:
                 _, lo, up = credibility_interval(samp)
                 logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
                 j += 1
-            if param == 'norm':
+            elif param == 'norm':
                 samp = out['posterior_samples']['rad']
                 best = self._get_max_from_kde(samp)
                 out['best_fit']['rad'] = best
@@ -619,7 +618,7 @@ class Fitter:
         samp = out['posterior_samples']['mass']
         best = self._get_max_from_kde(samp)
         out['best_fit']['mass'] = best
-        logdat += 'mass\t{:.4f}'.format(best)
+        logdat += 'mass\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
         logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
 
@@ -642,6 +641,18 @@ class Fitter:
         out['norm'] = self.norm
         out['model_grid'] = self.grid
         out['av_law'] = av_law
+
+        # Spectral type
+
+        # Load Mamajek spt table
+        mamajek_spt = sp.loadtxt(
+            '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
+        mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
+
+        # Find spt
+        spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+        spt = mamajek_spt[spt_idx]
+        out['spectral_type'] = spt
         with closing(open(log_out, 'w')) as logfile:
             logfile.write(logdat)
         pickle.dump(out, open(out_file, 'wb'))
