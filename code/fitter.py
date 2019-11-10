@@ -426,6 +426,14 @@ class Fitter:
             self.out_folder, self._engine, self.norm)
         pass
 
+    def fit_bma(self):
+        """Perform the fit with different models and the average the output.
+
+        Only works with dynesty.
+        """
+        raise NotImplementedError()
+        pass
+
     def fit_multinest(self):
         """Run MuiltiNest."""
         display(self._engine, self.star, self._nlive, self._dlogz, self.ndim)
@@ -442,7 +450,8 @@ class Fitter:
             verbose=self.verbose,
             resume=False
         )
-        self.save()
+        out_file = self.out_folder + '/' + self._engine + '_out.pkl'
+        self.save(out_file=out_file)
         pass
 
     def fit_dynesty(self):
@@ -488,10 +497,11 @@ class Fitter:
                 )
                 sampler.run_nested(dlogz=self._dlogz)
         results = sampler.results
-        self.save(results=results)
+        out_file = self.out_folder + '/' + self._engine + '_out.pkl'
+        self.save(results=results, out_file=out_file)
         pass
 
-    def save(self, results=None):
+    def save(self, results=None, out_file):
         """Save multinest/dynesty output and relevant information.
 
         Saves a dictionary as a pickle file. The dictionary contains the
@@ -518,7 +528,6 @@ class Fitter:
         """
         out = dict()
         logdat = 'Parameter\tmedian\tupper\tlower\n'
-        out_file = self.out_folder + '/' + self._engine + '_out.pkl'
         log_out = self.out_folder + '/' + 'best_fit.dat'
         if self._engine == 'multinest':
             lnz, lnzer, posterior_samples = self.multinest_results()
