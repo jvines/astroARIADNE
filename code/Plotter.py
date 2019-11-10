@@ -31,6 +31,7 @@ class SEDPlotter:
     def __init__(self, input_files, out_folder, pdf=False, png=True,
                  model='phoenix'):
         # TODO: read settings file.
+        print('\nInitializing plotter.\n')
         # General setup
         self.pdf = pdf
         self.png = png
@@ -102,6 +103,7 @@ class SEDPlotter:
 
         # Setup plots.
         self.read_config()
+        print('\nPlotter initialized.\n')
 
     def __extract_info(self):
         self.flux = []
