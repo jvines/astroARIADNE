@@ -508,6 +508,7 @@ class Fitter:
             global interpolator
             for intp, gr in zip(self._interpolators, self._grids):
                 interpolator = intp
+                self.grid = gr
                 out_file = self.out_folder + '/' + gr + '_out.pkl'
                 print('\t\t\tFITTING MODEL : ' + gr)
                 self.fit_dynesty(out_file=out_file)
@@ -516,7 +517,7 @@ class Fitter:
         # the posteriors
         outs = []
         for g in self._grids:
-            in_folder = self.out_folder + '/' + gr + '_out.pkl'
+            in_folder = self.out_folder + '/' + g + '_out.pkl'
             with closing(open(in_folder, 'rb')) as out:
                 outs.append(pickle.load(out))
 
@@ -560,7 +561,8 @@ class Fitter:
                     len(o[k])
                 except TypeError:
                     continue
-                out['averaged_samples'][k] += o[k] * weights[i]
+                weighted_samples = o[k][-self.n_samples:] * weights[i]
+                out['averaged_samples'][k] += weighted_samples
         out['evidences'] = dict()
         for e, g in zip(evidences, grids):
             out['evidences'][g] = e
