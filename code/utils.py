@@ -165,7 +165,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             print(colored('\t\t\trad : ', c), end='')
             print(colored('{:.4e}'.format(rad), c), end=' ')
             print(colored('+ {:.4e} -'.format(unhi), c), end=' ')
-            print(colored('{:.4e}'.format(unlo), c))
+            print(colored('{:.4e} derived'.format(unlo), c))
         if p == 'z':
             p = '[Fe/H]'
         print(colored('\t\t\t' + p + ' : ', c), end='')
@@ -181,9 +181,9 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     unlo = abs(mass - lo)
     unhi = abs(mass - up)
     print(colored('\t\t\tmass : ', c), end='')
-    print(colored('{:.2e}'.format(mass), c), end=' ')
-    print(colored('+ {:.2e} -'.format(unhi), c), end=' ')
-    print(colored('{:.2e}'.format(unlo), c))
+    print(colored('{:.2f}'.format(mass), c), end=' ')
+    print(colored('+ {:.2f} -'.format(unhi), c), end=' ')
+    print(colored('{:.2f} derived'.format(unlo), c))
     spt = out['spectral_type']
     print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
     print(colored(spt, c))
