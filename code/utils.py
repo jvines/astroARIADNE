@@ -150,10 +150,10 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     for i, p in enumerate(order):
         if p == 'norm':
             p = '(R/D)^2'
-            print(colored('\t\t\t' + p, c), end=' : ')
+            print(colored('\t\t\t' + p + ' : ', c), end='')
             print(colored('{:.4e}'.format(theta[i]), c), end=' ')
             if not coordinator[i]:
-                print(colored('+ {:.4e}'.format(uncert[i][1]), c), end=' - ')
+                print(colored('+ {:.4e} -'.format(uncert[i][1]), c), end=' ')
                 print(colored('{:.4e}'.format(uncert[i][0]), c))
             else:
                 print(colored('fixed', c))
@@ -162,16 +162,16 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             _, lo, up = credibility_interval(samp)
             unlo = abs(rad - lo)
             unhi = abs(rad - up)
-            print(colored('\t\t\trad', c), end=' : ')
+            print(colored('\t\t\trad : ', c), end='')
             print(colored('{:.4e}'.format(rad), c), end=' ')
-            print(colored('+ {:.4e}'.format(unhi), c), end=' - ')
+            print(colored('+ {:.4e} -'.format(unhi), c), end=' ')
             print(colored('{:.4e}'.format(unlo), c))
         if p == 'z':
             p = '[Fe/H]'
-        print(colored('\t\t\t' + p, c), end=' : ')
+        print(colored('\t\t\t' + p + ' : ', c), end='')
         print(colored('{:.4f}'.format(theta[i]), c), end=' ')
         if not coordinator[i]:
-            print(colored('+ {:.4f}'.format(uncert[i][1]), c), end=' - ')
+            print(colored('+ {:.4f} -'.format(uncert[i][1]), c), end=' ')
             print(colored('{:.4f}'.format(uncert[i][0]), c))
         else:
             print(colored('fixed', c))
@@ -180,17 +180,17 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     _, lo, up = credibility_interval(samp)
     unlo = abs(mass - lo)
     unhi = abs(mass - up)
-    print(colored('\t\t\tmass', c), end=' : ')
-    print(colored('{:.4e}'.format(mass), c), end=' ')
-    print(colored('+ {:.4e}'.format(unhi), c), end=' - ')
-    print(colored('{:.4e}'.format(unlo), c))
+    print(colored('\t\t\tmass : ', c), end='')
+    print(colored('{:.2e}'.format(mass), c), end=' ')
+    print(colored('+ {:.2e} -'.format(unhi), c), end=' ')
+    print(colored('{:.2e}'.format(unlo), c))
     spt = out['spectral_type']
     print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
-    print(colored(spt))
+    print(colored(spt, c))
     print(colored('\t\t\tLog Likelihood of best fit : ', c), end='')
-    print(colored('{:.3f}'.format(lglk)))
+    print(colored('{:.3f}'.format(lglk), c))
     print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
-    print(colored('{:.3f}'.format(z), c), end=' +/- ')
+    print(colored('{:.3f} +/-'.format(z), c), end=' ')
     print(colored('{:.3f}'.format(z_err), c))
     print(colored('\t\t\tElapsed time : ', c), end='')
     print(colored(elapsed_time, c))
