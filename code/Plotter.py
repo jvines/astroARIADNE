@@ -166,18 +166,19 @@ class SEDPlotter:
         ax.errorbar(self.wave, self.flux * self.wave,
                     xerr=self.bandpass, yerr=self.flux_er,
                     fmt=',',
-                    # ecolor=self.error_color,
+                    ecolor=self.error_color,
                     # color='turquoise',
                     marker=None)
 
         ax.scatter(self.wave, self.flux * self.wave,
                    edgecolors=self.edgecolors,
+                   marker=self.marker,
                    c=self.marker_colors,
                    s=self.scatter_size,
                    alpha=self.scatter_alpha)
 
         ax.scatter(self.wave, self.model * self.wave,
-                   marker='D',
+                   marker=self.marker_model,
                    edgecolors=self.marker_colors_model,
                    s=self.scatter_size,
                    facecolor='',
@@ -189,16 +190,17 @@ class SEDPlotter:
         ax_r.errorbar(self.wave, sp.zeros(self.wave.shape[0]),
                       xerr=self.bandpass, yerr=self.flux_er,
                       fmt=',',
-                      # ecolor=self.error_color,
+                      ecolor=self.error_color,
                       # color='turquoise',
                       marker=None)
         ax_r.scatter(self.wave, sp.zeros(self.wave.shape[0]),
                      edgecolors=self.edgecolors,
+                     marker=self.marker,
                      c=self.marker_colors,
                      s=self.scatter_size,
                      alpha=self.scatter_alpha)
         ax_r.scatter(self.wave, norm_res,
-                     marker='D',
+                     marker=self.marker_model,
                      edgecolors=self.marker_colors_model,
                      s=self.scatter_size,
                      facecolor='',
@@ -677,31 +679,20 @@ class SEDPlotter:
         return new_labels
 
     def read_config(self):
-        self.figsize = (12, 8)
-
-        # SCATTER
-        self.scatter_size = 60
-        self.edgecolors = 'k'
-        self.marker_colors = 'deepskyblue'
-        self.marker_colors_model = 'mediumvioletred'
-        self.scatter_alpha = .85
-        self.scatter_linewidths = 1
-
-        # ERRORBARS
-        self.error_color = 'k'
-        self.error_alpha = 1
-
-        # TEXT FORMAT
-        self.fontsize = 22
-        self.fontname = 'serif'
-        self.tick_labelsize = 18
-
-        # CORNER
-        self.corner_med_c = 'firebrick'
-        self.corner_v_c = 'lightcoral'
-        self.corner_v_style = '-.'
-        self.corner_med_style = '--'
-        self.corner_fontsize = 20
-        self.corner_tick_fontsize = 15
-        self.corner_labelpad = 15
-        self.corner_marker = 'sr'
+        """Read plotter configuration file."""
+        settings = open('../Datafiles/plot_settings.dat', 'r')
+        for line in settings.readlines():
+            if line[0] == '#' or line[0] == '\n':
+                continue
+            splt = line.split(' ')
+            attr = splt[0]
+            if attr == 'figsize':
+                vals = splt[1].split('\n')[0].split(',')
+                val = (int(vals[0]), int(vals[1]))
+                setattr(self, attr, val)
+            else:
+                try:
+                    val = int(splt[1].split('\n')[0])
+                except ValueError:
+                    val = splt[1].split('\n')[0]
+                setattr(self, attr, val)

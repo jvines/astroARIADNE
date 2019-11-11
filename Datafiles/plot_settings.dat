@@ -1,0 +1,34 @@
+# Plotter settings
+# Format is property value
+
+### GENERAL
+figsize 12,8
+
+### SCATTER PLOTS
+scatter_size 60
+edgecolors black
+marker o
+marker_model D
+marker_colors deepskyblue
+marker_colors_model mediumvioletred
+scatter_alpha 0.85
+scatter_linewidths 1
+
+### ERRORBARS
+error_color tab:blue
+error_alpha 1
+
+### TEXT FORMAT
+fontsize 22
+fontname serif
+tick_labelsize 18
+
+### CORNER PLOT
+corner_med_c firebrick
+corner_v_c lightcoral
+corner_v_style -.
+corner_med_style --
+corner_fontsize 20
+corner_tick_fontsize 15
+corner_labelpad 15
+corner_marker sr
