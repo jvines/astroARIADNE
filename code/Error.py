@@ -78,6 +78,7 @@ class PriorError(Error):
     Type 0 error means the parameter isn't recognized.
     Type 1 occurs if norm parameter is found alongside dist or rad.
     Type 2 occurs if the selected prior is illegal.
+
     """
 
     def __init__(self, par, type):
@@ -91,3 +92,39 @@ class PriorError(Error):
         if type == 1:
             self.message += ' has been found alongside norm. Parameters rad '
             self.message += 'and dist are incompatible with norm.'
+
+
+class CatalogWarning(Error):
+    """Exception raised for catalog errors.
+
+    Does not terminate program. It only acts as a warning.
+    Attributes
+    ----------
+    in_inst -- input instance
+    exp_inst -- expected instance
+    message -- explanation of the error
+
+    Notes
+    -----
+    Type 0 means parallax is invalid
+    Type 1 means parameter not found
+    Type 2 means magnitude not found
+    Type 3 means uncertainty not found
+
+    """
+
+    def __init__(self, par, type):
+        if type == 0:
+            self.message = 'Invalid parallax found (plx <= 0)'
+        if type == 1:
+            self.message = 'Parameter ' + par + ' not found!'
+        if type == 2:
+            self.message = par + ' magnitude not found! Skipping.'
+        if type == 3:
+            self.message = par + ' magnitude error not found! Skipping.'
+
+    def warn(self):
+        """Print error message."""
+        print('Warning!', end=': ')
+        print(self, end='\nWarning message: ')
+        print(self.message)
