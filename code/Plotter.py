@@ -12,7 +12,8 @@ import matplotlib.ticker as ticker
 import scipy as sp
 from astropy import units as u
 from astropy.io import fits
-from extinction import apply, fitzpatrick99
+from astropy.table import Table
+from extinction import apply
 from matplotlib import rcParams
 from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
@@ -29,8 +30,7 @@ class SEDPlotter:
 
     wav_file = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
-    def __init__(self, input_files, out_folder, pdf=False, png=True,
-                 model='phoenix'):
+    def __init__(self, input_files, out_folder, pdf=False, png=True):
         # TODO: read settings file.
         print('\nInitializing plotter.\n')
         # General setup
@@ -44,7 +44,7 @@ class SEDPlotter:
         self.chain_out = chains
         self.like_out = likelihoods
         self.post_out = posteriors
-        self.hdd = '/Volumes/JVines_ext/StellarAtmosphereModels/PHOENIXv2/'
+        self.hdd = '/Volumes/JVines_ext/StellarAtmosphereModels/'
 
         # Read output files.
         out = pickle.load(open(input_files, 'rb'))
@@ -57,7 +57,10 @@ class SEDPlotter:
         if self.engine != 'Bayesian Model Averaging':
             self.grid = out['model_grid']
         else:
-            self.grid = 'phoenix'
+            zs = sp.array([out['lnZ'][key] for key in out['lnZ'].keys()])
+            keys = sp.array([key for key in out['lnZ'].keys()])
+            grid = keys[sp.argmax(zs)]
+            self.grid = grid
         self.av_law = out['av_law']
 
         # Create target folders
@@ -67,7 +70,7 @@ class SEDPlotter:
             create_dir(likelihoods)
             create_dir(posteriors)
 
-        self.star.load_grid(model)
+        self.star.load_grid(self.grid)
 
         if not self.norm:
             self.order = sp.array(
@@ -157,35 +160,8 @@ class SEDPlotter:
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
 
-        # SED plot.
-        if True:
-            Rv = 3.1  # For extinction.
-            rad = self.theta[4]
-            dist = self.theta[3] * u.pc.to(u.solRad)
-            Av = self.theta[5]
+        self.SED(ax)
 
-            wave = fits.open(self.hdd + self.wav_file)[0].data
-            wave *= u.angstrom.to(u.um)
-
-            flux = self.fetch_SED()
-
-            lower_lim = 0.25 < wave
-            upper_lim = wave < 4.629296073126975
-            new_w = wave[lower_lim * upper_lim]
-
-            new_ww = sp.linspace(new_w[0], new_w[-1], len(new_w))
-
-            ext = fitzpatrick99(new_w * 1e4, Av, Rv)
-
-            brf, _ = pyasl.instrBroadGaussFast(
-                new_ww, flux, 650,
-                edgeHandling="firstlast",
-                fullout=True, maxsig=8
-            )
-            brf = brf[lower_lim * upper_lim]
-            brf = apply(ext, brf)
-            flx = brf * (rad / dist) ** 2 * new_w
-            ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color='k', zorder=0)
         # Model plot
         ax.errorbar(self.wave, self.flux * self.wave,
                     xerr=self.bandpass, yerr=self.flux_er,
@@ -285,6 +261,71 @@ class SEDPlotter:
             plt.savefig(self.out_folder + '/SED.pdf', bbox_inches='tight')
         if self.png:
             plt.savefig(self.out_folder + '/SED.png', bbox_inches='tight')
+        pass
+
+    def SED(self, ax):
+        Rv = 3.1  # For extinction.
+        rad = self.theta[4]
+        dist = self.theta[3] * u.pc.to(u.solRad)
+        Av = self.theta[5]
+
+        # SED plot.
+        if self.grid == 'phoenix':
+            wave = fits.open(self.hdd + self.wav_file)[0].data
+            wave *= u.angstrom.to(u.um)
+
+            lower_lim = 0.25 < wave
+            upper_lim = wave < 4.629296073126975
+
+            flux = self.fetch_Phoenix()
+
+            new_w = wave[lower_lim * upper_lim]
+
+            new_ww = sp.linspace(new_w[0], new_w[-1], len(new_w))
+
+            ext = self.av_law(new_w * 1e4, Av, Rv)
+
+            brf, _ = pyasl.instrBroadGaussFast(
+                new_ww, flux, 650,
+                edgeHandling="firstlast",
+                fullout=True, maxsig=8
+            )
+            brf = brf[lower_lim * upper_lim]
+            brf = apply(ext, brf)
+            flx = brf * (rad / dist) ** 2 * new_w
+            ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color='k', zorder=0)
+        elif self.grid == 'btsettl':
+            wave, flux = self.fetch_btsettl()
+
+            lower_lim = 0.25 < wave
+            upper_lim = wave < 4.629296073126975
+
+            wave = wave[lower_lim * upper_lim]
+            flux = flux[lower_lim * upper_lim]
+            ext = self.av_law(wave * 1e4, Av, Rv)
+
+            new_w = sp.linspace(wave[0], wave[-1], len(wave))
+
+            brf, _ = pyasl.instrBroadGaussFast(
+                new_w, flux, 650,
+                edgeHandling="firstlast",
+                fullout=True, maxsig=8
+            )
+            flx = apply(ext, brf)
+            flx *= wave * (rad / dist) ** 2
+            ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
+        elif self.grid == 'ck04':
+            wave, flux = self.fetch_ck04()
+
+            lower_lim = 0.25 < wave
+            upper_lim = wave < 4.629296073126975
+
+            wave = wave[lower_lim * upper_lim]
+            flux = flux[lower_lim * upper_lim]
+            ext = self.av_law(wave * 1e4, Av, Rv)
+            flux = apply(ext, flux)
+            flux *= wave * (rad / dist) ** 2
+            ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
         pass
 
     def plot_chains(self):
@@ -470,8 +511,14 @@ class SEDPlotter:
                             bbox_inches='tight')
         pass
 
-    def fetch_SED(self):
-        """Fetch correct SED file."""
+    def fetch_Phoenix(self):
+        """Fetch correct Phoenixv2 SED file.
+
+        The directory containing the Phoenix spectra must be called PHOENIXv2
+        Within PHOENIXv2 there should be the wavelength file called
+        WAVE_PHOENIX-ACES-AGSS-COND-2011.fits and several folders called
+        Z[-/+]X.X where X.X are the metallicities (e.g. Z-0.0, Z+1.0, etc)
+        """
         # Change hdd to a class variable depending on an env param.
         teff = self.theta[0]
         logg = self.theta[1]
@@ -482,7 +529,7 @@ class SEDPlotter:
         sel_teff = int(sp.unique(self.star.teff)[select_teff])
         sel_logg = sp.unique(self.star.logg)[select_logg]
         sel_z = sp.unique(self.star.z)[select_z]
-        selected_SED = self.hdd + 'Z'
+        selected_SED = self.hdd + 'PHOENIXv2/Z'
         metal_add = ''
         if sel_z < 0:
             metal_add = str(sel_z)
@@ -492,14 +539,96 @@ class SEDPlotter:
             metal_add = '+' + str(sel_z)
         selected_SED += metal_add
         selected_SED += '/lte'
-        selected_SED += str(sel_teff) if len(str(sel_teff)
-                                             ) == 5 else '0' + str(sel_teff)
+        selected_SED += str(sel_teff) if len(str(sel_teff)) == 5 else \
+            '0' + str(sel_teff)
         selected_SED += '-' + str(sel_logg) + '0'
         selected_SED += metal_add
         selected_SED += '.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits'
         flux = fits.open(selected_SED)[0].data
         flux *= (u.erg / u.s / u.cm**2 / u.cm).to(u.erg / u.s / u.cm**2 / u.um)
         return flux
+
+    def fetch_btsettl(self):
+        """Fetch correct BT-Settl SED file.
+
+        The directory containing the Phoenix spectra must be called BTSettl
+        Within BTSettl there should be yet another directory
+        called AGSS2009, within BTSettl/AGSS2009 there should be the SED fits
+        files with the following naming convention:
+
+        lteTTT-G.G[-/+]Z.Za+0.0.BT-Settl.AGSS2009.fits
+
+        where TTT are the first 3 digits of the effective temperature if it's a
+        number over 10000, else it's the first 2 digit prepended by a 0.
+        G.G is the log g and Z.Z the metallicity.
+        """
+        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        teff = self.theta[0]
+        logg = self.theta[1]
+        z = self.theta[2]
+        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
+        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
+        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
+        sel_teff = int(sp.unique(self.star.teff)[select_teff]) // 100
+        sel_logg = sp.unique(self.star.logg)[select_logg]
+        sel_z = sp.unique(self.star.z)[select_z]
+        metal_add = ''
+        if sel_z < 0:
+            metal_add = str(sel_z)
+        if sel_z == 0:
+            metal_add = '-0.0'
+        if sel_z > 0:
+            metal_add = '+' + str(sel_z)
+        selected_SED = self.hdd + 'BTSettl/AGSS2009/lte'
+        selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
+            '0' + str(sel_teff)
+        selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
+        selected_SED += '.BT-Settl.AGSS2009.fits'
+        tab = Table(fits.open(selected_SED)[1].data)
+        flux = sp.array(tab['FLUX'].tolist()) * conversion
+        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        return wave, flux
+
+    def fetch_ck04(self):
+        """Fetch correct Castelli-Kurucz 2004 SED file.
+
+        The directory containing the Phoenix spectra must be called
+        Castelli_Kurucz. Within Castelli_Kurucz there should be a group of
+        directories called ck[pm]ZZ where ZZ is the metalicity without the dot.
+        Within each directory there are fits files named:
+
+        ck[pm]ZZ_TTTT.fits
+
+        where ZZ is metalicity as previous and TTTT is the effective
+        temperature.
+        """
+        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        teff = self.theta[0]
+        logg = self.theta[1]
+        z = self.theta[2]
+        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
+        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
+        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
+        sel_teff = int(sp.unique(self.star.teff)[select_teff])
+        sel_logg = sp.unique(self.star.logg)[select_logg]
+        sel_z = sp.unique(self.star.z)[select_z]
+        metal_add = ''
+        if sel_z < 0:
+            metal_add = 'm' + str(sel_z).replace('.', '')
+        if sel_z == 0:
+            metal_add = 'p00'
+        if sel_z > 0:
+            metal_add = 'p' + str(sel_z).replace('.', '')
+        name = 'ck' + metal_add
+        lgg = 'g{:.0f}'.format(sel_logg * 10)
+        selected_SED = self.hdd + 'Castelli_Kurucz/' + name + '/' + name
+        selected_SED += '_' + str(sel_teff) + '.fits'
+        tab = Table(fits.open(selected_SED)[1].data)
+        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        flux = sp.array(tab[lgg].tolist()) * conversion
+        return wave, flux
 
     def __create_titles(self, titles, theta, theta_up, theta_lo):
         new_titles = sp.empty(titles.shape[0], dtype=object)
