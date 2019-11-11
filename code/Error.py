@@ -114,10 +114,11 @@ class CatalogWarning(Error):
     """
 
     def __init__(self, par, type):
+        self.errorname = 'CatalogWarning'
         if type == 0:
             self.message = 'Invalid parallax found (plx <= 0)'
         if type == 1:
-            self.message = 'Parameter ' + par + ' not found!'
+            self.message = 'Parameter ' + par + ' not found! Be advised.'
         if type == 2:
             self.message = par + ' magnitude not found! Skipping.'
         if type == 3:
