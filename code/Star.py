@@ -265,11 +265,11 @@ class Star:
         # Grid stuff
         # self.full_grid = sp.loadtxt('../Datafiles/model_grid_fix.dat')
         if model.lower() == 'phoenix':
-            gridname = 'model_grid_Phoenixv2.dat'
+            gridname = '../Datafiles/model grids/model_grid_Phoenixv2.dat'
         if model.lower() == 'btsettl':
-            gridname = 'model_grid_BT_Settl.dat'
+            gridname = '../Datafiles/model grids/model_grid_BT_Settl.dat'
         if model.lower() == 'ck04':
-            gridname = 'model_grid_CK04.dat'
+            gridname = '../Datafiles/model grids/model_grid_CK04.dat'
         self.full_grid = sp.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
