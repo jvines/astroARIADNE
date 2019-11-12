@@ -110,6 +110,9 @@ class CatalogWarning(Error):
     Type 1 means parameter not found
     Type 2 means magnitude not found
     Type 3 means uncertainty not found
+    Type 4 means uncertainty is 0
+    Type 5 means star is not available in the catalog
+    Type 6 means the selected magnitude was already retrieved
 
     """
 
@@ -123,6 +126,13 @@ class CatalogWarning(Error):
             self.message = par + ' magnitude not found! Skipping.'
         if type == 3:
             self.message = par + ' magnitude error not found! Skipping.'
+        if type == 4:
+            self.message = par + ' magnitude error is 0. Skipping.'
+        if type == 5:
+            self.message = 'Star is not available in catalog ' + par
+            self.message += '. Skipping'
+        if type == 6:
+            self.message = par + ' magnitude already retrieved. Skipping.'
 
     def warn(self):
         """Print error message."""
