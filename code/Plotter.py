@@ -84,15 +84,19 @@ class SEDPlotter:
             self.order = sp.array(
                 ['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
 
+        directory = '../Datafiles/model_grids/'
         if self.grid.lower() == 'phoenix':
-            with closing(open('interpolations_Phoenix.pkl', 'rb')) as intp:
-                self.interpolators = pickle.load(intp)
+            with open(directory + 'interpolations_Phoenix.pkl', 'rb') as intp:
+                self.interpolator = pickle.load(intp)
         if self.grid.lower() == 'btsettl':
-            with closing(open('interpolations_BTSettl.pkl', 'rb')) as intp:
-                self.interpolators = pickle.load(intp)
+            with open(directory + 'interpolations_BTSettl.pkl', 'rb') as intp:
+                self.interpolator = pickle.load(intp)
         if self.grid.lower() == 'ck04':
-            with closing(open('interpolations_CK04.pkl', 'rb')) as intp:
-                self.interpolators = pickle.load(intp)
+            with open(directory + 'interpolations_CK04.pkl', 'rb') as intp:
+                self.interpolator = pickle.load(intp)
+        if self.grid.lower() == 'kurucz':
+            with open(directory + 'interpolations_Kurucz.pkl', 'rb') as intp:
+                self.interpolator = pickle.load(intp)
 
         # Get best fit parameters.
         theta = sp.zeros(self.order.shape[0])
@@ -104,7 +108,7 @@ class SEDPlotter:
 
         # Calculate best fit model.
         self.model = model_grid(self.theta, self.star,
-                                self.interpolators, self.norm, self.av_law)
+                                self.interpolator, self.norm, self.av_law)
 
         # Get archival fluxes.
         self.__extract_info()
@@ -147,7 +151,7 @@ class SEDPlotter:
 
         # Get models residuals
         residuals, errors = get_residuals(
-            self.theta, self.star, self.interpolators, self.norm, self.av_law)
+            self.theta, self.star, self.interpolator, self.norm, self.av_law)
 
         # resdiuals = residuals / errors
         norm_res = residuals / errors
@@ -318,6 +322,19 @@ class SEDPlotter:
             ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
         elif self.grid == 'ck04':
             wave, flux = self.fetch_ck04()
+
+            lower_lim = 0.25 < wave
+            upper_lim = wave < 4.629296073126975
+
+            wave = wave[lower_lim * upper_lim]
+            flux = flux[lower_lim * upper_lim]
+            ext = self.av_law(wave * 1e4, Av, Rv)
+            flux = apply(ext, flux)
+            flux *= wave * (rad / dist) ** 2
+            ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
+
+        elif self.grid == 'kurucz':
+            wave, flux = self.fetch_kurucz()
 
             lower_lim = 0.25 < wave
             upper_lim = wave < 4.629296073126975
@@ -626,6 +643,46 @@ class SEDPlotter:
         name = 'ck' + metal_add
         lgg = 'g{:.0f}'.format(sel_logg * 10)
         selected_SED = self.hdd + 'Castelli_Kurucz/' + name + '/' + name
+        selected_SED += '_' + str(sel_teff) + '.fits'
+        tab = Table(fits.open(selected_SED)[1].data)
+        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        flux = sp.array(tab[lgg].tolist()) * conversion
+        return wave, flux
+
+    def fetch_kurucz(self):
+        """Fetch correct Kurucz 1993 SED file.
+
+        The directory containing the Phoenix spectra must be called
+        Kurucz. Within Kurucz there should be a group of
+        directories called k[pm]ZZ where ZZ is the metalicity without the dot.
+        Within each directory there are fits files named:
+
+        k[pm]ZZ_TTTT.fits
+
+        where ZZ is metalicity as previous and TTTT is the effective
+        temperature.
+        """
+        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        teff = self.theta[0]
+        logg = self.theta[1]
+        z = self.theta[2]
+        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
+        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
+        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
+        sel_teff = int(sp.unique(self.star.teff)[select_teff])
+        sel_logg = sp.unique(self.star.logg)[select_logg]
+        sel_z = sp.unique(self.star.z)[select_z]
+        metal_add = ''
+        if sel_z < 0:
+            metal_add = 'm' + str(sel_z).replace('.', '')
+        if sel_z == 0:
+            metal_add = 'p00'
+        if sel_z > 0:
+            metal_add = 'p' + str(sel_z).replace('.', '')
+        name = 'k' + metal_add
+        lgg = 'g{:.0f}'.format(sel_logg * 10)
+        selected_SED = self.hdd + 'Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
