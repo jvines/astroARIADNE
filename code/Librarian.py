@@ -126,7 +126,6 @@ class Librarian:
         self.gaia_params()
         self.gaia_query()
 
-        # self.get_stellar_params(get_plx,s.plx get_rad, get_temp, get_lum)
         pass
 
     def gaia_params(self):
@@ -167,7 +166,7 @@ class Librarian:
             return 0, 0
         lo = res['radius_percentile_lower'][0]
         up = res['radius_percentile_upper'][0]
-        rad_e = max([lo, up])
+        rad_e = max([rad - lo, up - rad])
         return rad, rad_e
 
     def _get_teff(self, res):
@@ -176,7 +175,7 @@ class Librarian:
             return 0, 0
         lo = res['teff_percentile_lower'][0]
         up = res['teff_percentile_upper'][0]
-        teff_e = max([lo, up])
+        teff_e = max([teff - lo, up - teff])
         return teff, teff_e
 
     def _get_lum(self, res):
@@ -185,7 +184,7 @@ class Librarian:
             return 0, 0
         lo = res['lum_percentile_lower'][0]
         up = res['lum_percentile_upper'][0]
-        lum_e = max([lo, up])
+        lum_e = max([lum - lo, up - lum])
         return lum, lum_e
 
     def _get_gaia_id(self):
@@ -365,133 +364,3 @@ class Librarian:
     def _get_gaia(self, cat):
         mask = cat['DR2Name'] == 'Gaia DR2 {0}'.format(self.ids['Gaia'])
         self._retrieve_from_cat(cat[mask], 'Gaia')
-
-    def get_stellar_params(self, get_plx, get_rad, get_temp, get_lum):
-        """Retrieve stellar parameters from Gaia if available.
-
-        The retrieved stellar parameters are parallax, radius and effective
-        temperature.
-        The reported errors are 2 * the highest 1 sigma error found
-
-        Parameters
-        ----------
-        get_plx : bool
-            True to retrieve parallax.
-        get_rad : bool
-            True to retrieve radius.
-        get_temp : bool
-            True to retrieve effective temperature.
-        get_lum : bool
-            True to retrieve luminosity.
-
-        """
-        # Query Gaia
-        catalog = Gaia.query_object_async(
-            SkyCoord(
-                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=1 * u.arcmin
-        )
-
-        if get_plx:
-            self.get_parallax(catalog)
-        if get_rad:
-            self.get_radius(catalog)
-        if get_temp:
-            self.get_temperature(catalog)
-        if get_lum:
-            self.get_luminosity(catalog)
-        pass
-
-    def get_parallax(self, catalog):
-        """Retrieve the parallax of the star."""
-        if self.verbose:
-            print('Searching for parallax in Gaia...')
-
-        try:
-            plx = catalog['parallax'][0]
-            plx_e = catalog['parallax_error'][0]
-            self.plx = plx + 0.082  # offset stassusn torres 18
-            self.plx_e = plx_e
-
-            if self.verbose:
-                print('Parallax found!\nParallax value', end=': ')
-                print(self.plx, end=' +- ')
-                print(self.plx_e, end=' mas\n')
-        except Exception as e:
-            raise Exception('No Gaia parallax found for this star.')
-        pass
-
-    def get_radius(self, catalog):
-        """Retrieve the stellar radius from Gaia if available."""
-        if self.verbose:
-            print('Searching for radius in Gaia...')
-
-        try:
-            rad = catalog['radius_val'][0]
-            if sp.ma.is_masked(rad):
-                self.rad = None
-                self.rad_e = None
-                return
-            rad_upper = catalog['radius_percentile_upper'][0]
-            rad_lower = catalog['radius_percentile_lower'][0]
-            e_up = rad_upper - rad
-            e_lo = rad - rad_lower
-            rad_e = max([e_up, e_lo])
-            self.rad = rad
-            self.rad_e = rad_e
-
-            if self.verbose:
-                print('Radius found!\nRadius value', end=': ')
-                print(self.rad, end=' +- ')
-                print(self.rad_e, end=' R_sun\n')
-        except Exception as e:
-            raise Exception('No radius value found.')
-        pass
-
-    def get_temperature(self, catalog):
-        """Retrieve effective temperature from Gaia if available."""
-        if self.verbose:
-            print('Searching for effective temperature in Gaia...')
-
-        try:
-            temp = catalog['teff_val'][0]
-            temp_upper = catalog['teff_percentile_upper'][0]
-            temp_lower = catalog['teff_percentile_lower'][0]
-            e_up = temp_upper - temp
-            e_lo = temp - temp_lower
-            temp_e = max([e_up, e_lo])
-            self.temp = temp
-            self.temp_e = temp_e
-            if self.verbose:
-                print('Teff found!\nTeff value', end=': ')
-                print(self.temp, end=' +- ')
-                print(self.temp_e, end=' K\n')
-        except Exception as e:
-            raise Exception('No effective temperature value found.')
-        pass
-
-    def get_luminosity(self, catalog):
-        """Retrieve the lumnosity from Gaia if available."""
-        if self.verbose:
-            print('Searching for luminosity in Gaia...')
-
-        try:
-            lum = catalog['lum_val'][0]
-            if sp.ma.is_masked(lum):
-                self.lum = None
-                self.lum_e = None
-                return
-            lum_upper = catalog['lum_percentile_upper'][0]
-            lum_lower = catalog['lum_percentile_lower'][0]
-            e_up = lum_upper - lum
-            e_lo = lum - lum_lower
-            lum_e = max([e_up, e_lo])
-            self.lum = lum
-            self.lum_e = lum_e
-            if self.verbose:
-                print('Luminosity found!\nLuminosity value', end=': ')
-                print(self.lum, end=' +- ')
-                print(self.lum_e, end=' L_Sol\n')
-        except Exception as e:
-            raise Exception('No luminosity value found.')
-        pass
