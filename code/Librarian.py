@@ -1,10 +1,20 @@
 """Helper class to look up broadband photometry and stellar parameters."""
+import warnings
+
 import astropy.units as u
 import scipy as sp
 from astropy.coordinates import Angle, SkyCoord
+from astropy.utils.exceptions import AstropyWarning
 from astroquery.gaia import Gaia
 from astroquery.vizier import Vizier
 from tqdm import tqdm
+
+from Error import CatalogWarning
+
+warnings.filterwarnings('ignore', category=UserWarning, append=True)
+warnings.filterwarnings('ignore', category=AstropyWarning, append=True)
+Vizier.ROW_LIMIT = -1
+Vizier.columns = ['all']
 
 
 class Librarian:
@@ -27,6 +37,10 @@ class Librarian:
     __apass_errs = ['e_Vmag', 'e_Bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
     __apass_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
                        'SDSS_g', 'SDSS_r', 'SDSS_i']
+    __ascc_mags = ['Vmag', 'Bmag', 'Jmag', 'Hmag', 'Kmag']
+    __ascc_errs = ['e_Vmag', 'e_Bmag', 'e_Jmag', 'e_Hmag', 'e_Kmag']
+    __ascc_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
+                      '2MASS_J', '2MASS_H', '2MASS_Ks']
     __wise_mags = ['W1mag', 'W2mag']
     __wise_errs = ['e_W1mag', 'e_W2mag']
     __wise_filters = ['WISE_RSR_W1', 'WISE_RSR_W2']
@@ -39,19 +53,23 @@ class Librarian:
     __gaia_mags = ['Gmag', 'BPmag', 'RPmag']
     __gaia_errs = ['e_Gmag', 'e_BPmag', 'e_RPmag']
     __gaia_filters = ['GaiaDR2v2_G',  'GaiaDR2v2_BP', 'GaiaDR2v2_RP']
-    __sdss_mags = ['umag']
-    # __sdss_mags = ['umag', 'zmag']
-    __sdss_errs = ['e_umag']
-    # __sdss_errs = ['e_umag', 'e_zmag']
-    __sdss_filters = ['SDSS_u']
-    # __sdss_filters = ['SDSS_u', 'SDSS_z']
+    # __sdss_mags = ['umag']
+    __sdss_mags = ['umag', 'gmag', 'rmag', 'imag', 'zmag']
+    # __sdss_errs = ['e_umag']
+    __sdss_errs = ['e_umag', 'e_gmag', 'e_rmag', 'e_imag', 'e_zmag']
+    # __sdss_filters = ['SDSS_u']
+    __sdss_filters = ['SDSS_u', 'SDSS_g', 'SDSS_r', 'SDSS_i', 'SDSS_z']
     __galex_mags = ['FUV', 'NUV']
     __galex_errs = ['e_FUV', 'e_NUV']
     __galex_filters = ['GALEX_FUV', 'GALEX_NUV']
 
     # APASS DR9, WISE, PAN-STARRS DR1, GAIA DR2, 2MASS, SDSS DR9
     catalogs = {
-        'apass': [
+        'ASCC': [
+            'I/280B/ascc',
+            zip(__ascc_mags, __ascc_errs, __ascc_filters)
+        ],
+        'APASS': [
             'II/336/apass9',
             zip(__apass_mags, __apass_errs, __apass_filters)
         ],
@@ -81,7 +99,7 @@ class Librarian:
         ]
     }
 
-    def __init__(self, starname, ra, dec, get_plx, get_rad, get_temp, get_lum,
+    def __init__(self, starname, ra, dec, radius=None, g_id=None,
                  verbose=True):
         self.starname = starname
         self.ra = ra
@@ -92,67 +110,261 @@ class Librarian:
         self.mags = sp.zeros(self.filter_names.shape[0])
         self.mag_errs = sp.zeros(self.filter_names.shape[0])
 
-        self.get_stellar_params(get_plx, get_rad, get_temp, get_lum)
+        if radius is None:
+            self.radius = 20 * u.arcsec
+        else:
+            self.radius = radius
+        if g_id is None:
+            if verbose:
+                print('No Gaia ID provided. Searching for nearest source.')
+            self.g_id = self._get_gaia_id()
+            if verbose:
+                print('Gaia ID found: {0}'.format(self.g_id))
+        else:
+            self.g_id = g_id
+
+        self.gaia_params()
+        self.gaia_query()
+
+        # self.get_stellar_params(get_plx,s.plx get_rad, get_temp, get_lum)
         pass
 
-    def get_catalogs(self, coordinate_lookup):
+    def gaia_params(self):
+        # If gaia DR2 id is provided, query by id
+        fields = sp.array([
+            'parallax', 'parallax_error', 'teff_val',
+            'teff_percentile_lower', 'teff_percentile_upper',
+            'radius_val', 'radius_percentile_lower',
+            'radius_percentile_upper', 'lum_val',
+            'lum_percentile_lower', 'lum_percentile_upper'
+        ])
+        query = 'select '
+        for f in fields[:-1]:
+            query += 'gaia.' + f + ', '
+        query += 'gaia.' + fields[-1]
+        query += ' from gaiadr2.gaia_source as gaia'
+        query += ' where gaia.source_id={0}'.format(self.g_id)
+        j = Gaia.launch_job_async(query)
+        res = j.get_results()
+        self.plx, self.plx_e = self._get_parallax(res)
+        self.temp, self.temp_e = self._get_teff(res)
+        self.rad, self.rad_e = self._get_radius(res)
+        self.lum, self.lum_e = self._get_lum(res)
+        pass
+
+    def _get_parallax(self, res):
+        plx = res['parallax'][0]
+        if plx <= 0:
+            print('Invalid parallax.')
+            return 0, 0
+        plx_e = res['parallax_error'][0]
+        return plx, plx_e
+
+    def _get_radius(self, res):
+        rad = res['radius_val'][0]
+        if sp.ma.is_masked(rad):
+            print('Radius not found.')
+            return 0, 0
+        lo = res['radius_percentile_lower'][0]
+        up = res['radius_percentile_upper'][0]
+        rad_e = max([lo, up])
+        return rad, rad_e
+
+    def _get_teff(self, res):
+        teff = res['teff_val'][0]
+        if sp.ma.is_masked(teff):
+            return 0, 0
+        lo = res['teff_percentile_lower'][0]
+        up = res['teff_percentile_upper'][0]
+        teff_e = max([lo, up])
+        return teff, teff_e
+
+    def _get_lum(self, res):
+        lum = res['lum_val'][0]
+        if sp.ma.is_masked(lum):
+            return 0, 0
+        lo = res['lum_percentile_lower'][0]
+        up = res['lum_percentile_upper'][0]
+        lum_e = max([lo, up])
+        return lum, lum_e
+
+    def _get_gaia_id(self):
+        c = SkyCoord(self.ra, self.dec, unit=(u.deg, u.deg), frame='icrs')
+        j = Gaia.cone_search_async(c, self.radius)
+        res = j.get_results()
+        return res['source_id'][0]
+
+    def gaia_query(self):
+        """Query Gaia to get different catalog IDs."""
+        # cats = ['tmass', 'panstarrs1', 'sdssdr9', 'allwise']
+        # names = ['tmass', 'ps', 'sdss', 'allwise']
+        cats = ['tycho2', 'panstarrs1', 'sdssdr9',
+                'allwise', 'tmass', 'apassdr9']
+        names = ['tycho', 'ps', 'sdss', 'allwise', 'tmass', 'apass']
+        IDS = {
+            'ASCC': '',  # ASCC uses Tycho-2 id
+            'APASS': '',
+            '2MASS': '',
+            'Pan-STARRS': '',
+            'SDSS': '',
+            'Wise': '',
+            'Gaia': self.g_id
+        }
+        for c, n in zip(cats, names):
+            if c == 'apassdr9':
+                cat = 'APASS'
+            if c == 'tmass':
+                cat = '2MASS'
+            if c == 'tycho2':
+                cat = 'ASCC'
+            if c == 'panstarrs1':
+                cat = 'Pan-STARRS'
+            if c == 'sdssdr9':
+                cat = 'SDSS'
+            if c == 'allwise':
+                cat = 'Wise'
+            query = 'select original_ext_source_id from '
+            query += 'gaiadr2.gaia_source as gaia join '
+            query += 'gaiadr2.{}_best_neighbour as {} '.format(c, n)
+            query += 'on gaia.source_id={}.source_id where '.format(n)
+            query += 'gaia.source_id={}'.format(self.g_id)
+            j = Gaia.launch_job_async(query)
+            r = j.get_results()
+            if len(r):
+                IDS[cat] = r[0][0]
+            else:
+                IDS[cat] = 'skipped'
+                if self.verbose:
+                    CatalogWarning(cat, 5).warn()
+
+        self.ids = IDS
+
+    def get_catalogs(self):
         """Retrieve available catalogs for a star from Vizier."""
-        if coordinate_lookup:
-            cats = Vizier.query_region(
-                SkyCoord(
-                    ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-                ), radius=Angle(.001, "deg")
-            )
-        else:
-            cats = Vizier.query_object(self.starname)
+        cats = Vizier.query_region(
+            SkyCoord(
+                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
+            ), radius=self.radius
+        )
 
         return cats
 
-    def get_magnitudes(self, coordinate_lookup):
+    def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
 
         Looks into APASS, WISE, Pan-STARRS, Gaia, 2MASS and SDSS surveys
         looking for different magnitudes for the star, along with the
         associated uncertainties.
         """
+        coord = SkyCoord(self.ra, self.dec, unit=(u.deg, u.deg), frame='icrs')
         if self.verbose:
             print('Looking online for archival magnitudes for star', end=' ')
             print(self.starname)
 
-        cats = self.get_catalogs(coordinate_lookup)
+        cats = self.get_catalogs()
 
         for c in tqdm(self.catalogs.keys()):
             # load magnitude names, filter names and error names of
             # current catalog
             current = self.catalogs[c][1]
-            try:
-                # load current catalog
-                current_cat = cats[self.catalogs[c][0]]
-                for m, e, f in current:
-                    if sp.ma.is_masked(current_cat[m][0]):
-                        if self.verbose:
-                            print('No magnitude found for filter', end=' ')
-                            print(f, end='. Skipping\n')
-                        continue
-                    if sp.ma.is_masked(current_cat[e][0]):
-                        if self.verbose:
-                            print('No error for filter', end=' ')
-                            print(f, end='. Skipping\n')
-                        continue
-                    if current_cat[e][0] == 0:
-                        if self.verbose:
-                            print('Retrieved error for filter', end=' ')
-                            print(f, end=' is 0. Skipping\n')
-                        continue
-                    filt_idx = sp.where(f == self.filter_names)[0]
-                    self.used_filters[filt_idx] = 1
-                    self.mags[filt_idx] = current_cat[m][0]
-                    self.mag_errs[filt_idx] = current_cat[e][0]
-            except Exception as e:
-                if self.verbose:
-                    print('Star is not available in catalog', end=' ')
-                    print(c)
+            if c in self.ids.keys():
+                if self.ids[c] == 'skipped':
+                    continue
+                try:
+                    current_cat = cats[self.catalogs[c][0]]
+                except TypeError:
+                    CatalogWarning(c, 5).warn()
+                    continue
+                if c == 'APASS':
+                    self._get_apass(current_cat)
+                    continue
+                if c == 'Wise':
+                    self._get_wise(current_cat)
+                    continue
+                if c == 'ASCC':
+                    self._get_ascc(current_cat)
+                    continue
+                if c == 'SDSS':
+                    self._get_sdss(current_cat)
+                    continue
+                if c == 'Pan-STARRS':
+                    self._get_ps1(current_cat)
+                    continue
+                if c == 'Gaia':
+                    self._get_gaia(current_cat)
+                    continue
+            else:
+                try:
+                    # load current catalog
+                    current_cat = cats[self.catalogs[c][0]]
+                    self._retrieve_from_cat(current_cat)
+                except Exception as e:
+                    if self.verbose:
+                        CatalogWarning(c, 5).warn()
         pass
+
+    def _retrieve_from_cat(self, cat, name):
+        for m, e, f in self.catalogs[name][1]:
+            filt_idx = sp.where(f == self.filter_names)[0]
+
+            if self.used_filters[filt_idx] == 1:
+                if self.verbose:
+                    CatalogWarning(f, 6)
+                continue
+            mag = cat[m]
+            err = cat[e]
+            if sp.ma.is_masked(mag):
+                CatalogWarning(m, 2).warn()
+                continue
+            if sp.ma.is_masked(err):
+                CatalogWarning(m, 3).warn()
+                continue
+            if err == 0:
+                CatalogWarning(m, 4).warn()
+                continue
+
+            self._add_mags(mag, err, f)
+
+    def _add_mags(self, mag, er, filt):
+        filt_idx = sp.where(filt == self.filter_names)[0]
+        if self.used_filters[filt_idx] == 1:
+            if self.verbose:
+                CatalogWarning(filt, 6)
+            return
+        self.used_filters[filt_idx] = 1
+        self.mags[filt_idx] = mag
+        self.mag_errs[filt_idx] = er
+
+    def _get_ascc(self, cat):
+        tyc1, tyc2, tyc3 = self.ids['ASCC'].split(b'-')
+        mask = cat['TYC1'] == tyc1
+        mask *= cat['TYC2'] == tyc2
+        mask *= cat['TYC3'] == tyc3
+        self._retrieve_from_cat(cat[mask], 'ASCC')
+
+    def _get_apass(self, cat):
+        mask = cat['recno'] == self.ids['APASS']
+        self._retrieve_from_cat(cat[mask], 'APASS')
+
+    def _get_wise(self, cat):
+        mask = cat['AllWISE'] == self.ids['Wise']
+        self._retrieve_from_cat(cat[mask], 'Wise')
+
+    def _get_2mass(self, cat):
+        mask = cat['_2MASS'] == self.ids['2MASS']
+        self._retrieve_from_cat(cat[mask], '2MASS')
+
+    def _get_sdss(self, cat):
+        mask = cat['SDSS12'] == self.ids['SDSS']
+        self._retrieve_from_cat(cat[mask], 'SDSS')
+
+    def _get_ps1(self, cat):
+        mask = cat['objID'] == self.ids['Pan-STARRS']
+        self._retrieve_from_cat(cat[mask], 'Pan-STARRS')
+
+    def _get_gaia(self, cat):
+        mask = cat['DR2Name'] == 'Gaia DR2 {0}'.format(self.ids['Gaia'])
+        self._retrieve_from_cat(cat[mask], 'Gaia')
 
     def get_stellar_params(self, get_plx, get_rad, get_temp, get_lum):
         """Retrieve stellar parameters from Gaia if available.
@@ -177,7 +389,7 @@ class Librarian:
         catalog = Gaia.query_object_async(
             SkyCoord(
                 ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=Angle(.001, "deg")
+            ), radius=1 * u.arcmin
         )
 
         if get_plx:

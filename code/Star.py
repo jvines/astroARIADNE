@@ -190,9 +190,7 @@ class Star:
         lookup = self.get_rad + self.get_temp + self.get_plx + self.get_mags
         if lookup:
             lib = Librarian(starname, self.ra, self.dec,
-                            self.get_plx, self.get_rad,
-                            self.get_temp, self.get_lum,
-                            verbose)
+                            verbose=verbose)
             if self.get_plx:
                 self.plx = lib.plx
                 self.plx_e = lib.plx_e
@@ -206,7 +204,7 @@ class Star:
                 self.lum = lib.lum
                 self.lum_e = lib.lum_e
             if self.get_mags:
-                lib.get_magnitudes(coordinate_search)
+                lib.get_magnitudes()
                 self.used_filters = lib.used_filters
                 self.mags = lib.mags
                 self.mag_errs = lib.mag_errs
@@ -265,11 +263,13 @@ class Star:
         # Grid stuff
         # self.full_grid = sp.loadtxt('../Datafiles/model_grid_fix.dat')
         if model.lower() == 'phoenix':
-            gridname = '../Datafiles/model grids/model_grid_Phoenixv2.dat'
+            gridname = '../Datafiles/model_grids/model_grid_Phoenixv2.dat'
         if model.lower() == 'btsettl':
-            gridname = '../Datafiles/model grids/model_grid_BT_Settl.dat'
+            gridname = '../Datafiles/model_grids/model_grid_BT_Settl.dat'
         if model.lower() == 'ck04':
-            gridname = '../Datafiles/model grids/model_grid_CK04.dat'
+            gridname = '../Datafiles/model_grids/model_grid_CK04.dat'
+        if model.lower() == 'kurucz':
+            gridname = '../Datafiles/model_grids/model_grid_Kurucz.dat'
         self.full_grid = sp.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
