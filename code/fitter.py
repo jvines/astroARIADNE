@@ -61,6 +61,7 @@ class Fitter:
         self.priorfile = None
         self.av_law = 'fitzpatrick'
         self.n_samples = None
+        self.bma = False
 
     @property
     def star(self):
@@ -137,16 +138,18 @@ class Fitter:
     def grid(self, grid):
         assert type(grid) == str
         self._grid = grid
+        directory = '../Datafiles/model_grids/'
         if grid.lower() == 'phoenix':
-            # with closing(open('interpolations.pkl', 'rb')) as intp:
-            #     self._interpolators = pickle.load(intp)
-            with closing(open('interpolations_Phoenix.pkl', 'rb')) as intp:
+            with open(directory + 'interpolations_Phoenix.pkl', 'rb') as intp:
                 self._interpolator = pickle.load(intp)
         if grid.lower() == 'btsettl':
-            with closing(open('interpolations_BTSettl.pkl', 'rb')) as intp:
+            with open(directory + 'interpolations_BTSettl.pkl', 'rb') as intp:
                 self._interpolator = pickle.load(intp)
         if grid.lower() == 'ck04':
-            with closing(open('interpolations_CK04.pkl', 'rb')) as intp:
+            with open(directory + 'interpolations_CK04.pkl', 'rb') as intp:
+                self._interpolator = pickle.load(intp)
+        if grid.lower() == 'kurucz':
+            with open(directory + 'interpolations_Kurucz.pkl', 'rb') as intp:
                 self._interpolator = pickle.load(intp)
 
     @property
