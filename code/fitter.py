@@ -151,6 +151,9 @@ class Fitter:
         if grid.lower() == 'kurucz':
             with open(directory + 'interpolations_Kurucz.pkl', 'rb') as intp:
                 self._interpolator = pickle.load(intp)
+        if grid.lower() == 'nextgen':
+            with open(directory + 'interpolations_NextGen.pkl', 'rb') as intp:
+                self._interpolator = pickle.load(intp)
 
     @property
     def bma(self):

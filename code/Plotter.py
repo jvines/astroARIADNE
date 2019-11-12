@@ -97,6 +97,9 @@ class SEDPlotter:
         if self.grid.lower() == 'kurucz':
             with open(directory + 'interpolations_Kurucz.pkl', 'rb') as intp:
                 self.interpolator = pickle.load(intp)
+        if self.grid.lower() == 'nextgen':
+            with open(directory + 'interpolations_NextGen.pkl', 'rb') as intp:
+                self.interpolator = pickle.load(intp)
 
         # Get best fit parameters.
         theta = sp.zeros(self.order.shape[0])
@@ -300,6 +303,7 @@ class SEDPlotter:
             brf = apply(ext, brf)
             flx = brf * (rad / dist) ** 2 * new_w
             ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color='k', zorder=0)
+
         elif self.grid == 'btsettl':
             wave, flux = self.fetch_btsettl()
 
@@ -320,6 +324,28 @@ class SEDPlotter:
             flx = apply(ext, brf)
             flx *= wave * (rad / dist) ** 2
             ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
+
+        elif self.grid == 'nextgen':
+            wave, flux = self.fetch_nextgen()
+
+            lower_lim = 0.25 < wave
+            upper_lim = wave < 4.629296073126975
+
+            wave = wave[lower_lim * upper_lim]
+            flux = flux[lower_lim * upper_lim]
+            ext = self.av_law(wave * 1e4, Av, Rv)
+
+            new_w = sp.linspace(wave[0], wave[-1], len(wave))
+
+            brf, _ = pyasl.instrBroadGaussFast(
+                new_w, flux, 650,
+                edgeHandling="firstlast",
+                fullout=True, maxsig=8
+            )
+            flx = apply(ext, brf)
+            flx *= wave * (rad / dist) ** 2
+            ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
+
         elif self.grid == 'ck04':
             wave, flux = self.fetch_ck04()
 
@@ -570,7 +596,7 @@ class SEDPlotter:
     def fetch_btsettl(self):
         """Fetch correct BT-Settl SED file.
 
-        The directory containing the Phoenix spectra must be called BTSettl
+        The directory containing the BT-Settl spectra must be called BTSettl
         Within BTSettl there should be yet another directory
         called AGSS2009, within BTSettl/AGSS2009 there should be the SED fits
         files with the following naming convention:
@@ -609,10 +635,52 @@ class SEDPlotter:
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
         return wave, flux
 
+    def fetch_nextgen(self):
+        """Fetch correct BT-NextGen SED file.
+
+        The directory containing the BT-NextGen spectra must be called
+        BTNextGen. Within BTNextGen there should be yet another directory
+        called AGSS2009, within BTNextGen/AGSS2009 there should be the SED fits
+        files with the following naming convention:
+
+        lteTTT-G.G[-/+]Z.Za+0.0..BT-NextGen.AGSS2009.fits
+
+        where TTT are the first 3 digits of the effective temperature if it's a
+        number over 10000, else it's the first 2 digit prepended by a 0.
+        G.G is the log g and Z.Z the metallicity.
+        """
+        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        teff = self.theta[0]
+        logg = self.theta[1]
+        z = self.theta[2]
+        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
+        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
+        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
+        sel_teff = int(sp.unique(self.star.teff)[select_teff]) // 100
+        sel_logg = sp.unique(self.star.logg)[select_logg]
+        sel_z = sp.unique(self.star.z)[select_z]
+        metal_add = ''
+        if sel_z < 0:
+            metal_add = str(sel_z)
+        if sel_z == 0:
+            metal_add = '-0.0'
+        if sel_z > 0:
+            metal_add = '+' + str(sel_z)
+        selected_SED = self.hdd + 'BTNextGen/AGSS2009/lte'
+        selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
+            '0' + str(sel_teff)
+        selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
+        selected_SED += '.BT-NextGen.AGSS2009.fits'
+        tab = Table(fits.open(selected_SED)[1].data)
+        flux = sp.array(tab['FLUX'].tolist()) * conversion
+        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        return wave, flux
+
     def fetch_ck04(self):
         """Fetch correct Castelli-Kurucz 2004 SED file.
 
-        The directory containing the Phoenix spectra must be called
+        The directory containing the Castelli-Kurucz spectra must be called
         Castelli_Kurucz. Within Castelli_Kurucz there should be a group of
         directories called ck[pm]ZZ where ZZ is the metalicity without the dot.
         Within each directory there are fits files named:
@@ -652,7 +720,7 @@ class SEDPlotter:
     def fetch_kurucz(self):
         """Fetch correct Kurucz 1993 SED file.
 
-        The directory containing the Phoenix spectra must be called
+        The directory containing the Kurucz spectra must be called
         Kurucz. Within Kurucz there should be a group of
         directories called k[pm]ZZ where ZZ is the metalicity without the dot.
         Within each directory there are fits files named:

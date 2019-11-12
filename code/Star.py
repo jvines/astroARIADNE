@@ -149,12 +149,12 @@ class Star:
         'GALEX_FUV', 'GALEX_NUV'
     ])
 
-    def __init__(self, starname, ra, dec,
-                 get_plx=True, plx=None, plx_e=None,
-                 get_rad=True, rad=None, rad_e=None,
-                 get_temp=True, temp=None, temp_e=None,
-                 get_lum=True, lum=None, lum_e=None,
-                 mag_dict=None, coordinate_search=True, verbose=True):
+    def __init__(self, starname, ra, dec, g_id=None,
+                 plx=None, plx_e=None,
+                 rad=None, rad_e=None,
+                 temp=None, temp_e=None,
+                 lum=None, lum_e=None,
+                 mag_dict=None, verbose=True):
         """See class docstring."""
         # MISC
         self.verbose = verbose
@@ -175,11 +175,13 @@ class Star:
                 print('Input magnitudes detected.', end=' ')
                 print('Overriding coordinate search.')
 
-        self.get_rad = get_rad if rad is None else False
-        self.get_plx = get_plx if plx is None else False
-        self.get_temp = get_temp if temp is None else False
-        self.get_lum = get_lum if lum is None else False
+        self.get_rad = True if rad is None else False
+        self.get_plx = True if plx is None else False
+        self.get_temp = True if temp is None else False
+        self.get_lum = True if lum is None else False
         self.get_mags = True if mag_dict is None else False
+
+        self.g_id = g_id
 
         # Star stuff
         self.starname = starname
@@ -189,8 +191,9 @@ class Star:
         # and parallax
         lookup = self.get_rad + self.get_temp + self.get_plx + self.get_mags
         if lookup:
-            lib = Librarian(starname, self.ra, self.dec,
+            lib = Librarian(starname, self.ra, self.dec, g_id=self.g_id,
                             verbose=verbose)
+            self.g_id = lib.g_id
             if self.get_plx:
                 self.plx = lib.plx
                 self.plx_e = lib.plx_e
@@ -270,6 +273,8 @@ class Star:
             gridname = '../Datafiles/model_grids/model_grid_CK04.dat'
         if model.lower() == 'kurucz':
             gridname = '../Datafiles/model_grids/model_grid_Kurucz.dat'
+        if model.lower() == 'nextgen':
+            gridname = '../Datafiles/model_grids/model_grid_NextGen.dat'
         self.full_grid = sp.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
