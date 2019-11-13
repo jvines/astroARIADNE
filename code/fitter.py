@@ -349,14 +349,26 @@ class Fitter:
             self._grids = []
             self._interpolators = []
             for mod in self._bma_models:
+                directory = '../Datafiles/model_grids/'
                 if mod.lower() == 'phoenix':
-                    with open('interpolations_Phoenix.pkl', 'rb') as intp:
+                    with open(directory + 'interpolations_Phoenix.pkl', 'rb') \
+                            as intp:
                         self._interpolators.append(pickle.load(intp))
                 if mod.lower() == 'btsettl':
-                    with open('interpolations_BTSettl.pkl', 'rb') as intp:
+                    with open(directory + 'interpolations_BTSettl.pkl', 'rb') \
+                            as intp:
                         self._interpolators.append(pickle.load(intp))
                 if mod.lower() == 'ck04':
-                    with open('interpolations_CK04.pkl', 'rb') as intp:
+                    with open(directory + 'interpolations_CK04.pkl', 'rb') \
+                            as intp:
+                        self._interpolators.append(pickle.load(intp))
+                if mod.lower() == 'kurucz':
+                    with open(directory + 'interpolations_Kurucz.pkl', 'rb') \
+                            as intp:
+                        self._interpolators.append(pickle.load(intp))
+                if mod.lower() == 'nextgen':
+                    with open(directory + 'interpolations_NextGen.pkl', 'rb') \
+                            as intp:
                         self._interpolators.append(pickle.load(intp))
                 self._grids.append(mod)
 

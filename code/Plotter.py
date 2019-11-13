@@ -31,7 +31,6 @@ class SEDPlotter:
     wav_file = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
     def __init__(self, input_files, out_folder, pdf=False, png=True):
-        # TODO: read settings file.
         print('\nInitializing plotter.\n')
         # General setup
         self.pdf = pdf
@@ -146,8 +145,6 @@ class SEDPlotter:
 
     def plot_SED(self):
         """Create the plot of the SED."""
-        # TODO: Finish the function
-
         # Get plot ylims.
         ymin = (self.flux * self.wave).min()
         ymax = (self.flux * self.wave).max()
@@ -703,7 +700,7 @@ class SEDPlotter:
         sel_z = sp.unique(self.star.z)[select_z]
         metal_add = ''
         if sel_z < 0:
-            metal_add = 'm' + str(sel_z).replace('.', '')
+            metal_add = 'm' + str(-sel_z).replace('.', '')
         if sel_z == 0:
             metal_add = 'p00'
         if sel_z > 0:
@@ -743,7 +740,7 @@ class SEDPlotter:
         sel_z = sp.unique(self.star.z)[select_z]
         metal_add = ''
         if sel_z < 0:
-            metal_add = 'm' + str(sel_z).replace('.', '')
+            metal_add = 'm' + str(-sel_z).replace('.', '')
         if sel_z == 0:
             metal_add = 'p00'
         if sel_z > 0:

@@ -129,6 +129,7 @@ class Librarian:
         pass
 
     def gaia_params(self):
+        """Retrieve parallax, radius, teff and lum from Gaia."""
         # If gaia DR2 id is provided, query by id
         fields = sp.array([
             'parallax', 'parallax_error', 'teff_val',
@@ -154,7 +155,7 @@ class Librarian:
     def _get_parallax(self, res):
         plx = res['parallax'][0]
         if plx <= 0:
-            print('Invalid parallax.')
+            CatalogWarning(0, 0).warn()
             return 0, 0
         plx_e = res['parallax_error'][0]
         return plx, plx_e
@@ -162,7 +163,7 @@ class Librarian:
     def _get_radius(self, res):
         rad = res['radius_val'][0]
         if sp.ma.is_masked(rad):
-            print('Radius not found.')
+            CatalogWarning('radius', 1).warn()
             return 0, 0
         lo = res['radius_percentile_lower'][0]
         up = res['radius_percentile_upper'][0]
@@ -172,6 +173,7 @@ class Librarian:
     def _get_teff(self, res):
         teff = res['teff_val'][0]
         if sp.ma.is_masked(teff):
+            CatalogWarning('teff', 1).warn()
             return 0, 0
         lo = res['teff_percentile_lower'][0]
         up = res['teff_percentile_upper'][0]
@@ -181,6 +183,7 @@ class Librarian:
     def _get_lum(self, res):
         lum = res['lum_val'][0]
         if sp.ma.is_masked(lum):
+            CatalogWarning('lum', 1).warn()
             return 0, 0
         lo = res['lum_percentile_lower'][0]
         up = res['lum_percentile_upper'][0]
@@ -262,7 +265,7 @@ class Librarian:
 
         cats = self.get_catalogs()
 
-        for c in tqdm(self.catalogs.keys()):
+        for c in self.catalogs.keys():
             # load magnitude names, filter names and error names of
             # current catalog
             current = self.catalogs[c][1]
@@ -309,18 +312,18 @@ class Librarian:
             if self.used_filters[filt_idx] == 1:
                 if self.verbose:
                     CatalogWarning(f, 6)
-                continue
+                return
             mag = cat[m]
             err = cat[e]
             if sp.ma.is_masked(mag):
                 CatalogWarning(m, 2).warn()
-                continue
+                return
             if sp.ma.is_masked(err):
                 CatalogWarning(m, 3).warn()
-                continue
+                return
             if err == 0:
                 CatalogWarning(m, 4).warn()
-                continue
+                return
 
             self._add_mags(mag, err, f)
 

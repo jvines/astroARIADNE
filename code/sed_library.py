@@ -137,7 +137,8 @@ def log_prior(theta, star, prior_dict, coordinator, use_norm):
             try:
                 lp += prior_dict['logg'].pdf(theta[i])
             except AttributeError:
-                with closing(open('../Datafiles/logg_kde.pkl', 'rb')) as jar:
+                with closing(open('../Datafiles/priors/logg_kde.pkl', 'rb')) \
+                        as jar:
                     prior = pickle.load(jar)['logg']
                 lp += prior(theta[i])
             i += 1
