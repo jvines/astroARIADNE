@@ -30,7 +30,8 @@ class SEDPlotter:
 
     wav_file = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
-    def __init__(self, input_files, out_folder, pdf=False, png=True):
+    def __init__(self, input_files, out_folder, pdf=False, png=True,
+                 model=None):
         print('\nInitializing plotter.\n')
         # General setup
         self.pdf = pdf
@@ -53,13 +54,16 @@ class SEDPlotter:
         self.coordinator = out['coordinator']
         self.fixed = out['fixed']
         self.norm = out['norm']
-        if self.engine != 'Bayesian Model Averaging':
-            self.grid = out['model_grid']
+        if model is None:
+            if self.engine != 'Bayesian Model Averaging':
+                self.grid = out['model_grid']
+            else:
+                zs = sp.array([out['lnZ'][key] for key in out['lnZ'].keys()])
+                keys = sp.array([key for key in out['lnZ'].keys()])
+                grid = keys[sp.argmax(zs)]
+                self.grid = grid
         else:
-            zs = sp.array([out['lnZ'][key] for key in out['lnZ'].keys()])
-            keys = sp.array([key for key in out['lnZ'].keys()])
-            grid = keys[sp.argmax(zs)]
-            self.grid = grid
+            self.grid = model
         self.av_law = out['av_law']
 
         # Create target folders
@@ -213,7 +217,7 @@ class SEDPlotter:
 
         # Formatting
         res_std = norm_res.std()
-        ax.set_ylim([ymin * .8, ymax * 1.1])
+        ax.set_ylim([ymin * .8, ymax * 1.25])
         # ax_r.set_ylim([-5, 5])
         ax.set_xlim([0.25, 10])
         ax_r.set_xlim([0.25, 10])
@@ -270,6 +274,7 @@ class SEDPlotter:
         pass
 
     def SED(self, ax):
+        """Plot the SED model."""
         Rv = 3.1  # For extinction.
         rad = self.theta[4]
         dist = self.theta[3] * u.pc.to(u.solRad)
