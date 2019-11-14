@@ -27,11 +27,74 @@ from utils import *
 
 
 class SEDPlotter:
+    """Short summary.
 
-    wav_file = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
+    Parameters
+    ----------
+    input_files : str
+        Directory containing the code's output files.
+    out_folder : type
+        Directory where to put the output plots.
+    pdf : type
+        Set to True to output plots in pdf.
+    png : type
+        Set to True to output plots in png.
+    model : type
+        Set to override the SED model that's going to be plotted.
+        Possible values are:
+            - Phoenix
+            - BTSettl
+            - NextGen
+            - CK04 (Castelli & Kurucz 2004)
+            - Kurucz (Kurucz 1993)
+
+    Examples
+    -------
+    Examples should be written in doctest format, and
+    should illustrate how to use the function/class.
+    >>>
+
+    Attributes
+    ----------
+    chain_out : str
+        Output directory for chain plot.
+    like_out : str
+        Output directory for likelihood plot.
+    post_out : str
+        Output directory for posteriors plot.
+    hdd : type
+        Description of attribute `hdd`.
+    out : dict
+        SED fitting routine output.
+    engine : str
+        Selected fitting engine.
+    star : Star
+        The fitted Star object.
+    coordinator : array_like
+        Array coordinating fixed parameters.
+    fixed : array_like
+        Array coordinating fixed parameters.
+    norm : bool
+        norm is set to True if a normalization constant is fitted instead of
+        radius + distance.
+    grid : str
+        Selected model grid.
+    av_law : function
+        Exticntion law chosen for the fit.
+    order : array_like
+        Array coordinating parameter order.
+    interpolator : function
+        Interpolator function.
+    theta : array_like
+        `Best fit` parameter vector
+
+    """
+
+    __wav_file = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
     def __init__(self, input_files, out_folder, pdf=False, png=True,
                  model=None):
+        """See class docstring."""
         print('\nInitializing plotter.\n')
         # General setup
         self.pdf = pdf
@@ -120,7 +183,7 @@ class SEDPlotter:
         self.__extract_info()
 
         # Setup plots.
-        self.read_config()
+        self.__read_config()
         print('\nPlotter initialized.\n')
 
     def __extract_info(self):
@@ -282,7 +345,7 @@ class SEDPlotter:
 
         # SED plot.
         if self.grid == 'phoenix':
-            wave = fits.open(self.hdd + self.wav_file)[0].data
+            wave = fits.open(self.hdd + self.__wav_file)[0].data
             wave *= u.angstrom.to(u.um)
 
             lower_lim = 0.25 < wave
@@ -805,7 +868,7 @@ class SEDPlotter:
                 new_labels[i] = r'$\sigma$'
         return new_labels
 
-    def read_config(self):
+    def __read_config(self):
         """Read plotter configuration file."""
         settings = open('../Datafiles/plot_settings.dat', 'r')
         for line in settings.readlines():
