@@ -100,7 +100,7 @@ class Librarian:
     }
 
     def __init__(self, starname, ra, dec, radius=None, g_id=None,
-                 verbose=True):
+                 verbose=True, mags=True):
         self.starname = starname
         self.ra = ra
         self.dec = dec
@@ -124,7 +124,8 @@ class Librarian:
             self.g_id = g_id
 
         self.gaia_params()
-        self.gaia_query()
+        if mags:
+            self.gaia_query()
 
         pass
 

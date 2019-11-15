@@ -282,8 +282,6 @@ class SEDPlotter:
         res_std = norm_res.std()
         ax.set_ylim([ymin * .8, ymax * 1.25])
         # ax_r.set_ylim([-5, 5])
-        ax.set_xlim([0.25, 10])
-        ax_r.set_xlim([0.25, 10])
         ax_r.set_ylim([-4 * res_std, 4 * res_std])
         ax.set_xscale('log', nonposx='clip')
         ax.set_yscale('log', nonposy='clip')
@@ -317,6 +315,9 @@ class SEDPlotter:
 
         ax_r.yaxis.set_minor_locator(ylocmin)
         ax_r.yaxis.set_minor_formatter(ticker.NullFormatter())
+
+        ax.set_xlim([0.25, 6])
+        ax_r.set_xlim([0.25, 6])
 
         labels = [item.get_text() for item in ax.get_xticklabels()]
 

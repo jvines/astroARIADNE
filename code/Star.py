@@ -192,7 +192,7 @@ class Star:
         lookup = self.get_rad + self.get_temp + self.get_plx + self.get_mags
         if lookup:
             lib = Librarian(starname, self.ra, self.dec, g_id=self.g_id,
-                            verbose=verbose)
+                            verbose=verbose, mags=self.get_mags)
             self.g_id = lib.g_id
             if self.get_plx:
                 self.plx = lib.plx
