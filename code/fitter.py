@@ -393,8 +393,7 @@ class Fitter:
                                   sp.log10(self.star.lum_e))
             if self.star.get_rad and self.star.rad is not None:
                 params['radius'] = (self.star.rad, self.star.rad_e)
-            if self.star.get_plx:
-                params['parallax'] = (self.star.plx, self.star.plx_e)
+            params['parallax'] = (self.star.plx, self.star.plx_e)
             mask = sp.array([1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
                              0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0])
             mags = self.star.mags[mask == 1]
@@ -417,7 +416,7 @@ class Fitter:
         else:
             with closing(open('../Datafiles/prior/teff_ppf.pkl', 'rb')) as jar:
                 defaults['teff'] = pickle.load(jar)
-            defaults['teff'] = teff_prior['teff']
+            # defaults['teff'] = teff_prior['teff']
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
         if not self._norm:
             defaults['dist'] = st.norm(
@@ -623,13 +622,18 @@ class Fitter:
                                nlive_init=self._nlive,
                                wt_kwargs={'pfrac': .95})
         else:
-            sampler = dynesty.NestedSampler(
-                dynesty_loglike_bma, pt_dynesty, self.ndim,
-                nlive=self._nlive, bound=self._bound,
-                sample=self._sample,
-                logl_args=([intp])
-            )
-            sampler.run_nested(dlogz=self._dlogz)
+            try:
+                sampler = dynesty.NestedSampler(
+                    dynesty_loglike_bma, pt_dynesty, self.ndim,
+                    nlive=self._nlive, bound=self._bound,
+                    sample=self._sample,
+                    logl_args=([intp])
+                )
+                sampler.run_nested(dlogz=self._dlogz)
+            except:
+                dump_out = self.out_folder + '/' + grid + '_DUMP.pkl'
+                pickle.dump(sampler, open(dump_out, 'wb'))
+                DynestyError(dump_out).raise_()
 
         results = sampler.results
         out_file = self.out_folder + '/' + grid + '_out.pkl'
@@ -819,11 +823,10 @@ class Fitter:
                 out['best_fit']['rad'] = best
                 logdat += 'rad\t{:.4f}\t'.format(best)
                 _, lo, up = credibility_interval(samp)
-                logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
+                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
             else:
                 out['best_fit'][param] = self.fixed[i]
-                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
-                logdat += '(FIXED)\n'
+                logdat += param + '\t{:.4f}\n'.format(self.fixed[i])
             best_theta[i] = out['best_fit'][param]
 
         # Add derived mass to best fit dictionary.
@@ -833,7 +836,7 @@ class Fitter:
         out['best_fit']['mass'] = best
         logdat += 'mass\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
-        logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
+        logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
 
         # Fill in best loglike, prior and posterior.
 
@@ -951,11 +954,10 @@ class Fitter:
                 out['best_fit']['rad'] = best
                 logdat += 'rad\t{:.4f}\t'.format(best)
                 _, lo, up = credibility_interval(samp)
-                logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
+                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
             else:
                 out['best_fit'][param] = self.fixed[i]
-                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
-                logdat += '(FIXED)\n'
+                logdat += param + '\t{:.4f}\n'.format(self.fixed[i])
             best_theta[i] = out['best_fit'][param]
 
         # Add derived mass to best fit dictionary.
@@ -965,7 +967,7 @@ class Fitter:
         out['best_fit']['mass'] = best
         logdat += 'mass\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
-        logdat += '{:.4f}\t{:.4f} (DERIVED)\n'.format(up, lo)
+        logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
 
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
