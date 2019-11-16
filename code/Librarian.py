@@ -159,7 +159,8 @@ class Librarian:
             CatalogWarning(0, 0).warn()
             return 0, 0
         plx_e = res['parallax_error'][0]
-        return plx, plx_e
+        # Parallax correction.
+        return plx + 0.082, sp.sqrt(plx_e ** 2 + 0.033**2)
 
     def _get_radius(self, res):
         rad = res['radius_val'][0]
