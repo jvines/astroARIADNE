@@ -139,3 +139,11 @@ class CatalogWarning(Error):
         print('Warning!', end=': ')
         print(self, end='\nWarning message: ')
         print(self.message)
+
+
+class DynestyError(Error):
+    """Exception raised when dynesty crashes."""
+
+    def __init__(self, out):
+        self.message = 'ERROR OCCURRED DURING DYNESTY RUN.\n'
+        self.message += 'DUMPING SAMPLER TO {}'.format(out)
