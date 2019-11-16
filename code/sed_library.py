@@ -137,7 +137,7 @@ def log_prior(theta, star, prior_dict, coordinator, use_norm):
             try:
                 lp += prior_dict['logg'].pdf(theta[i])
             except AttributeError:
-                with closing(open('../Datafiles/priors/logg_kde.pkl', 'rb')) \
+                with closing(open('../Datafiles/prior/logg_kde.pkl', 'rb')) \
                         as jar:
                     prior = pickle.load(jar)['logg']
                 lp += prior(theta[i])
@@ -146,8 +146,10 @@ def log_prior(theta, star, prior_dict, coordinator, use_norm):
         if par == 'teff':
             if not 3500 <= theta[i] <= 12000:
                 return -sp.inf
-            lp += prior_dict['teff'].pdf(
-                theta[i]) if star.get_temp else prior_dict['teff'](theta[i])
+            try:
+                lp += prior_dict['teff'](theta[i])
+            except TypeError:
+                lp += prior_dict['teff'].ppf(theta[i])
             i += 1
             continue
         if par == 'z' and not (-1 <= theta[i] <= 1):
@@ -209,17 +211,19 @@ def prior_transform_dynesty(u, star, prior_dict, coordinator, use_norm):
             continue
         if par == 'logg':
             try:
-                u2[i] = prior_dict['logg'](u2[i])
+                u2[i] = prior_dict['logg'](u[i])
             except TypeError:
-                u2[i] = prior_dict['logg'].ppf(u2[i])
+                u2[i] = prior_dict['logg'].ppf(u[i])
             i += 1
             continue
         if par == 'teff':
-            u2[i] = prior_dict['teff'].ppf(
-                u2[i]) if star.get_temp else prior_dict['teff'](u2[i])
+            try:
+                u2[i] = prior_dict['teff'](u[i])
+            except TypeError:
+                u2[i] = prior_dict['teff'].ppf(u[i])
             i += 1
             continue
-        u2[i] = prior_dict[par].ppf(u2[i])
+        u2[i] = prior_dict[par].ppf(u[i])
         i += 1
     return u2
 
