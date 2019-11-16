@@ -197,20 +197,33 @@ class Star:
             if self.get_plx:
                 self.plx = lib.plx
                 self.plx_e = lib.plx_e
+
             if self.get_rad:
                 self.rad = lib.rad
                 self.rad_e = lib.rad_e
+
             if self.get_temp:
                 self.temp = lib.temp
                 self.temp_e = lib.temp_e
+
             if self.get_lum:
                 self.lum = lib.lum
                 self.lum_e = lib.lum_e
+
             if self.get_mags:
                 lib.get_magnitudes()
                 self.used_filters = lib.used_filters
                 self.mags = lib.mags
                 self.mag_errs = lib.mag_errs
+        else:
+            self.plx = plx
+            self.plx_e = plx_e
+            self.rad = rad
+            self.rad_e = rad_e
+            self.temp = temp
+            self.temp_e = temp_e
+            self.lum = lum
+            self.lum_e = lum_e
         if not self.get_mags:
             filters = []
             self.used_filters = sp.zeros(self.filter_names.shape[0])
