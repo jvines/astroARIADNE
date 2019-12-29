@@ -1,6 +1,5 @@
 # @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """plot_utils module for plotting SEDs."""
-# TODO: create settings file
 
 import copy
 import glob

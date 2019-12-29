@@ -1,0 +1,1 @@
+include README.md Datafiles/*.dat Datafiles/prior/*.pkl Datafiles/model_grids/*.pkl Datafiles/model_grids/*.dat
