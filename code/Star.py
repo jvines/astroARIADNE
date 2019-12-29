@@ -2,6 +2,8 @@
 """Star.py contains the Star class which contains the data regarding a star."""
 
 import pickle
+import random
+import time
 from contextlib import closing
 
 import astropy.units as u
@@ -9,9 +11,13 @@ import scipy as sp
 from astropy.coordinates import SkyCoord
 from dustmaps.sfd import SFDQuery
 from scipy.interpolate import RegularGridInterpolator
+from tabulate import tabulate
+from termcolor import colored
 
+from isochrone import estimate
 from Librarian import Librarian
 from phot_utils import *
+from utils import display_star_fin, display_star_init
 
 
 class Star:
@@ -86,6 +92,9 @@ class Star:
     verbose : bool, optional
         Set to False to supress printed outputs.
 
+    ignore : list, optional
+        A list with the catalogs to ignore for whatever reason.
+
     Attributes
     ----------
     catalogs : dict
@@ -137,27 +146,48 @@ class Star:
 
     """
 
-    # pyphot filter names: currently unused are U R I PS1_w
+    # pyphot filter names
 
     filter_names = sp.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
+        'GROUND_COUSINS_I', 'GROUND_COUSINS_R',
         'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
+        'TYCHO_B_MvB', 'TYCHO_V_MvB',
+        'STROMGREN_b', 'STROMGREN_u', 'STROMGREN_v', 'STROMGREN_y',
         'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
         'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
         'WISE_RSR_W1', 'WISE_RSR_W2',
-        'GALEX_FUV', 'GALEX_NUV'
+        'GALEX_FUV', 'GALEX_NUV',
+        'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
+        'NGTS_I', 'TESS', 'KEPLER_Kp'
     ])
+
+    colors = [
+        'red', 'green', 'blue', 'yellow',
+        'grey', 'magenta', 'cyan', 'white'
+    ]
 
     def __init__(self, starname, ra, dec, g_id=None,
                  plx=None, plx_e=None,
                  rad=None, rad_e=None,
                  temp=None, temp_e=None,
                  lum=None, lum_e=None,
-                 mag_dict=None, verbose=True):
+                 logg=None, logg_e=None,
+                 Av=None,
+                 mag_dict=None, verbose=True, ignore=[]):
         """See class docstring."""
         # MISC
         self.verbose = verbose
+
+        # Star stuff
+        self.starname = starname
+        self.ra_dec_to_deg(ra, dec)
+
+        c = random.choice(self.colors)
+
+        display_star_init(self, c)
+
         if verbose:
             if plx is not None:
                 print('Parallax input detected.', end=' ')
@@ -180,50 +210,56 @@ class Star:
         self.get_temp = True if temp is None else False
         self.get_lum = True if lum is None else False
         self.get_mags = True if mag_dict is None else False
+        self.get_logg = False
 
         self.g_id = g_id
-
-        # Star stuff
-        self.starname = starname
-        self.ra_dec_to_deg(ra, dec)
 
         # Lookup archival magnitudes, radius, temperature, luminosity
         # and parallax
         lookup = self.get_rad + self.get_temp + self.get_plx + self.get_mags
         if lookup:
+            if verbose:
+                print(
+                    colored('\t\t*** LOOKING UP ARCHIVAL INFORMATION ***', c)
+                )
             lib = Librarian(starname, self.ra, self.dec, g_id=self.g_id,
-                            verbose=verbose, mags=self.get_mags)
+                            mags=self.get_mags, ignore=ignore)
             self.g_id = lib.g_id
+            self.tic = lib.tic
+            self.kic = lib.kic
             if self.get_plx:
                 self.plx = lib.plx
                 self.plx_e = lib.plx_e
+            else:
+                self.plx = plx
+                self.plx_e = plx_e
 
             if self.get_rad:
                 self.rad = lib.rad
                 self.rad_e = lib.rad_e
+            else:
+                self.rad = rad
+                self.rad_e = rad_e
 
             if self.get_temp:
                 self.temp = lib.temp
                 self.temp_e = lib.temp_e
+            else:
+                self.temp = temp
+                self.temp_e = temp_e
 
             if self.get_lum:
                 self.lum = lib.lum
                 self.lum_e = lib.lum_e
+            else:
+                self.lum = lum
+                self.lum_e = lum_e
 
             if self.get_mags:
-                lib.get_magnitudes()
                 self.used_filters = lib.used_filters
                 self.mags = lib.mags
                 self.mag_errs = lib.mag_errs
-        else:
-            self.plx = plx
-            self.plx_e = plx_e
-            self.rad = rad
-            self.rad_e = rad_e
-            self.temp = temp
-            self.temp_e = temp_e
-            self.lum = lum
-            self.lum_e = lum_e
+
         if not self.get_mags:
             filters = []
             self.used_filters = sp.zeros(self.filter_names.shape[0])
@@ -239,10 +275,14 @@ class Star:
         self.filter_mask = sp.where(self.used_filters == 1)[0]
 
         # Get max Av
-        sfd = SFDQuery()
-        coords = SkyCoord(self.ra, self.dec, unit=(u.deg, u.deg), frame='icrs')
-        ebv = sfd(coords)
-        self.Av = ebv * self.mags[4]
+        if Av is None:
+            sfd = SFDQuery()
+            coords = SkyCoord(self.ra, self.dec,
+                              unit=(u.deg, u.deg), frame='icrs')
+            ebv = sfd(coords)
+            self.Av = ebv * 2.742
+        else:
+            self.Av = Av
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
@@ -251,7 +291,7 @@ class Star:
         self.wave = sp.zeros(self.filter_names.shape[0])
         self.flux = sp.zeros(self.filter_names.shape[0])
         self.flux_er = sp.zeros(self.filter_names.shape[0])
-        self.bandpass = sp.zeros((self.filter_names.shape[0], 2))
+        self.bandpass = sp.zeros(self.filter_names.shape[0])
 
         for k in wave.keys():
             filt_idx = sp.where(k == self.filter_names)[0]
@@ -261,6 +301,7 @@ class Star:
             self.bandpass[filt_idx] = bandpass[k]
 
         self.calculate_distance()
+        display_star_fin(self, c)
 
     def ra_dec_to_deg(self, ra, dec):
         """Transform ra, dec from selected uniot to degrees."""
@@ -282,12 +323,15 @@ class Star:
             gridname = '../Datafiles/model_grids/model_grid_Phoenixv2.dat'
         if model.lower() == 'btsettl':
             gridname = '../Datafiles/model_grids/model_grid_BT_Settl.dat'
+        if model.lower() == 'btnextgen':
+            gridname = '../Datafiles/model_grids/model_grid_BT_NextGen.dat'
+        if model.lower() == 'btcond':
+            gridname = '../Datafiles/model_grids/model_grid_BT_Cond.dat'
         if model.lower() == 'ck04':
             gridname = '../Datafiles/model_grids/model_grid_CK04.dat'
         if model.lower() == 'kurucz':
             gridname = '../Datafiles/model_grids/model_grid_Kurucz.dat'
-        if model.lower() == 'nextgen':
-            gridname = '../Datafiles/model_grids/model_grid_NextGen.dat'
+
         self.full_grid = sp.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
@@ -355,3 +399,84 @@ class Star:
         dist_e = dist * self.plx_e / self.plx
         self.dist = dist
         self.dist_e = dist_e
+
+    def print_mags(self, c=None):
+        """Pretty print of magnitudes and errors."""
+        mags = self.mags[self.filter_mask]
+        ers = self.mag_errs[self.filter_mask]
+        filt = self.filter_names[self.filter_mask]
+        master = sp.vstack([filt, mags, ers]).T
+        master = sp.vstack([['Filter', 'Mag', 'Err'], master])
+        if c is not None:
+            print(colored(tabulate(master), c))
+        else:
+            print(tabulate(master))
+
+    def estimate_logg(self):
+        """Estimate logg values from MIST isochrones."""
+        self.get_logg = True
+        c = random.choice(self.colors)
+        params = dict()  # params for isochrones.
+        if self.temp is not None and self.temp_e != 0:
+            params['Teff'] = (self.temp, self.temp_e)
+        if self.lum is not None and self.lum != 0:
+            params['LogL'] = (sp.log10(self.lum),
+                              sp.log10(self.lum_e))
+        # if self.get_rad and self.rad is not None and self.rad != 0:
+        #     params['radius'] = (self.rad, self.rad_e)
+        params['parallax'] = (self.plx, self.plx_e)
+        mask = sp.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
+                         0, 1, 0])
+        mags = self.mags[mask == 1]
+        mags_e = self.mag_errs[mask == 1]
+        bands = ['H', 'J', 'K', 'V', 'B', 'G', 'RP', 'BP', 'W1', 'W2', 'TESS']
+        used_bands = []
+        for m, e, b in zip(mags, mags_e, bands):
+            if m != 0:
+                params[b] = (m, e)
+                used_bands.append(b)
+        if self.verbose:
+            print(
+                colored(
+                    '\t\t*** ESTIMATING LOGG USING MIST ISOCHRONES ***', c
+                )
+            )
+        logg_est = estimate(used_bands, params, logg=True)
+        if logg_est is not None:
+            self.logg = logg_est[0]
+            self.logg_e = logg_est[1]
+            print(colored('\t\t\tEstimated log g : ', c), end='')
+            print(
+                colored(
+                    '{:.3f} +/- {:.3f}'.format(self.logg, self.logg_e), c)
+            )
+
+    def add_mag(self, mag, err, filter):
+        """Add an individual photometry point to the SED."""
+        mask = self.filter_names == filter
+        self.mags[mask] = mag
+        self.mag_errs[mask] = err
+        self.used_filters[mask] = 1
+        self.filter_mask = sp.where(self.used_filters == 1)[0]
+
+        self._reload_fluxes()
+        pass
+
+    def _reload_fluxes(self):
+        # Get the wavelength and fluxes of the retrieved magnitudes.
+        wave, flux, flux_er, bandpass = extract_info(
+            self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
+            self.filter_names[self.filter_mask])
+
+        self.wave = sp.zeros(self.filter_names.shape[0])
+        self.flux = sp.zeros(self.filter_names.shape[0])
+        self.flux_er = sp.zeros(self.filter_names.shape[0])
+        self.bandpass = sp.zeros(self.filter_names.shape[0])
+
+        for k in wave.keys():
+            filt_idx = sp.where(k == self.filter_names)[0]
+            self.wave[filt_idx] = wave[k]
+            self.flux[filt_idx] = flux[k]
+            self.flux_er[filt_idx] = flux_er[k]
+            self.bandpass[filt_idx] = bandpass[k]

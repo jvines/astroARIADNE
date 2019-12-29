@@ -5,7 +5,6 @@
 #dist    TruncatedNormal    mu,sig,upper,lower
 #rad  default            ---
 #Av      Normal             mu,sig
-#inflation      Normal             mu,sig
 teff  default ----
 logg  default ----
 z default ----
@@ -13,4 +12,3 @@ z default ----
 dist  default ----  # Comment if using normalization constant
 rad  default ----  # Comment if using normalization constant
 Av  default ----
-inflation default ----

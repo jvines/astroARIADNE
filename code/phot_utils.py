@@ -121,8 +121,7 @@ def get_bandpass(band):
     # Load photometry filter library
     filt = pyphot.get_library()[band]
     # Get lower and upper bandpass in um
-    leff = get_effective_wavelength(band)
-    width = filt.fwhm.to('um').magnitude
+    width = filt.width.to('um').magnitude
     bp = width
     return bp / 2
 

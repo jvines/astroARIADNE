@@ -11,8 +11,10 @@ from multiprocessing import Pool, Process, cpu_count
 import astropy.units as u
 import scipy as sp
 import scipy.stats as st
+from astropy.constants import sigma_sb
+from isochrones.interp import DFInterpolator
 from scipy.stats import gaussian_kde
-from tabulate import tabulate
+from termcolor import colored
 
 import Star
 from Error import *
@@ -24,20 +26,12 @@ from utils import *
 try:
     import dynesty
     from dynesty.utils import resample_equal
-    iso_flag = True
     bma_flag = True
 except ModuleNotFoundError:
     wrn = 'Dynesty package not found. BMA and log g estimation unavailable.'
     warnings.warn(wrn)
     iso_flag = False
     bma_flag = False
-try:
-    from isochrones import SingleStarModel, get_ichrone
-    iso_flag *= True
-except ModuleNotFoundError:
-    wrn = 'Isochrones package not found. log g estimation unavailable.'
-    warnings.warn(wrn)
-    iso_flag = False
 try:
     import pymultinest
 except ModuleNotFoundError:
@@ -62,6 +56,8 @@ class Fitter:
         self.av_law = 'fitzpatrick'
         self.n_samples = None
         self.bma = False
+        self.prior_setup = None
+        self.sequential = False
 
     @property
     def star(self):
@@ -126,7 +122,7 @@ class Fitter:
     @norm.setter
     def norm(self, norm):
         if type(norm) is not bool:
-            rInputError(norm, 'norm must be True or False.').raise_()
+            InputError(norm, 'norm must be True or False.').raise_()
         self._norm = norm
 
     @property
@@ -139,21 +135,25 @@ class Fitter:
         assert type(grid) == str
         self._grid = grid
         directory = '../Datafiles/model_grids/'
+        # directory = './'
         if grid.lower() == 'phoenix':
-            with open(directory + 'interpolations_Phoenix.pkl', 'rb') as intp:
-                self._interpolator = pickle.load(intp)
+            with open(directory + 'Phoenixv2_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'btsettl':
-            with open(directory + 'interpolations_BTSettl.pkl', 'rb') as intp:
-                self._interpolator = pickle.load(intp)
+            with open(directory + 'BTSettl_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pickle.load(intp))
+        if grid.lower() == 'btnextgen':
+            with open(directory + 'BTNextGen_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pickle.load(intp))
+        if grid.lower() == 'btcond':
+            with open(directory + 'BTCond_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'ck04':
-            with open(directory + 'interpolations_CK04.pkl', 'rb') as intp:
-                self._interpolator = pickle.load(intp)
+            with open(directory + 'CK04_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'kurucz':
-            with open(directory + 'interpolations_Kurucz.pkl', 'rb') as intp:
-                self._interpolator = pickle.load(intp)
-        if grid.lower() == 'nextgen':
-            with open(directory + 'interpolations_NextGen.pkl', 'rb') as intp:
-                self._interpolator = pickle.load(intp)
+            with open(directory + 'Kurucz_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pickle.load(intp))
 
     @property
     def bma(self):
@@ -194,21 +194,6 @@ class Fitter:
     @n_samples.setter
     def n_samples(self, nsamp):
         self._nsamp = nsamp
-
-    @property
-    def estimate_logg(self):
-        """Estimate log g.
-
-        Set to True if log g estimation with MIST isochrones is needed.
-        """
-        return self._estimate_logg
-
-    @estimate_logg.setter
-    def estimate_logg(self, estimate_logg):
-        err_msg = 'estimate_logg must be True or False.'
-        if type(estimate_logg) is not bool:
-            InputError(estimate_logg, err_msg).raise_()
-        self._estimate_logg = estimate_logg if iso_flag else False
 
     @property
     def verbose(self):
@@ -290,9 +275,12 @@ class Fitter:
         """
         global prior_dict, coordinator, fixed, order, star
         global use_norm, av_law
+        self.start = time.time()
         err_msg = 'No star is detected. Please create an instance of Star.'
         if self.star is None:
-            InputError(self.star, err_msg).raise_()
+            er = InputError(self.star, err_msg)
+            er.log(self.out + '/output.log')
+            er.raise_()
         star = self.star
         if not self._bma:
             global interpolator
@@ -306,12 +294,11 @@ class Fitter:
             order = sp.array(
                 [
                     'teff', 'logg', 'z',
-                    'dist', 'rad', 'Av',
-                    'inflation'
+                    'dist', 'rad', 'Av'
                 ]
             )
         else:
-            order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+            order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
 
         # Create output directory
         if self.out_folder is None:
@@ -320,10 +307,12 @@ class Fitter:
 
         # Parameter coordination.
         # Order for the parameters are:
-        # teff, logg, z, dist, rad, Av, inflation
+        # teff, logg, z, dist, rad, Av, noise
         # or
-        # teff, logg, z, norm, Av, inflation
-        npars = 7 if not self.norm else 6
+        # teff, logg, z, norm, Av, noise
+        npars = 6 if not self.norm else 5
+        npars += self.star.used_filters.sum()
+        npars = int(npars)
         self.coordinator = sp.zeros(npars)  # 1 for fixed params
         self.fixed = sp.zeros(npars)
         coordinator = self.coordinator
@@ -331,7 +320,10 @@ class Fitter:
 
         # Setup priors.
         self.default_priors = self._default_priors()
-        self.create_priors(self.priorfile)
+        if self.prior_setup is None:
+            self.create_priors(self.priorfile)
+        else:
+            self.create_priors_from_setup()
         prior_dict = self.priors
 
         # Get dimensions.
@@ -349,66 +341,54 @@ class Fitter:
             self._grids = []
             self._interpolators = []
             for mod in self._bma_models:
-                directory = '../Datafiles/model_grids/'
+                # directory = '../Datafiles/model_grids/'
+                directory = './'
                 if mod.lower() == 'phoenix':
-                    with open(directory + 'interpolations_Phoenix.pkl', 'rb') \
-                            as intp:
-                        self._interpolators.append(pickle.load(intp))
+                    with open(directory + 'Phoenixv2_DF.pkl', 'rb') as intp:
+                        df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'btsettl':
-                    with open(directory + 'interpolations_BTSettl.pkl', 'rb') \
-                            as intp:
-                        self._interpolators.append(pickle.load(intp))
+                    with open(directory + 'BTSettl_DF.pkl', 'rb') as intp:
+                        df = DFInterpolator(pickle.load(intp))
+                if mod.lower() == 'btnextgen':
+                    with open(directory + 'BTNextGen_DF.pkl', 'rb') as intp:
+                        df = DFInterpolator(pickle.load(intp))
+                if mod.lower() == 'btcond':
+                    with open(directory + 'BTCond_DF.pkl', 'rb') as intp:
+                        df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'ck04':
-                    with open(directory + 'interpolations_CK04.pkl', 'rb') \
-                            as intp:
-                        self._interpolators.append(pickle.load(intp))
+                    with open(directory + 'CK04_DF.pkl', 'rb') as intp:
+                        df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'kurucz':
-                    with open(directory + 'interpolations_Kurucz.pkl', 'rb') \
-                            as intp:
-                        self._interpolators.append(pickle.load(intp))
-                if mod.lower() == 'nextgen':
-                    with open(directory + 'interpolations_NextGen.pkl', 'rb') \
-                            as intp:
-                        self._interpolators.append(pickle.load(intp))
+                    with open(directory + 'Kurucz_DF.pkl', 'rb') as intp:
+                        df = DFInterpolator(pickle.load(intp))
+                self._interpolators.append(df)
                 self._grids.append(mod)
+            thr = self._threads if self._sequential else len(
+                self._interpolators)
+        else:
+            thr = self._threads
+
+        en = 'Bayesian Model Averaging' if self._bma else self._engine
+        display_routine(en, self._nlive, self._dlogz, self.ndim, self._bound,
+                        self._sample, thr, self._dynamic)
 
     def get_ndim(self):
         """Calculate number of dimensions."""
-        ndim = 7 if not self.norm else 6
+        ndim = 6 if not self.norm else 5
+        ndim += self.star.used_filters.sum()
         ndim -= self.coordinator.sum()
         return int(ndim)
 
     def _default_priors(self):
+        global order
         defaults = dict()
         # Logg prior setup.
-        if not self.estimate_logg:
+        if self.star.get_logg:
+            defaults['logg'] = st.norm(
+                loc=self.star.logg, scale=self.star.logg_e)
+        else:
             with closing(open('../Datafiles/prior/logg_ppf.pkl', 'rb')) as jar:
                 defaults['logg'] = pickle.load(jar)
-        else:
-            params = dict()  # params for isochrones.
-            if self.star.get_temp:
-                params['Teff'] = (self.star.temp, self.star.temp_e)
-            if self.star.get_lum and self.star.lum is not None:
-                params['LogL'] = (sp.log10(self.star.lum),
-                                  sp.log10(self.star.lum_e))
-            if self.star.get_rad and self.star.rad is not None:
-                params['radius'] = (self.star.rad, self.star.rad_e)
-            params['parallax'] = (self.star.plx, self.star.plx_e)
-            mask = sp.array([1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
-                             0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0])
-            mags = self.star.mags[mask == 1]
-            mags_e = self.star.mag_errs[mask == 1]
-            bands = ['H', 'J', 'K', 'G', 'RP', 'BP', 'W1', 'W2']
-            used_bands = []
-            for m, e, b in zip(mags, mags_e, bands):
-                if m != 0:
-                    params[b] = (m, e)
-                    used_bands.append(b)
-            if self.verbose and self.estimate_logg:
-                print('*** ESTIMATING LOGG USING MIST ISOCHRONES ***')
-            logg_est = estimate(used_bands, params)
-            if logg_est is not None:
-                defaults['logg'] = st.norm(loc=logg_est[0], scale=0.1)
         # Teff prior setup.
         if self.star.get_temp:
             defaults['teff'] = st.norm(
@@ -416,31 +396,48 @@ class Fitter:
         else:
             with closing(open('../Datafiles/prior/teff_ppf.pkl', 'rb')) as jar:
                 defaults['teff'] = pickle.load(jar)
-            # defaults['teff'] = teff_prior['teff']
+        # [Fe/H] prior setup.
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
+        # Distance prior setup.
         if not self._norm:
             defaults['dist'] = st.norm(
                 loc=self.star.dist, scale=self.star.dist_e)
-            if self.star.rad is not None:
-                defaults['rad'] = st.norm(
-                    loc=self.star.rad, scale=self.star.rad_e)
+            # Radius prior setup.
+            if self.star.rad > 0:
+                a = - self.star.rad / self.star.rad_e
+                b = sp.inf
+                defaults['rad'] = st.truncnorm(
+                    loc=self.star.rad, scale=self.star.rad_e, a=a, b=b)
             else:
                 wrn_msg = 'No radius found in Gaia, using default radius prior'
                 wrn_msg += '. Consider fitting the normalization constant'
                 wrn_msg += ' instead.'
-                warnings.warn(wrn_msg)
-                defaults['rad'] = st.uniform(0.1, 10)
+                print(wrn_msg)
+                defaults['rad'] = st.uniform(loc=0.05, scale=10)
+        # Normalization prior setup.
         else:
             up = 1 / 1e-20
             defaults['norm'] = st.truncnorm(a=0, b=up, loc=0, scale=1e-20)
+        # Extinction prior setup.
         if self.star.Av == 0.:
-            self.coordinator[-2] = 1
-            self.fixed[-2] = 0
+            av_idx = 4 if self._norm else 5
+            self.coordinator[av_idx] = 1
+            self.fixed[av_idx] = 0
             defaults['Av'] = None
         else:
             defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
-        up, low = (5 - 0.5) / 0.5, (0 - 0.5) / 0.5
-        defaults['inflation'] = st.truncnorm(a=low, b=up, loc=0.5, scale=0.5)
+        # Noise model prior setup.
+        mask = self.star.filter_mask
+        flxs = self.star.flux[mask]
+        errs = self.star.flux_er[mask]
+        for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
+            p_ = get_noise_name(filt) + '_noise'
+            mu = 0
+            sigma = flx_e * 6
+            b = (1 - flx) / flx_e
+            defaults[p_] = st.truncnorm(loc=mu, scale=sigma, a=0, b=b)
+            # defaults[p_] = st.uniform(loc=0, scale=5)
+            order = sp.append(order, p_)
         return defaults
 
     def create_priors(self, priorfile):
@@ -451,18 +448,33 @@ class Fitter:
         param_list = [
             'teff', 'logg', 'z',
             'dist', 'rad', 'norm',
-            'Av', 'inflation'
+            'Av'
         ]
+
+        noise = []
+        mask = self.star.filter_mask
+        flxs = self.star.flux[mask]
+        errs = self.star.flux_er[mask]
+        for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
+            p_ = get_noise_name(filt) + '_noise'
+            noise.append(p_)
+
         if priorfile:
             param, prior, bounds = sp.loadtxt(
                 priorfile, usecols=[0, 1, 2], unpack=True, dtype=object)
+            copy = sp.vstack((param, prior, bounds)).T
+            sp.savetxt(self.out_folder + '/prior.dat', copy, fmt='%s')
             # Dict with priors.
             prior_dict = dict()
             for par, pri, bo in zip(param, prior, bounds):
                 if par not in param_list:
-                    PriorError(par, 0).raise_()
+                    er = PriorError(par, 0)
+                    er.log(self.out_folder + '/output.log')
+                    er.raise_()
                 if self.norm and (par == 'dist' or par == 'rad'):
-                    PriorError(par, 1).raise_()
+                    er = PriorError(par, 1)
+                    er.log(self.out_folder + '/output.log')
+                    er.raise_()
                 if pri.lower() == 'uniform':
                     a, b = bo.split(',')
                     a, b = float(a), float(b)
@@ -475,24 +487,82 @@ class Fitter:
                     mu, sig, up, low = bo.split(',')
                     mu, sig, up, low = float(mu), float(
                         sig), float(up), float(low)
-                    up, low = (up - mu) / sig, (low - mu) / sig
-                    priot_dict[par] = st.truncnorm(
-                        a=low, b=up, loc=mu, scale=sig)
+                    b, a = (up - mu) / sig, (low - mu) / sig
+                    priot_dict[par] = st.truncnorm(a=a, b=b, loc=mu, scale=sig)
                 elif pri.lower() == 'default':
                     prior_dict[par] = self.default_priors[par]
                 elif pri.lower() == 'fixed':
                     idx = sp.where(par == order)[0]
                     self.coordinator[idx] = 1
                     self.fixed[idx] = float(bo)
+
+                for par in noise:
+                    prior_dict[par] = self.default_priors[par]
             self.priors = prior_dict
         else:
             warnings.warn('No priorfile detected. Using default priors.')
             self.priors = self.default_priors
         pass
 
+    def create_priors_from_setup(self):
+        """Create priors from the manual setup."""
+        prior_dict = dict()
+        keys = self.prior_setup.keys()
+        noise = []
+        mask = self.star.filter_mask
+        flxs = self.star.flux[mask]
+        errs = self.star.flux_er[mask]
+        for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
+            p_ = get_noise_name(filt) + '_noise'
+            noise.append(p_)
+        prior_out = 'Parameter\tPrior\tValues\n'
+        if 'norm' in keys and ('rad' in keys or 'dist' in keys):
+            er = PriorError('rad or dist', 1)
+            er.log(self.out_folder + '/output.log')
+            er.raise_()
+        for k in keys:
+            if len(self.prior_setup[k]) == 1:
+                prior_dict[k] = self.default_priors[k]
+                prior_out += k + '\tdefault\n'
+            else:
+                type = self.prior_setup[k][0]
+                if type == 'fixed':
+                    value = self.prior_setup[k][1]
+                    idx = sp.where(k == order)[0]
+                    self.coordinator[idx] = 1
+                    self.fixed[idx] = value
+                    prior_out += k + '\tfixed\t{}\n'.format(value)
+                if type == 'normal':
+                    mu = self.prior_setup[k][1]
+                    sig = self.prior_setup[k][2]
+                    prior_dict[k] = st.norm(loc=mu, scale=sig)
+                    prior_out += k + '\tnormal\t{}\t{}\n'.format(mu, sig)
+                if type == 'truncnorm':
+                    mu = self.prior_setup[k][1]
+                    sig = self.prior_setup[k][2]
+                    low = self.prior_setup[k][3]
+                    up = self.prior_setup[k][4]
+                    b, a = (up - mu) / sig, (low - mu) / sig
+                    prior_dict[k] = st.truncnorm(a=a, b=b, loc=mu, scale=sig)
+                    prior_out += k
+                    prior_out += '\ttruncatednormal\t{}\t{}\t{}\t{}\n'.format(
+                        mu, sig, low, up)
+                if type == 'uniform':
+                    low = self.prior_setup[k][1]
+                    up = self.prior_setup[k][2]
+                    prior_dict[k] = st.uniform(loc=low, scale=up - low)
+                    prior_out += k + '\tuniform\t{}\t{}\n'.format(low, up)
+        for par in noise:
+            prior_dict[par] = self.default_priors[par]
+        ff = open(self.out_folder + '/prior.dat', 'w')
+        ff.write(prior_out)
+        ff.close()
+        del ff
+        self.priors = prior_dict
+        pass
+
     def fit(self):
         """Run fitting routine."""
-        self.start = time.time()
         if self._engine == 'multinest':
             self.fit_multinest()
         else:
@@ -508,10 +578,9 @@ class Fitter:
         Only works with dynesty.
         """
         thr = self._threads if self._sequential else len(self._interpolators)
-        display('Bayesian Model Averaging', self.star, self._nlive,
-                self._dlogz, self.ndim, self._bound, self._sample,
-                thr, self._dynamic)
-        self.start = time.time()
+        # display('Bayesian Model Averaging', self.star, self._nlive,
+        #         self._dlogz, self.ndim, self._bound, self._sample,
+        #         thr, self._dynamic)
         if not self._sequential:
             jobs = []
             n_threads = len(self._interpolators)
@@ -528,7 +597,13 @@ class Fitter:
                 self.grid = gr
                 out_file = self.out_folder + '/' + gr + '_out.pkl'
                 print('\t\t\tFITTING MODEL : ' + gr)
-                self.fit_dynesty(out_file=out_file)
+                try:
+                    self.fit_dynesty(out_file=out_file)
+                except ValueError:
+                    dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
+                    pickle.dump(self.sampler.results, open(dump_out, 'wb'))
+                    DynestyError(dump_out, gr).warn()
+                    continue
 
         # Now that the fitting finished, read the outputs and average
         # the posteriors
@@ -548,6 +623,7 @@ class Fitter:
 
     def bayesian_model_average(self, outputs, grids):
         """Perform Bayesian Model Averaging."""
+        choice = sp.random.choice
         evidences = []
         post_samples = []
         for o in outputs:
@@ -561,6 +637,12 @@ class Fitter:
         if self._norm:
             ban.append('rad')
         out = dict()
+        out['originals'] = dict()
+        out['weights'] = dict()
+        for i, o in enumerate(outputs):
+            out['weights'][o['model_grid']] = weights[i]
+        for o in outputs:
+            out['originals'][o['model_grid']] = o['posterior_samples']
         out['averaged_samples'] = dict()
         if self.n_samples == 'max':
             lens = []
@@ -578,7 +660,7 @@ class Fitter:
                     len(o[k])
                 except TypeError:
                     continue
-                weighted_samples = o[k][-self.n_samples:] * weights[i]
+                weighted_samples = choice(o[k], self.n_samples) * weights[i]
                 out['averaged_samples'][k] += weighted_samples
         out['evidences'] = dict()
         for e, g in zip(evidences, grids):
@@ -623,26 +705,27 @@ class Fitter:
                                wt_kwargs={'pfrac': .95})
         else:
             try:
-                sampler = dynesty.NestedSampler(
+                self.sampler = dynesty.NestedSampler(
                     dynesty_loglike_bma, pt_dynesty, self.ndim,
                     nlive=self._nlive, bound=self._bound,
                     sample=self._sample,
                     logl_args=([intp])
                 )
-                sampler.run_nested(dlogz=self._dlogz)
-            except:
+                self.sampler.run_nested(dlogz=self._dlogz)
+            except Error:
                 dump_out = self.out_folder + '/' + grid + '_DUMP.pkl'
-                pickle.dump(sampler, open(dump_out, 'wb'))
-                DynestyError(dump_out).raise_()
+                pickle.dump(self.sampler.results, open(dump_out, 'wb'))
+                er = DynestyError(dump_out, grid)
+                er.log(self.out + '/output.log')
+                er.raise_()
 
-        results = sampler.results
+        results = self.sampler.results
         out_file = self.out_folder + '/' + grid + '_out.pkl'
         self.save(results=results, out_file=out_file)
         pass
 
     def fit_multinest(self):
         """Run MuiltiNest."""
-        display(self._engine, self.star, self._nlive, self._dlogz, self.ndim)
         path = self.out_folder + 'multinest/'
         create_dir(path)  # Create multinest path.
         pymultinest.run(
@@ -662,48 +745,44 @@ class Fitter:
 
     def fit_dynesty(self, out_file=None):
         """Run dynesty."""
-        if not self._bma:
-            display(self._engine, self.star, self._nlive,
-                    self._dlogz, self.ndim, self._bound, self._sample,
-                    self._threads, self._dynamic)
         if self._dynamic:
             if self._threads > 1:
                 with closing(Pool(self._threads)) as executor:
-                    sampler = dynesty.DynamicNestedSampler(
+                    self.sampler = dynesty.DynamicNestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         bound=self._bound, sample=self._sample, pool=executor,
                         queue_size=self._threads - 1
                     )
-                    sampler.run_nested(dlogz_init=self._dlogz,
-                                       nlive_init=self._nlive,
-                                       wt_kwargs={'pfrac': .95})
+                    self.sampler.run_nested(dlogz_init=self._dlogz,
+                                            nlive_init=self._nlive,
+                                            wt_kwargs={'pfrac': 1})
             else:
-                sampler = dynesty.DynamicNestedSampler(
+                self.sampler = dynesty.DynamicNestedSampler(
                     dynesty_log_like, pt_dynesty, self.ndim,
                     bound=self._bound, sample=self._sample
 
                 )
-                sampler.run_nested(dlogz_init=self._dlogz,
-                                   nlive_init=self._nlive,
-                                   wt_kwargs={'pfrac': .95})
+                self.sampler.run_nested(dlogz_init=self._dlogz,
+                                        nlive_init=self._nlive,
+                                        wt_kwargs={'pfrac': 1})
         else:
             if self._threads > 1:
                 with closing(Pool(self._threads)) as executor:
-                    sampler = dynesty.NestedSampler(
+                    self.sampler = dynesty.NestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
                         sample=self._sample, pool=executor,
                         queue_size=self._threads - 1
                     )
-                    sampler.run_nested(dlogz=self._dlogz)
+                    self.sampler.run_nested(dlogz=self._dlogz)
             else:
-                sampler = dynesty.NestedSampler(
+                self.sampler = dynesty.NestedSampler(
                     dynesty_log_like, pt_dynesty, self.ndim,
                     nlive=self._nlive, bound=self._bound,
                     sample=self._sample
                 )
-                sampler.run_nested(dlogz=self._dlogz)
-        results = sampler.results
+                self.sampler.run_nested(dlogz=self._dlogz)
+        results = self.sampler.results
         if out_file is None:
             out_file = self.out_folder + '/' + self._engine + '_out.pkl'
         self.save(out_file, results=results)
@@ -735,12 +814,15 @@ class Fitter:
 
         """
         out = dict()
-        logdat = 'Parameter\tmedian\tupper\tlower\n'
+        logdat = 'Parameter\tmedian\tupper\tlower\t3sig_CI\n'
         log_out = self.out_folder + '/' + 'best_fit.dat'
         if self._engine == 'multinest':
             lnz, lnzer, posterior_samples = self.multinest_results()
         else:
             lnz, lnzer, posterior_samples = self.dynesty_results(results)
+
+        n = int(self.star.used_filters.sum())
+        mask = self.star.filter_mask
 
         # Save global evidence
 
@@ -787,9 +869,22 @@ class Fitter:
         mass_samp = self._get_mass(logg_samp, rad_samp)
         out['posterior_samples']['mass'] = mass_samp
 
+        # Create a distribution of luminosities.
+
+        teff_samp = out['posterior_samples']['teff']
+        lum_samp = self._get_lum(teff_samp, rad_samp)
+        out['posterior_samples']['lum'] = lum_samp
+
+        # Create a distribution of angular diameters.
+
+        dist_samp = out['posterior_samples']['dist']
+        ad_samp = self._get_angular_diameter(rad_samp, dist_samp)
+        out['posterior_samples']['AD'] = ad_samp
+
         for i in range(posterior_samples.shape[0]):
             theta = build_params(
-                posterior_samples[i, :], coordinator, fixed, self.norm)
+                posterior_samples[i, :], self.star, coordinator, fixed,
+                self.norm)
             out['posterior_samples']['loglike'][i] = log_likelihood(
                 theta, self.star, interpolator, self.norm, av_law)
             out['posterior_samples']['priors'][i] = log_prior(
@@ -803,30 +898,50 @@ class Fitter:
         # Calculate KDE for each marginalized posterior distributions
         # Find peak
         # peak is best fit.
+        # do only if not bma
 
         out['best_fit'] = dict()
+        out['uncertainties'] = dict()
+        out['confidence_interval'] = dict()
         best_theta = sp.zeros(order.shape[0])
-        j = 0
+
         for i, param in enumerate(order):
             if not self.coordinator[i]:
+                if 'noise' in param:
+                    continue
                 samp = out['posterior_samples'][param]
                 best = self._get_max_from_kde(samp)
                 out['best_fit'][param] = best
-                logdat += param + \
-                    '\t{:.4f}\t'.format(best)
+                if param == 'z':
+                    logdat += '[Fe/H]' + \
+                        '\t{:.4f}\t'.format(best)
+                else:
+                    logdat += param + \
+                        '\t{:.4f}\t'.format(best)
                 _, lo, up = credibility_interval(samp)
-                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
-                j += 1
+                out['uncertainties'][param] = (best - lo, up - best)
+                logdat += '{:.4f}\t{:.4f}\t'.format(
+                    up - best, best - lo)
+                _, lo, up = credibility_interval(samp, 3)
+                out['confidence_interval'][param] = (lo, up)
+                logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
             elif param == 'norm':
                 samp = out['posterior_samples']['rad']
                 best = self._get_max_from_kde(samp)
                 out['best_fit']['rad'] = best
                 logdat += 'rad\t{:.4f}\t'.format(best)
                 _, lo, up = credibility_interval(samp)
-                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
+                out['uncertainties']['rad'] = (best - lo, up - best)
+                logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+                _, lo, up = credibility_interval(samp, 3)
+                out['confidence_interval']['rad'] = (lo, up)
+                logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
             else:
                 out['best_fit'][param] = self.fixed[i]
-                logdat += param + '\t{:.4f}\n'.format(self.fixed[i])
+                out['uncertainties'][param] = sp.nan
+                out['confidence_interval'][param] = sp.nan
+                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
+                logdat += '(FIXED)\n'
             best_theta[i] = out['best_fit'][param]
 
         # Add derived mass to best fit dictionary.
@@ -836,17 +951,77 @@ class Fitter:
         out['best_fit']['mass'] = best
         logdat += 'mass\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
-        logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
+        out['uncertainties']['mass'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval']['mass'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        # Add derived luminosity to best fit dictionary.
+
+        samp = out['posterior_samples']['lum']
+        best = self._get_max_from_kde(samp)
+        out['best_fit']['lum'] = best
+        logdat += 'lum\t{:.4f}\t'.format(best)
+        _, lo, up = credibility_interval(samp)
+        out['uncertainties']['lum'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval']['lum'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        # Add derived angular diameter to best fit dictionary.
+
+        samp = out['posterior_samples']['AD']
+        best = self._get_max_from_kde(samp)
+        out['best_fit']['AD'] = best
+        logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
+        _, lo, up = credibility_interval(samp)
+        out['uncertainties']['AD'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval']['AD'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        for i, param in enumerate(order):
+            if not self.coordinator[i]:
+                if 'noise' not in param:
+                    continue
+                samp = out['posterior_samples'][param]
+                best = self._get_max_from_kde(samp)
+                out['best_fit'][param] = best
+                logdat += param + '\t{:.4e}\t'.format(best)
+                _, lo, up = credibility_interval(samp)
+                out['uncertainties'][param] = (best - lo, up - best)
+                logdat += '{:.4e}\t{:.4e}\t'.format(
+                    up - best, best - lo)
+                _, lo, up = credibility_interval(samp, 3)
+                out['confidence_interval'][param] = (lo, up)
+                logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
 
         # Fill in best loglike, prior and posterior.
 
         out['best_fit']['loglike'] = log_likelihood(
             best_theta, self.star, interpolator, self.norm, av_law)
         out['best_fit']['prior'] = log_prior(
-            best_theta, self.star, self.priors, self.coordinator, self.norm)
+            best_theta, self.star, self.priors, self.coordinator, self.norm
+        )
         lnlike = out['best_fit']['loglike']
         lnprior = out['best_fit']['prior']
         out['best_fit']['posterior'] = (lnlike + lnprior) - lnz
+
+        # Spectral type
+
+        # Load Mamajek spt table
+        mamajek_spt = sp.loadtxt(
+            '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
+        mamajek_temp = sp.loadtxt(
+            '../Datafiles/mamajek_spt.dat', usecols=[1])
+
+        # Find spt
+        spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+        spt = mamajek_spt[spt_idx]
+        out['spectral_type'] = spt
 
         # Utilities for plotting.
 
@@ -857,18 +1032,6 @@ class Fitter:
         out['norm'] = self.norm
         out['model_grid'] = self.grid
         out['av_law'] = av_law
-
-        # Spectral type
-
-        # Load Mamajek spt table
-        mamajek_spt = sp.loadtxt(
-            '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
-        mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
-
-        # Find spt
-        spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
-        spt = mamajek_spt[spt_idx]
-        out['spectral_type'] = spt
         with closing(open(log_out, 'w')) as logfile:
             logfile.write(logdat)
         pickle.dump(out, open(out_file, 'wb'))
@@ -898,17 +1061,32 @@ class Fitter:
 
         """
         out = dict()
-        logdat = 'Parameter\tmedian\tupper\tlower\n'
+        logdat = 'Parameter\tmedian\tupper\tlower\t3sig_CI\n'
         log_out = self.out_folder + '/' + 'best_fit.dat'
+
+        n = int(self.star.used_filters.sum())
+        mask = self.star.filter_mask
 
         # Save global evidence of each model.
         out['lnZ'] = avgd['evidences']
+
+        # Save original samples.
+        out['originals'] = avgd['originals']
+
+        # Save weights.
+        out['weights'] = avgd['weights']
 
         # Create raw samples holder
         out['posterior_samples'] = dict()
         j = 0
         for i, par in enumerate(order):
             if not self.coordinator[i]:
+                if par == 'inflation':
+                    for filt in self.star.filter_names[mask]:
+                        _p = get_noise_name(filt)
+                        samp = avgd['averaged_samples'][_p + '_noise']
+                        out['posterior_samples'][_p + '_noise'] = samp
+                    continue
                 out['posterior_samples'][par] = avgd['averaged_samples'][par]
                 j += 1
             else:
@@ -929,6 +1107,18 @@ class Fitter:
         mass_samp = self._get_mass(logg_samp, rad_samp)
         out['posterior_samples']['mass'] = mass_samp
 
+        # Create a distribution of luminosities.
+
+        teff_samp = out['posterior_samples']['teff']
+        lum_samp = self._get_lum(teff_samp, rad_samp)
+        out['posterior_samples']['lum'] = lum_samp
+
+        # Create a distribution of angular diameters.
+
+        dist_samp = out['posterior_samples']['dist']
+        ad_samp = self._get_angular_diameter(rad_samp, dist_samp)
+        out['posterior_samples']['AD'] = ad_samp
+
         # Best fit
         # The logic is as follows:
         # Calculate KDE for each marginalized posterior distributions
@@ -936,28 +1126,46 @@ class Fitter:
         # peak is best fit.
 
         out['best_fit'] = dict()
+        out['uncertainties'] = dict()
+        out['confidence_interval'] = dict()
         best_theta = sp.zeros(order.shape[0])
-        j = 0
         for i, param in enumerate(order):
             if not self.coordinator[i]:
+                if 'noise' in param:
+                    continue
                 samp = out['posterior_samples'][param]
                 best = self._get_max_from_kde(samp)
                 out['best_fit'][param] = best
-                logdat += param + \
-                    '\t{:.4f}\t'.format(best)
+                if param == 'z':
+                    logdat += '[Fe/H]' + \
+                        '\t{:.4f}\t'.format(best)
+                else:
+                    logdat += param + \
+                        '\t{:.4f}\t'.format(best)
                 _, lo, up = credibility_interval(samp)
-                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
-                j += 1
+                out['uncertainties'][param] = (best - lo, up - best)
+                logdat += '{:.4f}\t{:.4f}\t'.format(
+                    up - best, best - lo)
+                _, lo, up = credibility_interval(samp, 3)
+                out['confidence_interval'][param] = (lo, up)
+                logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
             elif param == 'norm':
                 samp = out['posterior_samples']['rad']
                 best = self._get_max_from_kde(samp)
                 out['best_fit']['rad'] = best
                 logdat += 'rad\t{:.4f}\t'.format(best)
                 _, lo, up = credibility_interval(samp)
-                logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
+                out['uncertainties']['rad'] = (best - lo, up - best)
+                logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+                _, lo, up = credibility_interval(samp, 3)
+                out['confidence_interval']['rad'] = (lo, up)
+                logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
             else:
                 out['best_fit'][param] = self.fixed[i]
-                logdat += param + '\t{:.4f}\n'.format(self.fixed[i])
+                out['uncertainties'][param] = sp.nan
+                out['confidence_interval'][param] = sp.nan
+                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
+                logdat += '(FIXED)\n'
             best_theta[i] = out['best_fit'][param]
 
         # Add derived mass to best fit dictionary.
@@ -967,7 +1175,66 @@ class Fitter:
         out['best_fit']['mass'] = best
         logdat += 'mass\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
-        logdat += '{:.4f}\t{:.4f}\n'.format(up, lo)
+        out['uncertainties']['mass'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval']['mass'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        # Add derived luminosity to best fit dictionary.
+
+        samp = out['posterior_samples']['lum']
+        best = self._get_max_from_kde(samp)
+        out['best_fit']['lum'] = best
+        logdat += 'lum\t{:.4f}\t'.format(best)
+        _, lo, up = credibility_interval(samp)
+        out['uncertainties']['lum'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval']['lum'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        # Add derived angular diameter to best fit dictionary.
+
+        samp = out['posterior_samples']['AD']
+        best = self._get_max_from_kde(samp)
+        out['best_fit']['AD'] = best
+        logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
+        _, lo, up = credibility_interval(samp)
+        out['uncertainties']['AD'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval']['AD'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        # Add estimated age to best fit dictionary.
+
+        samp = self.estimate_age(out['best_fit'], out['uncertainties'])
+        best = self._get_max_from_kde(samp)
+        out['best_fit']['age'] = best
+        logdat += 'age\t{:.4f}\t'.format(best)
+        _, lo, up = credibility_interval(samp)
+        out['uncertainties']['age'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, abs(best - lo))
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval']['age'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        for i, param in enumerate(order):
+            if not self.coordinator[i]:
+                if 'noise' not in param:
+                    continue
+                samp = out['posterior_samples'][param]
+                best = self._get_max_from_kde(samp)
+                out['best_fit'][param] = best
+                logdat += param + '\t{:.4e}\t'.format(best)
+                _, lo, up = credibility_interval(samp)
+                out['uncertainties'][param] = (best - lo, up - best)
+                logdat += '{:.4e}\t{:.4e}\t'.format(
+                    up - best, best - lo)
+                _, lo, up = credibility_interval(samp, 3)
+                out['confidence_interval'][param] = (lo, up)
+                logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
 
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
@@ -1019,6 +1286,11 @@ class Fitter:
         mass = 10**mass
         return mass
 
+    def _get_lum(self, teff, rad):
+        sb = sigma_sb.to(u.solLum / u.K**4 / u.solRad**2).value
+        L = 4 * sp.pi * rad ** 2 * sb * teff ** 4
+        return L
+
     def _get_rad(self, samples, dist, dist_e):
         """Calculate radius from the normalization constant and distance."""
         norm = samples
@@ -1030,15 +1302,69 @@ class Fitter:
         r *= u.pc.to(u.solRad)  # Transform to Solar radii
         return r
 
+    def _get_angular_diameter(self, rad, dist):
+        diameter = 2 * rad
+        ad = (diameter / (dist * u.pc.to(u.solRad))) * u.rad.to(u.marcsec)
+        return ad
+
     def _get_max_from_kde(self, samp):
         """Get maximum of the given distribution."""
         kde = gaussian_kde(samp)
         xmin = samp.min()
         xmax = samp.max()
-        xx = sp.linspace(xmin, xmax, 10000)
+        xx = sp.linspace(xmin, xmax, 5000)
         kde = kde(xx)
         best = xx[kde.argmax()]
         return best
+
+    def estimate_age(self, bf, unc):
+        """Estimate age using MIST isochrones."""
+        colors = [
+            'red', 'green', 'blue', 'yellow',
+            'grey', 'magenta', 'cyan', 'white'
+        ]
+        c = random.choice(colors)
+        print(
+            colored(
+                '\t\t*** ESTIMATING AGE USING MIST ISOCHRONES ***', c
+            )
+        )
+        params = dict()  # params for isochrones.
+        for i, k in enumerate(order):
+            if k == 'logg' or 'noise' in k:
+                continue
+            if k == 'teff':
+                par = 'Teff'
+            if k == 'z':
+                continue
+            if k == 'dist':
+                par = 'distance'
+            if k == 'rad':
+                par = 'radius'
+            if k == 'Av':
+                par = 'AV'
+            if not self.coordinator[i]:
+                params[par] = (bf[k], max(unc[k]))
+                if par == 'distance':
+                    params['parallax'] = (1000 / bf[k], self.star.plx_e)
+            else:
+                continue
+
+        params['mass'] = (bf['mass'], max(unc['mass']))
+        params['logL'] = (sp.log10(bf['lum']), abs(sp.log10(max(unc['lum']))))
+        mask = sp.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
+                         0, 1, 0])
+        mags = self.star.mags[mask == 1]
+        mags_e = self.star.mag_errs[mask == 1]
+        bands = ['H', 'J', 'K', 'V', 'B', 'G', 'RP', 'BP', 'W1', 'W2', 'TESS']
+        used_bands = []
+        for m, e, b in zip(mags, mags_e, bands):
+            if m != 0:
+                params[b] = (m, e)
+                used_bands.append(b)
+        samp = estimate(used_bands, params, logg=False)
+        return samp
 
 #####################
 # Dynesty and multinest wrappers
@@ -1052,7 +1378,7 @@ def dynesty_loglike_bma(cube, interpolator):
 
 def dynesty_log_like(cube):
     """Dynesty log likelihood wrapper."""
-    theta = build_params(cube, coordinator, fixed, use_norm)
+    theta = build_params(cube, star, coordinator, fixed, use_norm)
     return log_likelihood(theta, star, interpolator, use_norm, av_law)
 
 
@@ -1065,17 +1391,10 @@ def pt_dynesty(cube):
 def multinest_log_like(cube, ndim, nparams):
     """Multinest log likelihood wrapper."""
     theta = [cube[i] for i in range(ndim)]
-    theta = build_params(theta, coordinator, fixed, use_norm)
-    return log_likelihood(theta, star, interpolators, use_norm)
+    theta = build_params(theta, star, coordinator, fixed, use_norm)
+    return log_likelihood(theta, star, interpolator, use_norm, av_law)
 
 
 def pt_multinest(cube, ndim, nparams):
     """Multinest prior transform."""
     prior_transform_multinest(cube, star, prior_dict, coordinator, use_norm)
-
-
-def log_prob(theta, star):
-    """Wrap for sed_library.log_probability."""
-    # DEPRECATED
-    return log_probability(theta, star, prior_dict, coordinator, interpolators,
-                           fixed)

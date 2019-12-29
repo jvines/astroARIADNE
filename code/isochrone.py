@@ -1,41 +1,79 @@
 """Estimate logg using MIST isochrones."""
 
 import os
+import warnings
 
+import pandas as pd
 import scipy as sp
 from isochrones import SingleStarModel, get_ichrone
 from isochrones.priors import GaussianPrior
+from numba.errors import (NumbaDeprecationWarning,
+                          NumbaPendingDeprecationWarning)
 
 import dynesty
 from dynesty.utils import resample_equal
 from utils import credibility_interval
 
+warnings.filterwarnings(
+    'ignore', category=NumbaDeprecationWarning, append=True)
+warnings.filterwarnings(
+    'ignore', category=NumbaPendingDeprecationWarning, append=True)
 
-def estimate(bands, params):
+
+def estimate(bands, params, logg=True):
     """Estimate logg using MIST isochrones."""
     mist = get_ichrone('mist', bands=bands)
     model = SingleStarModel(mist, **params)
     dist = 1 / (params['parallax'][0] * 0.001)
     dist_e = dist * params['parallax'][1] / params['parallax'][0]
-    model._priors['distance'] = GaussianPrior(dist, 3 * dist_e)
+    if 'distance' in params.keys():
+        dist, dist_e = params['distance']
+    if 'feh' in params.keys():
+        fe, fe_e = params['feh']
+        model._priors['feh'] = GaussianPrior(fe, fe_e)
+    if 'mass' in params.keys():
+        m, m_e = params['mass']
+        model._priors['mass'] = GaussianPrior(m, m_e)
+    if 'AV' in params.keys():
+        av, av_e = params['AV']
+        model._priors['mass'] = GaussianPrior(av, av_e)
+    model._priors['distance'] = GaussianPrior(dist, dist_e)
     sampler = dynesty.NestedSampler(
         loglike, prior_transform, model.n_params + len(bands),
+        nlive=500, bound='multi', sample='rwalk',
         logl_args=([model, params, bands]),
         ptform_args=([model])
     )
-    sampler.run_nested()
+    sampler.run_nested(dlogz=0.5)
     results = sampler.results
     samples = resample_equal(
         results.samples, sp.exp(results.logwt - results.logz[-1])
     )
-    # model.fit(resume=False, verbose=False, n_live_points=500)
-    logg_samples = model.derived_samples['logg']
-    med, lo, up = credibility_interval(logg_samples)
-    med_e = 2 * max([med - lo, up - med])
-    print('\nEstimated log g : ', end='')
-    print(med, end=' +/- ')
-    print(med_e)
-    return med, med_e
+    ###########################################################################
+    # Written by Dan Foreman-mackey
+    # https://github.com/dfm/gaia-isochrones
+    df = model._samples = pd.DataFrame(
+        dict(
+            zip(
+                list(model.param_names),
+                samples.T,
+            )
+        )
+    )
+    model._derived_samples = model.ic(
+        *[df[c].values for c in model.param_names])
+    model._derived_samples["parallax"] = 1000.0 / df["distance"]
+    model._derived_samples["distance"] = df["distance"]
+    model._derived_samples["AV"] = df["AV"]
+    ###########################################################################
+    if logg:
+        samples = model._derived_samples['logg']
+        med, lo, up = credibility_interval(samples, 5)
+        med_e = max([med - lo, up - med])
+        return med, med_e
+    else:
+        samples = 10 ** (model._derived_samples['age'] - 9)
+        return samples
 
 
 # Written by Dan Foreman-mackey

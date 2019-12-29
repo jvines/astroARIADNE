@@ -10,10 +10,16 @@ import time
 from contextlib import closing
 
 import scipy as sp
+from scipy.special import erf
 from termcolor import colored
 
 
-def credibility_interval(post, alpha=.68):
+def norm_fit(x, mu, sigma, A):
+    """Gaussian function."""
+    return A * sp.stats.norm.pdf(x, loc=mu, scale=sigma)
+
+
+def credibility_interval(post, alpha=1.):
     """Calculate bayesian credibility interval.
 
     Parameters:
@@ -33,19 +39,57 @@ def credibility_interval(post, alpha=.68):
         Upper part of the credibility interval.
 
     """
-    er_msg = 'Cannot calculate credibility interval of a single element.'
-    assert len(post) > 1, er_msg
-    lower_percentile = 100 * (1 - alpha) / 2
-    upper_percentile = 100 * (1 + alpha) / 2
+    z = erf(alpha / sp.sqrt(2))
+
+    lower_percentile = 100 * (1 - z) / 2
+    upper_percentile = 100 * (1 + z) / 2
     low, med, up = sp.percentile(
-        post,
-        [lower_percentile, 50, upper_percentile]
+        post, [lower_percentile, 50, upper_percentile]
     )
     return med, low, up
 
 
-def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
-            nthreads=None, dynamic=None):
+def display_star_fin(star, c):
+    """Display stellar information."""
+    temp, temp_e = star.temp, star.temp_e
+    rad, rad_e = star.rad, star.rad_e
+    plx, plx_e = star.plx, star.plx_e
+    lum, lum_e = star.lum, star.lum_e
+    print(colored('\t\t\tGaia DR2 ID : {}'.format(star.g_id), c))
+    if star.tic:
+        print(colored('\t\t\tTIC : {}'.format(star.tic), c))
+    if star.kic:
+        print(colored('\t\t\tKIC : {}'.format(star.kic), c))
+    print(colored('\t\t\tEffective temperature : ', c), end='')
+    print(colored('{:.3f} +/- {:.3f}'.format(temp, temp_e), c))
+    if rad is not None:
+        print(colored('\t\t\tStellar radius : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
+    if lum is not None:
+        print(colored('\t\t\tStellar Luminosity : ', c), end='')
+        print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
+    print(colored('\t\t\tParallax : ', c), end='')
+    print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
+    print(colored('\t\t\tMaximum Av : ', c), end='')
+    print(colored('{:.3f}'.format(star.Av), c))
+    print('')
+    pass
+
+
+def display_star_init(star, c):
+    """Display stellar information."""
+    print(colored('\n\t\t####################################', c))
+    print(colored('\t\t##          PLACEHOLDER           ##', c))
+    print(colored('\t\t####################################', c))
+    print(colored('\n\t\t\tAuthor : Jose Vines', c))
+    print(colored('\t\t\tContact : jose . vines at ug . uchile . cl', c))
+    print(colored('\t\t\tStar : ', c), end='')
+    print(colored(star.starname, c))
+    pass
+
+
+def display_routine(engine, live_points, dlogz, ndim, bound=None, sample=None,
+                    nthreads=None, dynamic=None):
     """Display program information.
 
     What is displayed is:
@@ -64,29 +108,7 @@ def display(engine, star, live_points, dlogz, ndim, bound=None, sample=None,
         engine = 'MultiNest'
     if engine == 'dynesty':
         engine = 'Dynesty'
-    temp, temp_e = star.temp, star.temp_e
-    rad, rad_e = star.rad, star.rad_e
-    plx, plx_e = star.plx, star.plx_e
-    lum, lum_e = star.lum, star.lum_e
-    print(colored('\n\t\t####################################', c))
-    print(colored('\t\t##          PLACEHOLDER           ##', c))
-    print(colored('\t\t####################################', c))
-    print(colored('\n\t\t\tAuthor: Jose Vines', c))
-    print(colored('\t\t\tContact : jose . vines at ug . uchile . cl', c))
-    print(colored('\t\t\tStar : ', c), end='')
-    print(colored(star.starname, c))
-    print(colored('\t\t\tEffective temperature : ', c), end='')
-    print(colored('{:.3f} +/- {:.3f}'.format(temp, temp_e), c))
-    if rad is not None:
-        print(colored('\t\t\tStellar radius : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
-    if lum is not None:
-        print(colored('\t\t\tStellar Luminosity : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
-    print(colored('\t\t\tParallax : ', c), end='')
-    print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
-    print(colored('\t\t\tEstimated Av : ', c), end='')
-    print(colored('{:.3f}'.format(star.Av), c))
+    print(colored('\n\t\t*** EXECUTING MAIN FITTING ROUTINE ***', c))
     print(colored('\t\t\tSelected engine : ', c), end='')
     print(colored(engine, c))
     print(colored('\t\t\tLive points : ', c), end='')
@@ -122,10 +144,10 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     ]
     c = random.choice(colors)
     if use_norm:
-        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
         order = sp.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'Av', 'inflation']
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
     if engine == 'Bayesian Model Averaging':
         res_dir = out_folder + '/BMA_out.pkl'
@@ -134,10 +156,21 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     with closing(open(res_dir, 'rb')) as jar:
         out = pickle.load(jar)
 
-    theta = sp.zeros(order.shape[0])
+    star = out['star']
+    mask = star.filter_mask
+    n = int(star.used_filters.sum())
+    for filt in star.filter_names[mask]:
+        p_ = get_noise_name(filt) + '_noise'
+        order = sp.append(order, p_)
+
+    theta = sp.zeros(order.shape[0] - 1 + n)
     for i, param in enumerate(order):
         if param != 'loglike':
             theta[i] = out['best_fit'][param]
+        if param == 'inflation':
+            for m, fi in enumerate(star.filter_names[mask]):
+                _p = get_noise_name(fi) + '_noise'
+                theta[i + m] = out['best_fit'][_p]
     uncert = []
     if engine != 'Bayesian Model Averaging':
         lglk = out['best_fit']['loglike']
@@ -153,23 +186,27 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     print(colored('\t\t\tFitting finished.', c))
     print(colored('\t\t\tBest fit parameters are:', c))
     for i, p in enumerate(order):
+        if 'noise' in p:
+            continue
         if p == 'norm':
             p = '(R/D)^2'
             print(colored('\t\t\t' + p + ' : ', c), end='')
             print(colored('{:.4e}'.format(theta[i]), c), end=' ')
             if not coordinator[i]:
                 print(colored('+ {:.4e} -'.format(uncert[i][1]), c), end=' ')
-                print(colored('{:.4e}'.format(uncert[i][0]), c))
+                print(colored('{:.4e}'.format(uncert[i][0]), c), end=' ')
+                samp = out['posterior_samples']['norm']
+                _, lo, up = credibility_interval(samp, 3)
+                print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
             else:
                 print(colored('fixed', c))
-            samp = out['posterior_samples']['rad']
             rad = out['best_fit']['rad']
-            _, lo, up = credibility_interval(samp)
-            unlo = abs(rad - lo)
-            unhi = abs(rad - up)
+            unlo, unhi = out['uncertainties']['rad']
+            lo, up = out['confidence_interval']['rad']
             print(colored('\t\t\trad : ', c), end='')
             print(colored('{:.4e}'.format(rad), c), end=' ')
             print(colored('+ {:.4e} -'.format(unhi), c), end=' ')
+            print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
             print(colored('{:.4e} derived'.format(unlo), c))
         if p == 'z':
             p = '[Fe/H]'
@@ -177,24 +214,76 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         print(colored('{:.4f}'.format(theta[i]), c), end=' ')
         if not coordinator[i]:
             print(colored('+ {:.4f} -'.format(uncert[i][1]), c), end=' ')
-            print(colored('{:.4f}'.format(uncert[i][0]), c))
+            print(colored('{:.4f}'.format(uncert[i][0]), c), end=' ')
+            if p == '[Fe/H]':
+                p = 'z'
+            samp = out['posterior_samples'][p]
+            _, lo, up = credibility_interval(samp, 3)
+            print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
         else:
             print(colored('fixed', c))
-    samp = out['posterior_samples']['mass']
+
+    ad = out['best_fit']['AD']
+    unlo, unhi = out['uncertainties']['AD']
+    lo, up = out['confidence_interval']['AD']
+    print(colored('\t\t\tAngular diameter : ', c), end='')
+    print(colored('{:.4f}'.format(ad), c), end=' ')
+    print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
+    print(colored('{:.4f}'.format(unlo), c), end=' ')
+    print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+
     mass = out['best_fit']['mass']
-    _, lo, up = credibility_interval(samp)
-    unlo = abs(mass - lo)
-    unhi = abs(mass - up)
+    unlo, unhi = out['uncertainties']['mass']
+    lo, up = out['confidence_interval']['mass']
     print(colored('\t\t\tmass : ', c), end='')
     print(colored('{:.2f}'.format(mass), c), end=' ')
     print(colored('+ {:.2f} -'.format(unhi), c), end=' ')
-    print(colored('{:.2f} derived'.format(unlo), c))
+    print(colored('{:.2f}'.format(unlo), c), end=' ')
+    print(colored('[{:.2f}, {:.2f}]'.format(lo, up), c))
+
+    lum = out['best_fit']['lum']
+    unlo, unhi = out['uncertainties']['lum']
+    lo, up = out['confidence_interval']['lum']
+    print(colored('\t\t\tluminosity : ', c), end='')
+    print(colored('{:.3f}'.format(lum), c), end=' ')
+    print(colored('+ {:.3f} -'.format(unhi), c), end=' ')
+    print(colored('{:.3f}'.format(unlo), c), end=' ')
+    print(colored('[{:.3f}, {:.3f}]'.format(lo, up), c))
+
+    if engine == 'Bayesian Model Averaging':
+        age = out['best_fit']['age']
+        unlo, unhi = out['uncertainties']['age']
+        lo, up = out['confidence_interval']['age']
+        print(colored('\t\t\tage : ', c), end='')
+        print(colored('{:.4f}'.format(age), c), end=' ')
+        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
+        print(colored('{:.4f}'.format(unlo), c), end=' ')
+        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+
+    for i, p in enumerate(order):
+        if 'noise' not in p:
+            continue
+        p_ = 'Excess '
+        if 'SDSS' not in p and 'PS1' not in p:
+            p1, p2 = p.split('_')
+        else:
+            p1, p2, p3 = p.split('_')
+            p1 += '_' + p2
+            p2 = p3
+        print(colored('\t\t\t' + p_ + p1 + ' ' + p2 + ' : ', c), end='')
+        print(colored('{:.4e}'.format(theta[i]), c), end=' ')
+        print(colored('+ {:.4e}'.format(uncert[i][1]), c), end=' ')
+        print(colored('- {:.4e}'.format(uncert[i][0]), c), end=' ')
+        samp = out['posterior_samples'][p]
+        _, lo, up = credibility_interval(samp, 3)
+        print(colored('[{:.4e}, {:.4e}]'.format(lo, up), c))
+
     spt = out['spectral_type']
     print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
     print(colored(spt, c))
     if engine != 'Bayesian Model Averaging':
-        print(colored('\t\t\tLog Likelihood of best fit : ', c), end='')
-        print(colored('{:.3f}'.format(lglk), c))
+        # print(colored('\t\t\tLog Likelihood of best fit : ', c), end='')
+        # print(colored('{:.3f}'.format(lglk), c))
         print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
         print(colored('{:.3f} +/-'.format(z), c), end=' ')
         print(colored('{:.3f}'.format(z_err), c))
@@ -208,9 +297,11 @@ def create_dir(path):
     try:
         os.mkdir(path)
     except OSError:
-        print("Creation of the directory {:s} failed".format(path))
+        # print("Creation of the directory {:s} failed".format(path))
+        pass
     else:
-        print("Created the directory {:s} ".format(path))
+        # print("Created the directory {:s} ".format(path))
+        pass
     pass
 
 
@@ -246,3 +337,24 @@ def execution_time(start):
         elapsed += ', {:.0f} minutes'.format(minutes)
         elapsed += ' and {:.2f} seconds'.format(seconds)
     return elapsed
+
+
+def get_noise_name(filt):
+    """Retrieve parameter name for white noise."""
+    if filt == 'TYCHO_B_MvB':
+        return 'BT'
+    if filt == 'TYCHO_V_MvB':
+        return 'VT'
+    if filt == 'SPITZER_IRAC_36':
+        return 'IRAC_36'
+    if filt == 'SPITZER_IRAC_45':
+        return 'IRAC_45'
+    if filt == 'NGTS_I':
+        return 'NGTS'
+    if filt == 'WISE_RSR_W1':
+        return 'W1'
+    if filt == 'WISE_RSR_W2':
+        return 'W2'
+    if 'SDSS' in filt or 'PS1' in filt:
+        return filt
+    return filt.split('_')[-1]

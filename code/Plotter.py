@@ -7,6 +7,7 @@ import glob
 import os
 from contextlib import closing
 
+import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import scipy as sp
@@ -14,9 +15,12 @@ from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table
 from extinction import apply
+from isochrones.interp import DFInterpolator
 from matplotlib import rcParams
 from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
+from scipy.optimize import curve_fit
+from scipy.stats import norm
 
 import corner
 from dynesty import plotting as dyplot
@@ -27,7 +31,7 @@ from utils import *
 
 
 class SEDPlotter:
-    """Short summary.
+    """Artist class for all things SED.
 
     Parameters
     ----------
@@ -90,7 +94,7 @@ class SEDPlotter:
 
     """
 
-    __wav_file = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
+    __wav_file = 'PHOENIXv2/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
     def __init__(self, input_files, out_folder, pdf=False, png=True,
                  model=None):
@@ -104,83 +108,100 @@ class SEDPlotter:
         chains = out_folder + '/chains'
         likelihoods = out_folder + '/likelihoods'
         posteriors = out_folder + '/posteriors'
+        histograms = out_folder + '/histograms'
         self.chain_out = chains
         self.like_out = likelihoods
         self.post_out = posteriors
+        self.hist_out = histograms
         self.hdd = '/Volumes/JVines_ext/StellarAtmosphereModels/'
 
         # Read output files.
-        out = pickle.load(open(input_files, 'rb'))
-        self.out = out
-        self.engine = out['engine']
-        self.star = out['star']
-        self.coordinator = out['coordinator']
-        self.fixed = out['fixed']
-        self.norm = out['norm']
-        if model is None:
-            if self.engine != 'Bayesian Model Averaging':
-                self.grid = out['model_grid']
+        if input_files != 'raw':
+            out = pickle.load(open(input_files, 'rb'))
+            self.out = out
+            self.engine = out['engine']
+            self.star = out['star']
+            self.coordinator = out['coordinator']
+            self.fixed = out['fixed']
+            self.norm = out['norm']
+            if model is None:
+                if self.engine != 'Bayesian Model Averaging':
+                    self.grid = out['model_grid']
+                else:
+                    zs = sp.array([out['lnZ'][key]
+                                   for key in out['lnZ'].keys()])
+                    keys = sp.array([key for key in out['lnZ'].keys()])
+                    grid = keys[sp.argmax(zs)]
+                    self.grid = grid
             else:
-                zs = sp.array([out['lnZ'][key] for key in out['lnZ'].keys()])
-                keys = sp.array([key for key in out['lnZ'].keys()])
-                grid = keys[sp.argmax(zs)]
-                self.grid = grid
-        else:
-            self.grid = model
-        self.av_law = out['av_law']
+                self.grid = model
+            self.av_law = out['av_law']
 
-        # Create target folders
-        create_dir(out_folder)
-        if self.engine != 'Bayesian Model Averaging':
-            create_dir(chains)
-            create_dir(likelihoods)
-            create_dir(posteriors)
+            # Create target folders
+            create_dir(out_folder)
+            if self.engine != 'Bayesian Model Averaging':
+                create_dir(chains)
+                create_dir(likelihoods)
+                create_dir(posteriors)
+            create_dir(histograms)
 
-        self.star.load_grid(self.grid)
+            self.star.load_grid(self.grid)
 
-        if not self.norm:
-            self.order = sp.array(
-                [
-                    'teff', 'logg', 'z',
-                    'dist', 'rad', 'Av',
-                    'inflation'
-                ]
-            )
-        else:
-            self.order = sp.array(
-                ['teff', 'logg', 'z', 'norm', 'Av', 'inflation'])
+            if not self.norm:
+                self.order = sp.array(
+                    [
+                        'teff', 'logg', 'z',
+                        'dist', 'rad', 'Av',
+                    ]
+                )
+            else:
+                self.order = sp.array(
+                    ['teff', 'logg', 'z', 'norm', 'Av'])
 
-        directory = '../Datafiles/model_grids/'
-        if self.grid.lower() == 'phoenix':
-            with open(directory + 'interpolations_Phoenix.pkl', 'rb') as intp:
-                self.interpolator = pickle.load(intp)
-        if self.grid.lower() == 'btsettl':
-            with open(directory + 'interpolations_BTSettl.pkl', 'rb') as intp:
-                self.interpolator = pickle.load(intp)
-        if self.grid.lower() == 'ck04':
-            with open(directory + 'interpolations_CK04.pkl', 'rb') as intp:
-                self.interpolator = pickle.load(intp)
-        if self.grid.lower() == 'kurucz':
-            with open(directory + 'interpolations_Kurucz.pkl', 'rb') as intp:
-                self.interpolator = pickle.load(intp)
-        if self.grid.lower() == 'nextgen':
-            with open(directory + 'interpolations_NextGen.pkl', 'rb') as intp:
-                self.interpolator = pickle.load(intp)
+            mask = self.star.filter_mask
+            flxs = self.star.flux[mask]
+            errs = self.star.flux_er[mask]
+            filters = self.star.filter_names[mask]
+            for filt, flx, flx_e in zip(filters, flxs, errs):
+                p_ = get_noise_name(filt) + '_noise'
+                self.order = sp.append(self.order, p_)
 
-        # Get best fit parameters.
-        theta = sp.zeros(self.order.shape[0])
-        for i, param in enumerate(self.order):
-            if param != 'likelihood':
-                theta[i] = out['best_fit'][param]
-        self.theta = theta
-        # self.theta = build_params(theta, self.coordinator, self.fixed)
+            directory = '../Datafiles/model_grids/'
+            if self.grid.lower() == 'phoenix':
+                with open(directory + 'Phoenixv2_DF.pkl', 'rb') as intp:
+                    self.interpolator = DFInterpolator(pickle.load(intp))
+            if self.grid.lower() == 'btsettl':
+                with open(directory + 'BTSettl_DF.pkl', 'rb') as intp:
+                    self.interpolator = DFInterpolator(pickle.load(intp))
+            if self.grid.lower() == 'btnextgen':
+                with open(directory + 'BTNextGen_DF.pkl', 'rb') as intp:
+                    self.interpolator = DFInterpolator(pickle.load(intp))
+            if self.grid.lower() == 'btcond':
+                with open(directory + 'BTCond_DF.pkl', 'rb') as intp:
+                    self.interpolator = DFInterpolator(pickle.load(intp))
+            if self.grid.lower() == 'ck04':
+                with open(directory + 'CK04_DF.pkl', 'rb') as intp:
+                    self.interpolator = DFInterpolator(pickle.load(intp))
+            if self.grid.lower() == 'kurucz':
+                with open(directory + 'Kurucz_DF.pkl', 'rb') as intp:
+                    self.interpolator = DFInterpolator(pickle.load(intp))
 
-        # Calculate best fit model.
-        self.model = model_grid(self.theta, self.star,
-                                self.interpolator, self.norm, self.av_law)
+            # Get best fit parameters.
+            mask = self.star.filter_mask
+            n = int(self.star.used_filters.sum())
+            theta = sp.zeros(self.order.shape[0])
+            for i, param in enumerate(self.order):
+                if param != 'likelihood' and param != 'inflation':
+                    theta[i] = out['best_fit'][param]
+            self.theta = theta
+            # self.theta = build_params(theta, self.coordinator, self.fixed)
 
-        # Get archival fluxes.
-        self.__extract_info()
+            # Calculate best fit model.
+            self.model = model_grid(self.theta, self.star,
+                                    self.interpolator, self.norm, self.av_law)
+
+            # Get archival fluxes.
+            self.__extract_info()
 
         # Setup plots.
         self.__read_config()
@@ -210,8 +231,92 @@ class SEDPlotter:
         self.wave = sp.array(self.wave)
         self.bandpass = sp.array(self.bandpass).T
 
+    def plot_SED_no_model(self, s=None):
+        """Plot raw photometry."""
+        create_dir(self.out_folder)
+        if self.star is None:
+            self.star = s
+        self.__extract_info()
+        # Get plot ylims.
+        ymin = (self.flux * self.wave).min()
+        ymax = (self.flux * self.wave).max()
+
+        f, ax = plt.subplots(figsize=self.figsize)
+
+        # Model plot
+        used_f = self.star.filter_names[self.star.filter_mask]
+        n_used = int(self.star.used_filters.sum())
+        colors = sp.array([
+            'indianred', 'firebrick', 'maroon',
+            'salmon', 'red',
+            'darkorange', 'tan', 'orange',
+            'goldenrod', 'gold',
+            'olivedrab', 'yellowgreen', 'greenyellow', 'yellow',
+            'orangered', 'chocolate', 'khaki',
+            'limegreen', 'darkgreen', 'lime', 'seagreen', 'lawngreen', 'green',
+            'aquamarine', 'turquoise', 'lightseagreen', 'teal', 'cadetblue',
+            'steelblue', 'dodgerblue',
+            'blueviolet', 'darkviolet',
+            'midnightblue', 'blue',
+            'deeppink', 'fuchsia', 'mediumslateblue'
+        ])
+
+        for c, w, fl, fe, bp, fi in zip(
+                colors[self.star.filter_mask],
+                self.wave, self.flux, self.flux_er,
+                self.bandpass, used_f):
+
+            ax.errorbar(w, fl * w,
+                        xerr=bp, yerr=fe,
+                        fmt=',',
+                        ecolor=c,
+                        marker=None)
+
+            ax.scatter(w, fl * w,
+                       edgecolors='black',
+                       marker=self.marker,
+                       c=c,
+                       s=self.scatter_size,
+                       alpha=self.scatter_alpha, label=fi)
+
+        ax.set_ylim([ymin * .8, ymax * 1.25])
+        ax.set_xscale('log', nonposx='clip')
+        ax.set_yscale('log', nonposy='clip')
+        ax.set_ylabel(r'$\lambda$F$_\lambda$ (erg cm$^{-2}$s$^{-1}$)',
+                      fontsize=self.fontsize,
+                      fontname=self.fontname
+                      )
+        ax.legend(loc=0)
+
+        ax.tick_params(
+            axis='both', which='major',
+            labelsize=self.tick_labelsize
+        )
+        ax.set_xticks(sp.linspace(1, 10, 10))
+        ax.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
+        ylocmin = ticker.LinearLocator(numticks=4)
+
+        ax.set_xlim([0.1, 6])
+
+        labels = [item.get_text() for item in ax.get_xticklabels()]
+
+        # empty_string_labels = [''] * len(labels)
+        # ax.set_xticklabels(empty_string_labels)
+
+        for tick in ax.get_yticklabels():
+            tick.set_fontname(self.fontname)
+
+        if self.pdf:
+            plt.savefig(self.out_folder + '/SED_no_model.pdf',
+                        bbox_inches='tight')
+        if self.png:
+            plt.savefig(self.out_folder + '/SED_no_model.png',
+                        bbox_inches='tight')
+        pass
+
     def plot_SED(self):
         """Create the plot of the SED."""
+        print('Plotting SED')
         # Get plot ylims.
         ymin = (self.flux * self.wave).min()
         ymax = (self.flux * self.wave).max()
@@ -280,7 +385,7 @@ class SEDPlotter:
 
         # Formatting
         res_std = norm_res.std()
-        ax.set_ylim([ymin * .8, ymax * 1.25])
+        ax.set_ylim([ymin * .05, ymax * 1.8])
         # ax_r.set_ylim([-5, 5])
         ax_r.set_ylim([-4 * res_std, 4 * res_std])
         ax.set_xscale('log', nonposx='clip')
@@ -316,8 +421,13 @@ class SEDPlotter:
         ax_r.yaxis.set_minor_locator(ylocmin)
         ax_r.yaxis.set_minor_formatter(ticker.NullFormatter())
 
-        ax.set_xlim([0.25, 6])
-        ax_r.set_xlim([0.25, 6])
+        if 'GALEX_FUV' in self.star.filter_names[self.star.filter_mask] or \
+                'GALEX_NUV' in self.star.filter_names[self.star.filter_mask]:
+            ax.set_xlim([0.125, 6])
+            ax_r.set_xlim([0.125, 6])
+        else:
+            ax.set_xlim([0.25, 6])
+            ax_r.set_xlim([0.25, 6])
 
         labels = [item.get_text() for item in ax.get_xticklabels()]
 
@@ -349,7 +459,7 @@ class SEDPlotter:
             wave = fits.open(self.hdd + self.__wav_file)[0].data
             wave *= u.angstrom.to(u.um)
 
-            lower_lim = 0.25 < wave
+            lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
 
             flux = self.fetch_Phoenix()
@@ -361,7 +471,7 @@ class SEDPlotter:
             ext = self.av_law(new_w * 1e4, Av, Rv)
 
             brf, _ = pyasl.instrBroadGaussFast(
-                new_ww, flux, 650,
+                new_ww, flux, 1500,
                 edgeHandling="firstlast",
                 fullout=True, maxsig=8
             )
@@ -373,7 +483,7 @@ class SEDPlotter:
         elif self.grid == 'btsettl':
             wave, flux = self.fetch_btsettl()
 
-            lower_lim = 0.25 < wave
+            lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
 
             wave = wave[lower_lim * upper_lim]
@@ -383,7 +493,7 @@ class SEDPlotter:
             new_w = sp.linspace(wave[0], wave[-1], len(wave))
 
             brf, _ = pyasl.instrBroadGaussFast(
-                new_w, flux, 650,
+                new_w, flux, 1500,
                 edgeHandling="firstlast",
                 fullout=True, maxsig=8
             )
@@ -391,10 +501,10 @@ class SEDPlotter:
             flx *= wave * (rad / dist) ** 2
             ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
 
-        elif self.grid == 'nextgen':
-            wave, flux = self.fetch_nextgen()
+        elif self.grid == 'btnextgen':
+            wave, flux = self.fetch_btnextgen()
 
-            lower_lim = 0.25 < wave
+            lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
 
             wave = wave[lower_lim * upper_lim]
@@ -404,7 +514,28 @@ class SEDPlotter:
             new_w = sp.linspace(wave[0], wave[-1], len(wave))
 
             brf, _ = pyasl.instrBroadGaussFast(
-                new_w, flux, 650,
+                new_w, flux, 1500,
+                edgeHandling="firstlast",
+                fullout=True, maxsig=8
+            )
+            flx = apply(ext, brf)
+            flx *= wave * (rad / dist) ** 2
+            ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
+
+        elif self.grid == 'btcond':
+            wave, flux = self.fetch_btcond()
+
+            lower_lim = 0.125 < wave
+            upper_lim = wave < 4.629296073126975
+
+            wave = wave[lower_lim * upper_lim]
+            flux = flux[lower_lim * upper_lim]
+            ext = self.av_law(wave * 1e4, Av, Rv)
+
+            new_w = sp.linspace(wave[0], wave[-1], len(wave))
+
+            brf, _ = pyasl.instrBroadGaussFast(
+                new_w, flux, 1500,
                 edgeHandling="firstlast",
                 fullout=True, maxsig=8
             )
@@ -415,7 +546,7 @@ class SEDPlotter:
         elif self.grid == 'ck04':
             wave, flux = self.fetch_ck04()
 
-            lower_lim = 0.25 < wave
+            lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
 
             wave = wave[lower_lim * upper_lim]
@@ -428,7 +559,7 @@ class SEDPlotter:
         elif self.grid == 'kurucz':
             wave, flux = self.fetch_kurucz()
 
-            lower_lim = 0.25 < wave
+            lower_lim = 0.15 < wave
             upper_lim = wave < 4.629296073126975
 
             wave = wave[lower_lim * upper_lim]
@@ -529,18 +660,110 @@ class SEDPlotter:
         plt.close('all')
         pass
 
+    def plot_bma_hist(self):
+        """Plot histograms."""
+        print('Plotting BMA histograms.')
+        models = [key for key in self.out['originals'].keys()]
+        for i, param in enumerate(self.order):
+            if 'noise' in param:
+                continue
+            if not self.coordinator[i]:
+                f, ax = plt.subplots(figsize=(12, 4))
+                for m in models:
+                    # Get samples
+                    samp = self.out['originals'][m][param]
+                    # Plot sample histogram
+                    label = m + ' prob: {:.3f}'.format(self.out['weights'][m])
+                    n, bins, patches = ax.hist(samp, alpha=.3, bins=50,
+                                               label=label, density=True)
+                    # Fit gaussian distribution to data
+                    bc = bins[:-1] + sp.diff(bins)
+                    # Get reasonable p0
+                    mu, sig = norm.fit(samp)
+                    popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+                                           p0=[mu, sig, n.max()])
+                    xx = sp.linspace(bins[0], bins[-1], 100000)
+                    # Plot best fit
+                    ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
+                            alpha=.7)
+                # The same but for the averaged samples
+                n, bins, patches = ax.hist(
+                    self.out['posterior_samples'][param], alpha=.3,
+                    bins=50, label='Average', density=True
+                )
+                bc = bins[:-1] + sp.diff(bins)
+                mu, sig = norm.fit(self.out['posterior_samples'][param])
+                popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+                                       p0=[mu, sig, n.max()])
+                xx = sp.linspace(bins[0], bins[-1], 100000)
+                ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
+                ax.set_ylabel('PDF')
+                if param == 'z':
+                    param = '[Fe/H]'
+                ax.set_xlabel(param)
+                plt.legend(loc=0)
+                if param == '[Fe/H]':
+                    param = 'Fe_H'
+                if self.png:
+                    plt.savefig(self.hist_out + '/' + param + '.png',
+                                bbox_inches='tight')
+                if self.pdf:
+                    plt.savefig(self.hist_out + '/' + param + '.pdf',
+                                bbox_inches='tight')
+
+        # Repeat the above with weighed histograms.
+        for i, param in enumerate(self.order):
+            if 'noise' in param:
+                continue
+            if not self.coordinator[i]:
+                f, ax = plt.subplots(figsize=(12, 4))
+                for m in models:
+                    samp = self.out['originals'][m][param]
+                    label = m + ' prob: {:.3f}'.format(self.out['weights'][m])
+                    n, bins, patches = ax.hist(
+                        samp, alpha=.3, bins=50, label=label,
+                        weights=[self.out['weights'][m]] * len(samp)
+                    )
+                    bc = bins[:-1] + sp.diff(bins)
+                    mu, sig = norm.fit(samp)
+                    popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+                                           p0=[mu, sig, n.max()])
+                    xx = sp.linspace(bins[0], bins[-1], 100000)
+                    ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
+                            alpha=.7)
+                ax.set_ylabel('N')
+                if param == 'z':
+                    param = '[Fe/H]'
+                ax.set_xlabel(param)
+                plt.legend(loc=0)
+                if param == '[Fe/H]':
+                    param = 'Fe_H'
+                if self.png:
+                    plt.savefig(self.hist_out + '/weighted_' + param + '.png',
+                                bbox_inches='tight')
+                if self.pdf:
+                    plt.savefig(self.hist_out + '/weighted_' + param + '.pdf',
+                                bbox_inches='tight')
+
     def plot_corner(self):
         """Make corner plot."""
+        print('Plotting corner.')
         samples = self.out['posterior_samples']
         all_samps = []
         theta_lo = []
         theta_up = []
+
+        for i, o in enumerate(self.order):
+            if 'noise' in o:
+                self.coordinator[i] = 1
 
         theta = self.theta[self.coordinator == 0]
         used_params = self.order[self.coordinator == 0]
 
         for i, param in enumerate(self.order):
             if not self.coordinator[i]:
+                if 'noise' in param:
+                    continue
                 _, lo, up = credibility_interval(
                     samples[param])
                 theta_lo.append(lo)
@@ -701,7 +924,7 @@ class SEDPlotter:
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
         return wave, flux
 
-    def fetch_nextgen(self):
+    def fetch_btnextgen(self):
         """Fetch correct BT-NextGen SED file.
 
         The directory containing the BT-NextGen spectra must be called
@@ -738,6 +961,48 @@ class SEDPlotter:
             '0' + str(sel_teff)
         selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
         selected_SED += '.BT-NextGen.AGSS2009.fits'
+        tab = Table(fits.open(selected_SED)[1].data)
+        flux = sp.array(tab['FLUX'].tolist()) * conversion
+        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        return wave, flux
+
+    def fetch_btcond(self):
+        """Fetch correct BT-COND SED file.
+
+        The directory containing the BT-COND spectra must be called
+        BTCOND. Within BTCOND there should be yet another directory
+        called CIFIST2011, within BTCOND/CIFIST2011 there should be the SED
+        fits files with the following naming convention:
+
+        lteTTT-G.G[-/+]Z.Za+0.0..BT-Cond.CIFIST2011.fits
+
+        where TTT are the first 3 digits of the effective temperature if it's a
+        number over 10000, else it's the first 2 digit prepended by a 0.
+        G.G is the log g and Z.Z the metallicity.
+        """
+        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        teff = self.theta[0]
+        logg = self.theta[1]
+        z = self.theta[2]
+        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
+        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
+        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
+        sel_teff = int(sp.unique(self.star.teff)[select_teff]) // 100
+        sel_logg = sp.unique(self.star.logg)[select_logg]
+        sel_z = sp.unique(self.star.z)[select_z]
+        metal_add = ''
+        if sel_z < 0:
+            metal_add = str(sel_z)
+        if sel_z == 0:
+            metal_add = '-0.0'
+        if sel_z > 0:
+            metal_add = '+' + str(sel_z)
+        selected_SED = self.hdd + 'BTCond/CIFIST2011/lte'
+        selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
+            '0' + str(sel_teff)
+        selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
+        selected_SED += '.BT-Cond.CIFIST2011.fits'
         tab = Table(fits.open(selected_SED)[1].data)
         flux = sp.array(tab['FLUX'].tolist()) * conversion
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
@@ -842,10 +1107,20 @@ class SEDPlotter:
                 new_titles[i] = r'Av ='
             if param == 'inflation':
                 new_titles[i] = r'$\sigma$ ='
-            new_titles[i] += '{:.2f}'.format(theta[i])
-            new_titles[i] += r'$^{+' + '{:.2f}'.format(theta_up[i] - theta[i])
-            new_titles[i] += r'}_{-' + '{:.2f}'.format(theta[i] - theta_lo[i])
-            new_titles[i] += r'}$'
+            if param == 'rad' or param == 'dist':
+                new_titles[i] += '{:.3f}'.format(theta[i])
+                new_titles[i] += r'$^{+' + \
+                    '{:.3f}'.format(theta_up[i] - theta[i])
+                new_titles[i] += r'}_{-' + \
+                    '{:.3f}'.format(theta[i] - theta_lo[i])
+                new_titles[i] += r'}$'
+            else:
+                new_titles[i] += '{:.2f}'.format(theta[i])
+                new_titles[i] += r'$^{+' + \
+                    '{:.2f}'.format(theta_up[i] - theta[i])
+                new_titles[i] += r'}_{-' + \
+                    '{:.2f}'.format(theta[i] - theta_lo[i])
+                new_titles[i] += r'}$'
         return new_titles
 
     def __create_labels(self, labels):

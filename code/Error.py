@@ -26,6 +26,12 @@ class Error(Exception):
         print('An exception was catched!', end=': ')
         print(self, end='\nError message: ')
         print(self.message)
+
+    def log(self, out):
+        """Log the error."""
+        log_f = open(out, 'a')
+        log_f.write(self.message)
+        log_f.close()
     pass
 
 
@@ -113,6 +119,8 @@ class CatalogWarning(Error):
     Type 4 means uncertainty is 0
     Type 5 means star is not available in the catalog
     Type 6 means the selected magnitude was already retrieved
+    Type 7 means catalog was manually skipped
+    Type 8 means the given entry is either of bad quality or is a galaxy
 
     """
 
@@ -133,6 +141,11 @@ class CatalogWarning(Error):
             self.message += '. Skipping'
         if type == 6:
             self.message = par + ' magnitude already retrieved. Skipping.'
+        if type == 7:
+            self.message = 'Catalog ' + par + ' manually skipped!'
+        if type == 8:
+            self.message = 'Catalog ' + par + ' entry is either an extended'
+            self.message += ' source or is of bad quality. Skipping.'
 
     def warn(self):
         """Print error message."""
@@ -144,6 +157,8 @@ class CatalogWarning(Error):
 class DynestyError(Error):
     """Exception raised when dynesty crashes."""
 
-    def __init__(self, out):
+    def __init__(self, out, mod):
+        self.errorname = 'DynestyError'
         self.message = 'ERROR OCCURRED DURING DYNESTY RUN.\n'
-        self.message += 'DUMPING SAMPLER TO {}'.format(out)
+        self.message += 'WHILE FITTING MODEL {}\n'.format(mod)
+        self.message += 'DUMPING `sampler.results` TO {}'.format(out)
