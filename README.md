@@ -1,6 +1,6 @@
 # ARIADNE (spectrAl eneRgy dIstribution bAyesian moDel averagiNg fittEr)
 ## Characterize stellar atmospheres easily!
-PLACEHOLDER Is a code written in python 3 (sorry python 2 users) designed to fit broadband photometry to Phoenix v2 stellar atmosphere models automatically using Nested sampling algorithms.
+ARIADNE Is a code written in python 3 (sorry python 2 users!) designed to fit broadband photometry to different stellar atmosphere models automatically using Nested sampling algorithms.
 
 # Installation
 To install ARIADNE you just have to clone this repository with
