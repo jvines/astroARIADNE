@@ -16,12 +16,13 @@ from isochrones.interp import DFInterpolator
 from scipy.stats import gaussian_kde
 from termcolor import colored
 
-import Star
-from Error import *
-from isochrone import estimate
-from phot_utils import *
-from sed_library import *
-from utils import *
+from .star import Star
+from .error import *
+from .isochrone import estimate
+from .phot_utils import *
+from .sed_library import *
+from .utils import *
+from .config import gridsdir, priorsdir, filesdir
 
 try:
     import dynesty
@@ -137,22 +138,22 @@ class Fitter:
         directory = '../Datafiles/model_grids/'
         # directory = './'
         if grid.lower() == 'phoenix':
-            with open(directory + 'Phoenixv2_DF.pkl', 'rb') as intp:
+            with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'btsettl':
-            with open(directory + 'BTSettl_DF.pkl', 'rb') as intp:
+            with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'btnextgen':
-            with open(directory + 'BTNextGen_DF.pkl', 'rb') as intp:
+            with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'btcond':
-            with open(directory + 'BTCond_DF.pkl', 'rb') as intp:
+            with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'ck04':
-            with open(directory + 'CK04_DF.pkl', 'rb') as intp:
+            with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'kurucz':
-            with open(directory + 'Kurucz_DF.pkl', 'rb') as intp:
+            with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pickle.load(intp))
 
     @property
@@ -344,22 +345,22 @@ class Fitter:
                 # directory = '../Datafiles/model_grids/'
                 directory = './'
                 if mod.lower() == 'phoenix':
-                    with open(directory + 'Phoenixv2_DF.pkl', 'rb') as intp:
+                    with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'btsettl':
-                    with open(directory + 'BTSettl_DF.pkl', 'rb') as intp:
+                    with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'btnextgen':
-                    with open(directory + 'BTNextGen_DF.pkl', 'rb') as intp:
+                    with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'btcond':
-                    with open(directory + 'BTCond_DF.pkl', 'rb') as intp:
+                    with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'ck04':
-                    with open(directory + 'CK04_DF.pkl', 'rb') as intp:
+                    with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'kurucz':
-                    with open(directory + 'Kurucz_DF.pkl', 'rb') as intp:
+                    with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 self._interpolators.append(df)
                 self._grids.append(mod)
@@ -387,14 +388,14 @@ class Fitter:
             defaults['logg'] = st.norm(
                 loc=self.star.logg, scale=self.star.logg_e)
         else:
-            with closing(open('../Datafiles/prior/logg_ppf.pkl', 'rb')) as jar:
+            with closing(open(priorsdir + '/logg_ppf.pkl', 'rb')) as jar:
                 defaults['logg'] = pickle.load(jar)
         # Teff prior setup.
         if self.star.get_temp:
             defaults['teff'] = st.norm(
                 loc=self.star.temp, scale=self.star.temp_e)
         else:
-            with closing(open('../Datafiles/prior/teff_ppf.pkl', 'rb')) as jar:
+            with closing(open(priorsdir + '/teff_ppf.pkl', 'rb')) as jar:
                 defaults['teff'] = pickle.load(jar)
         # [Fe/H] prior setup.
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
@@ -1014,9 +1015,9 @@ class Fitter:
 
         # Load Mamajek spt table
         mamajek_spt = sp.loadtxt(
-            '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
+            filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
         mamajek_temp = sp.loadtxt(
-            '../Datafiles/mamajek_spt.dat', usecols=[1])
+            filesdir + '/mamajek_spt.dat', usecols=[1])
 
         # Find spt
         spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
@@ -1247,8 +1248,8 @@ class Fitter:
 
         # Load Mamajek spt table
         mamajek_spt = sp.loadtxt(
-            '../Datafiles/mamajek_spt.dat', dtype=str, usecols=[0])
-        mamajek_temp = sp.loadtxt('../Datafiles/mamajek_spt.dat', usecols=[1])
+            filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
+        mamajek_temp = sp.loadtxt(filesdir + '/mamajek_spt.dat', usecols=[1])
 
         # Find spt
         spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))

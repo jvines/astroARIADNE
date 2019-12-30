@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 
 try:
-    from setuptools import setup
+    from setuptools import setup, find_packages
 except ImportError:
-    from distutils.core import setup
+    from distutils.core import setup, find_packages
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
-    name="astro_ariadne",
+    name="astroARIADNE",
     version="0.0.1",
     author="Jose Vines",
     author_email="jose.vines@ug.uchile.cl",
@@ -21,7 +21,7 @@ setup(
     long_description_content_type="text/markdown",
     license="MIT",
     url="https://github.com/pypa/sampleproject",
-    packages=setuptools.find_packages(),
+    packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

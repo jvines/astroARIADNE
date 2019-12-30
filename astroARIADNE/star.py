@@ -14,10 +14,11 @@ from scipy.interpolate import RegularGridInterpolator
 from tabulate import tabulate
 from termcolor import colored
 
-from isochrone import estimate
-from Librarian import Librarian
-from phot_utils import *
-from utils import display_star_fin, display_star_init
+from .isochrone import estimate
+from .librarian import Librarian
+from .phot_utils import *
+from .utils import display_star_fin, display_star_init
+from .config import gridsdir
 
 
 class Star:
@@ -320,17 +321,17 @@ class Star:
         # Grid stuff
         # self.full_grid = sp.loadtxt('../Datafiles/model_grid_fix.dat')
         if model.lower() == 'phoenix':
-            gridname = '../Datafiles/model_grids/model_grid_Phoenixv2.dat'
+            gridname = gridsdir + '/model_grid_Phoenixv2.dat'
         if model.lower() == 'btsettl':
-            gridname = '../Datafiles/model_grids/model_grid_BT_Settl.dat'
+            gridname = gridsdir + '/model_grid_BT_Settl.dat'
         if model.lower() == 'btnextgen':
-            gridname = '../Datafiles/model_grids/model_grid_BT_NextGen.dat'
+            gridname = gridsdir + '/model_grid_BT_NextGen.dat'
         if model.lower() == 'btcond':
-            gridname = '../Datafiles/model_grids/model_grid_BT_Cond.dat'
+            gridname = gridsdir + '/model_grid_BT_Cond.dat'
         if model.lower() == 'ck04':
-            gridname = '../Datafiles/model_grids/model_grid_CK04.dat'
+            gridname = gridsdir + '/model_grid_CK04.dat'
         if model.lower() == 'kurucz':
-            gridname = '../Datafiles/model_grids/model_grid_Kurucz.dat'
+            gridname = gridsdir + '/model_grid_Kurucz.dat'
 
         self.full_grid = sp.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]

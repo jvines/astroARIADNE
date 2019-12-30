@@ -15,7 +15,7 @@ from astroquery.xmatch import XMatch
 from regions import CircleSkyRegion
 from tqdm import tqdm
 
-from Error import CatalogWarning
+from .error import CatalogWarning
 
 warnings.filterwarnings('ignore', category=UserWarning, append=True)
 warnings.filterwarnings('ignore', category=AstropyWarning, append=True)

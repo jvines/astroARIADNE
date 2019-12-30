@@ -23,10 +23,11 @@ from scipy.stats import norm
 
 import corner
 from dynesty import plotting as dyplot
-from phot_utils import *
-from sed_library import *
-from Star import *
-from utils import *
+
+from .phot_utils import *
+from .sed_library import *
+from .utils import *
+from .config import gridsdir, filesdir, modelsdir
 
 
 class SEDPlotter:
@@ -65,8 +66,8 @@ class SEDPlotter:
         Output directory for likelihood plot.
     post_out : str
         Output directory for posteriors plot.
-    hdd : type
-        Description of attribute `hdd`.
+    moddir : type
+        Directory wheere the SED models are located.
     out : dict
         SED fitting routine output.
     engine : str
@@ -112,7 +113,7 @@ class SEDPlotter:
         self.like_out = likelihoods
         self.post_out = posteriors
         self.hist_out = histograms
-        self.hdd = '/Volumes/JVines_ext/StellarAtmosphereModels/'
+        self.moddir = modelsdir
 
         # Read output files.
         if input_files != 'raw':
@@ -165,24 +166,23 @@ class SEDPlotter:
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = sp.append(self.order, p_)
 
-            directory = '../Datafiles/model_grids/'
             if self.grid.lower() == 'phoenix':
-                with open(directory + 'Phoenixv2_DF.pkl', 'rb') as intp:
+                with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pickle.load(intp))
             if self.grid.lower() == 'btsettl':
-                with open(directory + 'BTSettl_DF.pkl', 'rb') as intp:
+                with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pickle.load(intp))
             if self.grid.lower() == 'btnextgen':
-                with open(directory + 'BTNextGen_DF.pkl', 'rb') as intp:
+                with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pickle.load(intp))
             if self.grid.lower() == 'btcond':
-                with open(directory + 'BTCond_DF.pkl', 'rb') as intp:
+                with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pickle.load(intp))
             if self.grid.lower() == 'ck04':
-                with open(directory + 'CK04_DF.pkl', 'rb') as intp:
+                with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pickle.load(intp))
             if self.grid.lower() == 'kurucz':
-                with open(directory + 'Kurucz_DF.pkl', 'rb') as intp:
+                with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pickle.load(intp))
 
             # Get best fit parameters.
@@ -315,6 +315,9 @@ class SEDPlotter:
 
     def plot_SED(self):
         """Create the plot of the SED."""
+        if self.moddir is None:
+            print('Models directory not provided, skipping SED plot.')
+            return
         print('Plotting SED')
         # Get plot ylims.
         ymin = (self.flux * self.wave).min()
@@ -455,7 +458,7 @@ class SEDPlotter:
 
         # SED plot.
         if self.grid == 'phoenix':
-            wave = fits.open(self.hdd + self.__wav_file)[0].data
+            wave = fits.open(self.moddir + self.__wav_file)[0].data
             wave *= u.angstrom.to(u.um)
 
             lower_lim = 0.125 < wave
@@ -862,7 +865,7 @@ class SEDPlotter:
         sel_teff = int(sp.unique(self.star.teff)[select_teff])
         sel_logg = sp.unique(self.star.logg)[select_logg]
         sel_z = sp.unique(self.star.z)[select_z]
-        selected_SED = self.hdd + 'PHOENIXv2/Z'
+        selected_SED = self.moddir + 'PHOENIXv2/Z'
         metal_add = ''
         if sel_z < 0:
             metal_add = str(sel_z)
@@ -913,7 +916,7 @@ class SEDPlotter:
             metal_add = '-0.0'
         if sel_z > 0:
             metal_add = '+' + str(sel_z)
-        selected_SED = self.hdd + 'BTSettl/AGSS2009/lte'
+        selected_SED = self.moddir + 'BTSettl/AGSS2009/lte'
         selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
             '0' + str(sel_teff)
         selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
@@ -955,7 +958,7 @@ class SEDPlotter:
             metal_add = '-0.0'
         if sel_z > 0:
             metal_add = '+' + str(sel_z)
-        selected_SED = self.hdd + 'BTNextGen/AGSS2009/lte'
+        selected_SED = self.moddir + 'BTNextGen/AGSS2009/lte'
         selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
             '0' + str(sel_teff)
         selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
@@ -997,7 +1000,7 @@ class SEDPlotter:
             metal_add = '-0.0'
         if sel_z > 0:
             metal_add = '+' + str(sel_z)
-        selected_SED = self.hdd + 'BTCond/CIFIST2011/lte'
+        selected_SED = self.moddir + 'BTCond/CIFIST2011/lte'
         selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
             '0' + str(sel_teff)
         selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
@@ -1040,7 +1043,7 @@ class SEDPlotter:
             metal_add = 'p' + str(sel_z).replace('.', '')
         name = 'ck' + metal_add
         lgg = 'g{:.0f}'.format(sel_logg * 10)
-        selected_SED = self.hdd + 'Castelli_Kurucz/' + name + '/' + name
+        selected_SED = self.moddir + 'Castelli_Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
@@ -1080,7 +1083,7 @@ class SEDPlotter:
             metal_add = 'p' + str(sel_z).replace('.', '')
         name = 'k' + metal_add
         lgg = 'g{:.0f}'.format(sel_logg * 10)
-        selected_SED = self.hdd + 'Kurucz/' + name + '/' + name
+        selected_SED = self.moddir + 'Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
@@ -1145,7 +1148,7 @@ class SEDPlotter:
 
     def __read_config(self):
         """Read plotter configuration file."""
-        settings = open('../Datafiles/plot_settings.dat', 'r')
+        settings = open(filesdir + '/plot_settings.dat', 'r')
         for line in settings.readlines():
             if line[0] == '#' or line[0] == '\n':
                 continue

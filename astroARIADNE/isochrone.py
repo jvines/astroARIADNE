@@ -12,7 +12,8 @@ from numba.errors import (NumbaDeprecationWarning,
 
 import dynesty
 from dynesty.utils import resample_equal
-from utils import credibility_interval
+
+from .utils import credibility_interval
 
 warnings.filterwarnings(
     'ignore', category=NumbaDeprecationWarning, append=True)

@@ -297,10 +297,10 @@ def create_dir(path):
     try:
         os.mkdir(path)
     except OSError:
-        # print("Creation of the directory {:s} failed".format(path))
+        print("Creation of the directory {:s} failed".format(path))
         pass
     else:
-        # print("Created the directory {:s} ".format(path))
+        print("Created the directory {:s} ".format(path))
         pass
     pass
 

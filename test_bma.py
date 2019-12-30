@@ -1,6 +1,6 @@
-from fitter import *
-from Plotter import *
-from Star import *
+from astroARIADNE.fitter import Fitter
+from astroARIADNE.plotter import SEDPlotter
+from astroARIADNE.star import Star
 
 if __name__ == '__main__':
     # ra = 338.399
@@ -248,15 +248,15 @@ if __name__ == '__main__':
     # SEDPlotter('raw', '../outs/').plot_SED_no_model(s)
 
     # Comment to use a custom log g prior or the default prior
-    s.estimate_logg()
+    # s.estimate_logg()
 
-    out_folder = '../outs/SED paper outputs/{}_short'.format(starname)
+    out_folder = '/Users/jvines/github/astroARIADNE/outs/SED paper outputs/{}_short_test'.format(starname)
     # out_folder = '../outs/bma_{}'.format(starname)
     in_file = out_folder + '/BMA_out.pkl'
     plots_out_folder = out_folder + '/plots'
     # Setup parameters
     engine = 'dynesty'  # Only dynesty is available for BMA
-    nlive = 500  # number of live points to use
+    nlive = 50  # number of live points to use
     dlogz = 0.5  # evidence tolerance
     bound = 'multi'  # Unit cube bounds. Options are multi, single
     sample = 'rwalk'  # Sampling method. Options are rwalk, unif

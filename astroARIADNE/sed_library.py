@@ -1,13 +1,16 @@
 """sed_library contain the model, prior and likelihood to be used."""
 
+import pickle
+from contextlib import closing
+
 import astropy.units as u
 import scipy as sp
 from extinction import apply
 from scipy.special import ndtr
 
-from phot_utils import *
-from Star import *
-from utils import get_noise_name
+from .config import priorsdir
+from .phot_utils import *
+from .utils import get_noise_name
 
 
 def build_params(theta, star, coordinator, fixed, use_norm):
@@ -144,7 +147,7 @@ def log_prior(theta, star, prior_dict, coordinator, use_norm):
             try:
                 lp += prior_dict['logg'].pdf(theta[i])
             except AttributeError:
-                with closing(open('../Datafiles/prior/logg_kde.pkl', 'rb')) \
+                with closing(open(priorsdir + '/logg_kde.pkl', 'rb')) \
                         as jar:
                     prior = pickle.load(jar)['logg']
                 lp += prior(theta[i])
