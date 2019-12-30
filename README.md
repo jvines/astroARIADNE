@@ -6,7 +6,7 @@ ARIADNE Is a code written in python 3 (sorry python 2 users!) designed to fit br
 To install ARIADNE you just have to clone this repository with
 
 ```
-git clone https://github.com/jvines/placeholder.git
+git clone https://github.com/jvines/astroARIADNE.git
 ```
 
 But for the code to work, first you must install the necessary dependencies:
