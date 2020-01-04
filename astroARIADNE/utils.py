@@ -79,7 +79,7 @@ def display_star_fin(star, c):
 def display_star_init(star, c):
     """Display stellar information."""
     print(colored('\n\t\t####################################', c))
-    print(colored('\t\t##          PLACEHOLDER           ##', c))
+    print(colored('\t\t##              ARIADNE            ##', c))
     print(colored('\t\t####################################', c))
     print(colored('\n\t\t\tAuthor : Jose Vines', c))
     print(colored('\t\t\tContact : jose . vines at ug . uchile . cl', c))
