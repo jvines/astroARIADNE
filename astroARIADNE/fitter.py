@@ -73,7 +73,7 @@ class Fitter:
 
     @property
     def setup(self):
-        """Set-up options."""
+        """Set up options."""
         return self._setup
 
     @setup.setter
