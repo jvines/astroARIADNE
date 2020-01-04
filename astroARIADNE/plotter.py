@@ -327,8 +327,11 @@ class SEDPlotter:
         residuals, errors = get_residuals(
             self.theta, self.star, self.interpolator, self.norm, self.av_law)
 
+        n_filt = self.star.used_filters.sum()
+        n_pars = len(self.theta) - n_filt
+
         # resdiuals = residuals / errors
-        norm_res = residuals / errors
+        norm_res = residuals / sp.sqrt(errors**2 + self.theta[n_filt:]**2)
 
         # Create plot layout
 
