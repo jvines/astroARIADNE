@@ -5,6 +5,7 @@ import copy
 import glob
 import os
 from contextlib import closing
+from random import choice
 
 import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
@@ -16,6 +17,7 @@ from astropy.table import Table
 from extinction import apply
 from isochrones.interp import DFInterpolator
 from matplotlib import rcParams
+from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
 from scipy.optimize import curve_fit
@@ -24,10 +26,11 @@ from scipy.stats import norm
 import corner
 from dynesty import plotting as dyplot
 
+from .config import filesdir, gridsdir, modelsdir
+from .isochrone import get_isochrone
 from .phot_utils import *
 from .sed_library import *
 from .utils import *
-from .config import gridsdir, filesdir, modelsdir
 
 
 class SEDPlotter:
@@ -201,6 +204,8 @@ class SEDPlotter:
 
             # Get archival fluxes.
             self.__extract_info()
+        else:
+            self.star = None
 
         # Setup plots.
         self.__read_config()
@@ -686,7 +691,7 @@ class SEDPlotter:
                     # Get reasonable p0
                     mu, sig = norm.fit(samp)
                     popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-                                           p0=[mu, sig, n.max()])
+                                           p0=[mu, sig, n.max()], maxfev=5000)
                     xx = sp.linspace(bins[0], bins[-1], 100000)
                     # Plot best fit
                     ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
@@ -732,7 +737,7 @@ class SEDPlotter:
                     bc = bins[:-1] + sp.diff(bins)
                     mu, sig = norm.fit(samp)
                     popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-                                           p0=[mu, sig, n.max()])
+                                           p0=[mu, sig, n.max()], maxfev=5000)
                     xx = sp.linspace(bins[0], bins[-1], 100000)
                     ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
                             alpha=.7)
@@ -749,6 +754,135 @@ class SEDPlotter:
                 if self.pdf:
                     plt.savefig(self.hist_out + '/weighted_' + param + '.pdf',
                                 bbox_inches='tight')
+
+        # f, ax = plt.subplots(figsize=(12, 4))
+        # samp = self.out['posterior_samples']['age']
+        # # The same but for the averaged samples
+        # n, bins, patches = ax.hist(
+        #     samp, alpha=.3, bins=50, label='MIST', density=True
+        # )
+        # bc = bins[:-1] + sp.diff(bins)
+        # mu, sig = norm.fit(samp)
+        # popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+        #                        p0=[mu, sig, n.max()], maxfev=50000)
+        # xx = sp.linspace(bins[0], bins[-1], 100000)
+        # ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
+        # ax.set_ylabel('PDF')
+        # ax.set_xlabel('Age')
+        # plt.legend(loc=0)
+        # if self.png:
+        #     plt.savefig(self.hist_out + '/age.png',
+        #                 bbox_inches='tight')
+        # if self.pdf:
+        #     plt.savefig(self.hist_out + '/age.pdf',
+        #                 bbox_inches='tight')
+
+        # f, ax = plt.subplots(figsize=(12, 4))
+        # samp = self.out['posterior_samples']['mass']
+        # # The same but for the averaged samples
+        # n, bins, patches = ax.hist(
+        #     samp, alpha=.3, bins=50, label='MIST', density=True
+        # )
+        # bc = bins[:-1] + sp.diff(bins)
+        # mu, sig = norm.fit(samp)
+        # popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+        #                        p0=[mu, sig, n.max()])
+        # xx = sp.linspace(bins[0], bins[-1], 100000)
+        # ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
+        # ax.set_ylabel('PDF')
+        # ax.set_xlabel('Mass')
+        # plt.legend(loc=0)
+        # if self.png:
+        #     plt.savefig(self.hist_out + '/mass.png',
+        #                 bbox_inches='tight')
+        # if self.pdf:
+        #     plt.savefig(self.hist_out + '/mass.pdf',
+        #                 bbox_inches='tight')
+
+    def plot_bma_HR(self, nsamp):
+        """Plot HR diagram for the star."""
+        print('Plotting HR diagram')
+        # Get necessary info from the star.
+        age = self.out['best_fit']['age']
+        feh = self.out['best_fit']['z']
+        teff = sp.log10(self.out['best_fit']['teff'])
+        lum = sp.log10(self.out['best_fit']['lum'])
+        teff_lo, teff_hi = self.out['uncertainties']['teff']
+        lum_lo, lum_hi = self.out['uncertainties']['lum']
+        teff_lo = teff_lo / (10**teff * sp.log(10))
+        teff_hi = teff_hi / (10**teff * sp.log(10))
+        lum_lo = lum_lo / (10**lum * sp.log(10))
+        lum_hi = lum_hi / (10**lum * sp.log(10))
+        ages = self.out['posterior_samples']['age']
+        fehs = self.out['posterior_samples']['z']
+
+        if feh > 0.5:
+            feh = 0.5
+
+        iso_bf = get_isochrone(sp.log10(age) + 9, feh)
+
+        logteff = iso_bf['logTeff'].values
+        loglum = iso_bf['logL'].values
+        mass = iso_bf['mass'].values
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        points = sp.array([logteff, loglum]).T.reshape(-1, 1, 2)
+        segments = sp.concatenate([points[:-1], points[1:]], axis=1)
+
+        norm = plt.Normalize(mass.min(), mass.max())
+        lc = LineCollection(segments, cmap='cool', norm=norm, linewidths=5)
+
+        lc.set_array(mass)
+        line = ax.add_collection(lc)
+        line.zorder = 1000
+        cbar = fig.colorbar(line, ax=ax, pad=0.01)
+        cbar.set_label(r'$M_\odot$',
+                       rotation=270,
+                       fontsize=self.fontsize,
+                       fontname=self.fontname,
+                       labelpad=20)
+
+        for i in range(nsamp):
+            a = sp.log10(choice(ages)) + 9
+            z = choice(fehs)
+            if z > 0.5:
+                z = 0.5
+            iso = get_isochrone(a, z)
+
+            logt = iso['logTeff'].values
+            logl = iso['logL'].values
+            ax.plot(logt, logl, color='gray')
+
+        ax.errorbar(teff, lum, xerr=[[teff_lo], [teff_hi]],
+                    yerr=[[lum_lo], [lum_hi]], color='red', zorder=1001)
+        ax.scatter(teff, lum, s=120, color='red', zorder=1002, edgecolors='k')
+        # ax.set_xlim(logteff.max() + .05, logteff.min() - .05)
+        # ax.set_ylim(loglum.min() - .25, loglum.max() + .25)
+        ax.invert_xaxis()
+        ax.set_xlabel('logTeff',
+                      fontsize=self.fontsize,
+                      fontname=self.fontname)
+        ax.set_ylabel('logL',
+                      fontsize=self.fontsize,
+                      fontname=self.fontname)
+        ax.tick_params(
+            axis='both', which='major',
+            labelsize=self.tick_labelsize
+        )
+        for l in cbar.ax.yaxis.get_ticklabels():
+            l.set_fontsize(self.tick_labelsize)
+        for tick in ax.get_yticklabels():
+            tick.set_fontname(self.fontname)
+        for tick in ax.get_yticklabels():
+            tick.set_fontname(self.fontname)
+
+        if self.png:
+            plt.savefig(self.out_folder + '/HR_diagram.png',
+                        bbox_inches='tight')
+        if self.pdf:
+            plt.savefig(self.out_folder + '/HR_diagram.pdf',
+                        bbox_inches='tight')
 
     def plot_corner(self):
         """Make corner plot."""
@@ -922,8 +1056,9 @@ class SEDPlotter:
         selected_SED = self.moddir + 'BTSettl/AGSS2009/lte'
         selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
             '0' + str(sel_teff)
-        selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
-        selected_SED += '.BT-Settl.AGSS2009.fits'
+        selected_SED += '-' + str(sel_logg) + metal_add + 'a+*'
+        gl = glob.glob(selected_SED)
+        selected_SED = gl[0]
         tab = Table(fits.open(selected_SED)[1].data)
         flux = sp.array(tab['FLUX'].tolist()) * conversion
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
