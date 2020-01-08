@@ -6,6 +6,7 @@ import warnings
 import pandas as pd
 import scipy as sp
 from isochrones import SingleStarModel, get_ichrone
+from isochrones.mist import MIST_Isochrone
 from isochrones.priors import GaussianPrior
 from numba.errors import (NumbaDeprecationWarning,
                           NumbaPendingDeprecationWarning)
@@ -19,6 +20,13 @@ warnings.filterwarnings(
     'ignore', category=NumbaDeprecationWarning, append=True)
 warnings.filterwarnings(
     'ignore', category=NumbaPendingDeprecationWarning, append=True)
+
+
+def get_isochrone(logage, feh):
+    """Retrieve isochrone for given age and feh."""
+    mist = MIST_Isochrone()
+    iso = mist.isochrone(logage, feh)
+    return iso
 
 
 def estimate(bands, params, logg=True):
@@ -73,8 +81,9 @@ def estimate(bands, params, logg=True):
         med_e = max([med - lo, up - med])
         return med, med_e
     else:
-        samples = 10 ** (model._derived_samples['age'] - 9)
-        return samples
+        age_samples = 10 ** (model._derived_samples['age'] - 9)
+        mass_samples = model._derived_samples['mass']
+        return age_samples, mass_samples
 
 
 # Written by Dan Foreman-mackey
