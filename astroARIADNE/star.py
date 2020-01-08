@@ -332,6 +332,8 @@ class Star:
             gridname = gridsdir + '/model_grid_CK04.dat'
         if model.lower() == 'kurucz':
             gridname = gridsdir + '/model_grid_Kurucz.dat'
+        if model.lower() == 'coelho':
+            gridname = gridsdir + '/model_grid_Coelho.dat'
 
         self.full_grid = sp.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]
@@ -342,6 +344,7 @@ class Star:
 
     def interpolate(self, out_name):
         """Create interpolation grids for later evaluation."""
+        raise DeprecationWarning()
         if self.verbose:
             print('Interpolating grids for filters:')
         interpolators = sp.zeros(self.filter_names.shape[0], dtype=object)
@@ -426,7 +429,7 @@ class Star:
         # if self.get_rad and self.rad is not None and self.rad != 0:
         #     params['radius'] = (self.rad, self.rad_e)
         params['parallax'] = (self.plx, self.plx_e)
-        mask = sp.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+        mask = sp.array([1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
                          0, 1, 0])
         mags = self.mags[mask == 1]
@@ -437,6 +440,7 @@ class Star:
             if m != 0:
                 params[b] = (m, e)
                 used_bands.append(b)
+
         if self.verbose:
             print(
                 colored(

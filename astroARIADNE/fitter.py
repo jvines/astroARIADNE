@@ -16,13 +16,13 @@ from isochrones.interp import DFInterpolator
 from scipy.stats import gaussian_kde
 from termcolor import colored
 
-from .star import Star
+from .config import filesdir, gridsdir, priorsdir
 from .error import *
 from .isochrone import estimate
 from .phot_utils import *
 from .sed_library import *
+from .star import Star
 from .utils import *
-from .config import gridsdir, priorsdir, filesdir
 
 try:
     import dynesty
@@ -522,23 +522,23 @@ class Fitter:
             er.log(self.out_folder + '/output.log')
             er.raise_()
         for k in keys:
-            if len(self.prior_setup[k]) == 1:
+            if type(self.prior_setup[k]) == str:
                 prior_dict[k] = self.default_priors[k]
                 prior_out += k + '\tdefault\n'
             else:
-                type = self.prior_setup[k][0]
-                if type == 'fixed':
+                prior = self.prior_setup[k][0]
+                if prior == 'fixed':
                     value = self.prior_setup[k][1]
                     idx = sp.where(k == order)[0]
                     self.coordinator[idx] = 1
                     self.fixed[idx] = value
                     prior_out += k + '\tfixed\t{}\n'.format(value)
-                if type == 'normal':
+                if prior == 'normal':
                     mu = self.prior_setup[k][1]
                     sig = self.prior_setup[k][2]
                     prior_dict[k] = st.norm(loc=mu, scale=sig)
                     prior_out += k + '\tnormal\t{}\t{}\n'.format(mu, sig)
-                if type == 'truncnorm':
+                if prior == 'truncnorm':
                     mu = self.prior_setup[k][1]
                     sig = self.prior_setup[k][2]
                     low = self.prior_setup[k][3]
@@ -548,7 +548,7 @@ class Fitter:
                     prior_out += k
                     prior_out += '\ttruncatednormal\t{}\t{}\t{}\t{}\n'.format(
                         mu, sig, low, up)
-                if type == 'uniform':
+                if prior == 'uniform':
                     low = self.prior_setup[k][1]
                     up = self.prior_setup[k][2]
                     prior_dict[k] = st.uniform(loc=low, scale=up - low)
@@ -1172,7 +1172,7 @@ class Fitter:
         # Add derived mass to best fit dictionary.
 
         samp = out['posterior_samples']['mass']
-        best = self._get_max_from_kde(samp)
+        best = sp.median(samp)
         out['best_fit']['mass'] = best
         logdat += 'mass\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
@@ -1185,7 +1185,7 @@ class Fitter:
         # Add derived luminosity to best fit dictionary.
 
         samp = out['posterior_samples']['lum']
-        best = self._get_max_from_kde(samp)
+        best = sp.median(samp)
         out['best_fit']['lum'] = best
         logdat += 'lum\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
@@ -1198,7 +1198,7 @@ class Fitter:
         # Add derived angular diameter to best fit dictionary.
 
         samp = out['posterior_samples']['AD']
-        best = self._get_max_from_kde(samp)
+        best = sp.median(samp)
         out['best_fit']['AD'] = best
         logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
         _, lo, up = credibility_interval(samp)
@@ -1210,16 +1210,29 @@ class Fitter:
 
         # Add estimated age to best fit dictionary.
 
-        samp = self.estimate_age(out['best_fit'], out['uncertainties'])
-        best = self._get_max_from_kde(samp)
+        age_samp, mass_samp = self.estimate_age(out['best_fit'],
+                                                out['uncertainties'])
+        out['posterior_samples']['age'] = age_samp
+        best = sp.median(age_samp)
         out['best_fit']['age'] = best
         logdat += 'age\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(samp)
+        _, lo, up = credibility_interval(age_samp)
         out['uncertainties']['age'] = (best - lo, up - best)
         logdat += '{:.4f}\t{:.4f}\t'.format(up - best, abs(best - lo))
-        _, lo, up = credibility_interval(samp, 3)
+        _, lo, up = credibility_interval(age_samp, 3)
         out['confidence_interval']['age'] = (lo, up)
         logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+
+        # out['posterior_samples']['mist_mass'] = mass_samp
+        # best = sp.median(mass_samp)
+        # out['best_fit']['mist_mass'] = best
+        # logdat += 'mist_mass\t{:.4f}\t'.format(best)
+        # _, lo, up = credibility_interval(mass_samp)
+        # out['uncertainties']['mist_mass'] = (best - lo, up - best)
+        # logdat += '{:.4f}\t{:.4f}\t'.format(up - best, abs(best - lo))
+        # _, lo, up = credibility_interval(mass_samp, 3)
+        # out['confidence_interval']['mist_mass'] = (lo, up)
+        # logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -1319,7 +1332,17 @@ class Fitter:
         return best
 
     def estimate_age(self, bf, unc):
-        """Estimate age using MIST isochrones."""
+        """Estimate age using MIST isochrones.
+
+        Parameters
+        ----------
+        bf : dict
+            A dictionary with the best fit parameters.
+
+        unc : dict
+            A dictionary with the uncertainties.
+
+        """
         colors = [
             'red', 'green', 'blue', 'yellow',
             'grey', 'magenta', 'cyan', 'white'
@@ -1364,8 +1387,8 @@ class Fitter:
             if m != 0:
                 params[b] = (m, e)
                 used_bands.append(b)
-        samp = estimate(used_bands, params, logg=False)
-        return samp
+        age_samp, mass_samp = estimate(used_bands, params, logg=False)
+        return age_samp, mass_samp
 
 #####################
 # Dynesty and multinest wrappers
