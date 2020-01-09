@@ -128,7 +128,7 @@ class Fitter:
 
     @property
     def grid(self):
-        """Model grid selected. For now only Phoenix v2 is available."""
+        """Model grid selected."""
         return self._grid
 
     @grid.setter
@@ -154,6 +154,9 @@ class Fitter:
                 self._interpolator = DFInterpolator(pickle.load(intp))
         if grid.lower() == 'kurucz':
             with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pickle.load(intp))
+        if grid.lower() == 'coelho':
+            with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pickle.load(intp))
 
     @property
@@ -361,6 +364,9 @@ class Fitter:
                         df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'kurucz':
                     with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
+                        df = DFInterpolator(pickle.load(intp))
+                if mod.lower() == 'coelho':
+                    with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 self._interpolators.append(df)
                 self._grids.append(mod)
@@ -751,7 +757,8 @@ class Fitter:
                 with closing(Pool(self._threads)) as executor:
                     self.sampler = dynesty.DynamicNestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
-                        bound=self._bound, sample=self._sample, pool=executor,
+                        bound=self._bound, sample=self._sample,
+                        pool=executor,
                         queue_size=self._threads - 1
                     )
                     self.sampler.run_nested(dlogz_init=self._dlogz,
@@ -772,7 +779,8 @@ class Fitter:
                     self.sampler = dynesty.NestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
-                        sample=self._sample, pool=executor,
+                        sample=self._sample,
+                        pool=executor,
                         queue_size=self._threads - 1
                     )
                     self.sampler.run_nested(dlogz=self._dlogz)
@@ -1223,16 +1231,16 @@ class Fitter:
         out['confidence_interval']['age'] = (lo, up)
         logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
 
-        # out['posterior_samples']['mist_mass'] = mass_samp
-        # best = sp.median(mass_samp)
-        # out['best_fit']['mist_mass'] = best
-        # logdat += 'mist_mass\t{:.4f}\t'.format(best)
-        # _, lo, up = credibility_interval(mass_samp)
-        # out['uncertainties']['mist_mass'] = (best - lo, up - best)
-        # logdat += '{:.4f}\t{:.4f}\t'.format(up - best, abs(best - lo))
-        # _, lo, up = credibility_interval(mass_samp, 3)
-        # out['confidence_interval']['mist_mass'] = (lo, up)
-        # logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        out['posterior_samples']['mass_iso'] = mass_samp
+        best = sp.median(mass_samp)
+        out['best_fit']['mass_iso'] = best
+        logdat += 'mass_iso\t{:.4f}\t'.format(best)
+        _, lo, up = credibility_interval(mass_samp)
+        out['uncertainties']['mass_iso'] = (best - lo, up - best)
+        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, abs(best - lo))
+        _, lo, up = credibility_interval(mass_samp, 3)
+        out['confidence_interval']['mass_iso'] = (lo, up)
+        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
