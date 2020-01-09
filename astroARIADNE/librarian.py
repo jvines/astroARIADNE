@@ -313,9 +313,8 @@ class Librarian:
         print(self.starname)
 
         cats = self.get_catalogs()
-
+        skips = ['ASCC', 'STROMGREN', 'GLIMPSE']
         for c in self.catalogs.keys():
-            skips = ['ASCC', 'STROMGREN', 'GLIMPSE']
             if c in skips:
                 continue
             if c in self.ignore:
@@ -324,40 +323,41 @@ class Librarian:
 
             if self.ids[c] == 'skipped':
                 continue
-            try:
-                current_cat = cats[self.catalogs[c][0]]
-                current_cat.sort('_r')
-            except TypeError:
-                CatalogWarning(c, 5).warn()
+            if c != 'TESS':
+                try:
+                    current_cat = cats[self.catalogs[c][0]]
+                    current_cat.sort('_r')
+                except TypeError:
+                    CatalogWarning(c, 5).warn()
+                    continue
+            else:
+                self._retrieve_from_tess()
                 continue
             if c == 'APASS':
                 self._get_apass(current_cat)
                 continue
-            if c == 'Wise':
+            elif c == 'Wise':
                 self._get_wise(current_cat)
                 continue
-            if c == 'TYCHO2':
+            elif c == 'TYCHO2':
                 self._get_ascc_tycho2_stromgren(cats, False, 'TYCHO2')
                 self._get_ascc_tycho2_stromgren(cats, False, 'ASCC')
                 # self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN')
                 continue
-            if c == 'SDSS':
+            elif c == 'SDSS':
                 self._get_sdss(current_cat)
                 continue
-            if c == 'Pan-STARRS':
+            elif c == 'Pan-STARRS':
                 self._get_ps1(current_cat)
                 continue
-            if c == 'Gaia':
+            elif c == 'Gaia':
                 self._get_gaia(current_cat)
                 continue
-            if c == '2MASS':
+            elif c == '2MASS':
                 self._get_2mass_glimpse(cats, False, '2MASS')
                 self._get_2mass_glimpse(cats, False, 'GLIMPSE')
                 continue
-            if c == 'TESS':
-                self._retrieve_from_tess()
-                continue
-            if c == 'GALEX':
+            elif c == 'GALEX':
                 current_cat = self._gaia_galex_xmatch(cats)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
