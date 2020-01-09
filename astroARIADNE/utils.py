@@ -78,9 +78,11 @@ def display_star_fin(star, c):
 
 def display_star_init(star, c):
     """Display stellar information."""
-    print(colored('\n\t\t####################################', c))
-    print(colored('\t\t##              ARIADNE            ##', c))
-    print(colored('\t\t####################################', c))
+    print(colored('\n\t\t#####################################', c))
+    print(colored('\t\t##             ARIADNE             ##', c))
+    print(colored('\t\t#####################################', c))
+    print(colored('   spectrAl eneRgy dIstribution', c), end=' ')
+    print(colored('bAyesian moDel averagiNg fittEr', c))
     print(colored('\n\t\t\tAuthor : Jose Vines', c))
     print(colored('\t\t\tContact : jose . vines at ug . uchile . cl', c))
     print(colored('\t\t\tStar : ', c), end='')
@@ -256,6 +258,15 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         lo, up = out['confidence_interval']['age']
         print(colored('\t\t\tage : ', c), end='')
         print(colored('{:.4f}'.format(age), c), end=' ')
+        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
+        print(colored('{:.4f}'.format(unlo), c), end=' ')
+        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+
+        miso = out['best_fit']['mass_iso']
+        unlo, unhi = out['uncertainties']['mass_iso']
+        lo, up = out['confidence_interval']['mass_iso']
+        print(colored('\t\t\tmass_iso : ', c), end='')
+        print(colored('{:.4f}'.format(miso), c), end=' ')
         print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
         print(colored('{:.4f}'.format(unlo), c), end=' ')
         print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
