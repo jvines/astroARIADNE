@@ -187,6 +187,9 @@ class SEDPlotter:
             if self.grid.lower() == 'kurucz':
                 with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pickle.load(intp))
+            if self.grid.lower() == 'coelho':
+                with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
+                    self.interpolator = DFInterpolator(pickle.load(intp))
 
             # Get best fit parameters.
             mask = self.star.filter_mask
@@ -272,7 +275,7 @@ class SEDPlotter:
 
             ax.errorbar(w, fl * w,
                         xerr=bp, yerr=fe,
-                        fmt=',',
+                        fmt='',
                         ecolor=c,
                         marker=None)
 
