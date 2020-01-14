@@ -232,8 +232,10 @@ def prior_transform_dynesty(u, star, prior_dict, coordinator, use_norm):
             i += 1
             continue
         if par == 'teff':
-            u2[i] = prior_dict['teff'].ppf(
-                u2[i]) if star.get_temp else prior_dict['teff'](u2[i])
+            try:
+                u2[i] = prior_dict['teff'].ppf(u2[i])
+            except TypeError:
+                u2[i] = prior_dict['teff'](u2[i])
             i += 1
             continue
         u2[i] = prior_dict[par].ppf(u2[i])
