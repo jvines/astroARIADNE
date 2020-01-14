@@ -372,8 +372,8 @@ class Librarian:
         tic.sort('dstArcSec')
         mask = tic['GAIA'] == str(self.g_id)
         cat = tic[mask]
-        if len(tic[mask]) > 0:
-            is_star = cat['objType'] == 'STAR'
+        if len(cat) > 0:
+            is_star = cat['objType'][0] == 'STAR'
             if not is_star:
                 CatalogWarning('TESS', 8).warn()
                 return
