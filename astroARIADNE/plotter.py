@@ -1102,8 +1102,9 @@ class SEDPlotter:
         selected_SED = self.moddir + 'BTNextGen/AGSS2009/lte'
         selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
             '0' + str(sel_teff)
-        selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
-        selected_SED += '.BT-NextGen.AGSS2009.fits'
+        selected_SED += '-' + str(sel_logg) + metal_add + 'a+*'
+        gl = glob.glob(selected_SED)
+        selected_SED = gl[0]
         tab = Table(fits.open(selected_SED)[1].data)
         flux = sp.array(tab['FLUX'].tolist()) * conversion
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
@@ -1144,8 +1145,9 @@ class SEDPlotter:
         selected_SED = self.moddir + 'BTCond/CIFIST2011/lte'
         selected_SED += str(sel_teff) if len(str(sel_teff)) == 3 else \
             '0' + str(sel_teff)
-        selected_SED += '-' + str(sel_logg) + metal_add + 'a+0.0'
-        selected_SED += '.BT-Cond.CIFIST2011.fits'
+        selected_SED += '-' + str(sel_logg) + metal_add + 'a+*'
+        gl = glob.glob(selected_SED)
+        selected_SED = gl[0]
         tab = Table(fits.open(selected_SED)[1].data)
         flux = sp.array(tab['FLUX'].tolist()) * conversion
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
