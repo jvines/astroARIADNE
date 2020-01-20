@@ -67,8 +67,8 @@ class Fitter:
 
     @star.setter
     def star(self, star):
-        if not isinstance(star, Star) and star is not None:
-            InstanceError(star, Star).raise_()
+        # if not isinstance(star, Star) and star is not None:
+        #     InstanceError(star, Star).raise_()
         self._star = star
 
     @property
@@ -630,6 +630,7 @@ class Fitter:
 
     def bayesian_model_average(self, outputs, grids):
         """Perform Bayesian Model Averaging."""
+        # CONSIDER MAKING STATIC
         choice = sp.random.choice
         evidences = []
         post_samples = []
