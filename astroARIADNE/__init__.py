@@ -8,3 +8,7 @@ parameters posteriors as in the Bayesian Model Average framework. This
 averages over the models and thus the averaged posteriors account for model
 specific uncertainties.
 """
+from .fitter import Fitter
+from .star import Star
+from .librarian import Librarian
+from .plotter import SEDPlotter
