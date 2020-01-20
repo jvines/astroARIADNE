@@ -14,11 +14,11 @@ from scipy.interpolate import RegularGridInterpolator
 from tabulate import tabulate
 from termcolor import colored
 
+from .config import gridsdir
 from .isochrone import estimate
 from .librarian import Librarian
 from .phot_utils import *
 from .utils import display_star_fin, display_star_init
-from .config import gridsdir
 
 
 class Star:
@@ -303,6 +303,10 @@ class Star:
 
         self.calculate_distance()
         display_star_fin(self, c)
+
+    def __repr__(self):
+        """Repr overload."""
+        return self.starname
 
     def ra_dec_to_deg(self, ra, dec):
         """Transform ra, dec from selected uniot to degrees."""
