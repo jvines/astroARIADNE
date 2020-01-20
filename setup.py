@@ -31,6 +31,7 @@ setup(
     requires=["numpy", "scipy", "matplotlib", "astropy", "astroquery",
               "tabulate", "tqdm", "regions", "pyphot", "PyAstronomy",
               "termcolor"],
+    package_data={'astroARIADNE':['Datafiles']},
     include_package_data=True,
     python_requires='>=3.6',
 )
