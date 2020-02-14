@@ -416,10 +416,7 @@ class Fitter:
                 defaults['rad'] = st.truncnorm(
                     loc=self.star.rad, scale=self.star.rad_e, a=a, b=b)
             else:
-                wrn_msg = 'No radius found in Gaia, using default radius prior'
-                wrn_msg += '. Consider fitting the normalization constant'
-                wrn_msg += ' instead.'
-                print(wrn_msg)
+                PriorError('rad', 3).warn()
                 defaults['rad'] = st.uniform(loc=0.05, scale=10)
         # Normalization prior setup.
         else:
