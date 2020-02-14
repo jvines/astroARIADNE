@@ -68,7 +68,7 @@ class Fitter:
     @star.setter
     def star(self, star):
         # if not isinstance(star, Star) and star is not None:
-        #     InstanceError(star, Star).raise_()
+        #     InstanceError(star, Star).__raise__()
         self._star = star
 
     @property
@@ -81,7 +81,7 @@ class Fitter:
         err_msg = 'The setup has to contain at least the fitting engine'
         err_msg += ', multinest or dynesty.'
         if len(setup) < 1:
-            InputError(setup, err_msg).raise_()
+            InputError(setup, err_msg).__raise__()
         self._setup = setup
         self._engine = setup[0]
         defaults = False
@@ -123,7 +123,7 @@ class Fitter:
     @norm.setter
     def norm(self, norm):
         if type(norm) is not bool:
-            InputError(norm, 'norm must be True or False.').raise_()
+            InputError(norm, 'norm must be True or False.').__raise__()
         self._norm = norm
 
     @property
@@ -207,7 +207,7 @@ class Fitter:
     @verbose.setter
     def verbose(self, verbose):
         if type(verbose) is not bool:
-            InputError(verbose, 'verbose must be True or False.').raise_()
+            InputError(verbose, 'verbose must be True or False.').__raise__()
         self._verbose = verbose
 
     @property
@@ -219,7 +219,7 @@ class Fitter:
     def priorfile(self, priorfile):
         if type(priorfile) is not str and priorfile is not None:
             err_msg = 'Priorfile must be an address or None.'
-            InputError(priorfile, err_msg).raise_()
+            InputError(priorfile, err_msg).__raise__()
         self._priorfile = priorfile
 
     @property
@@ -234,7 +234,7 @@ class Fitter:
     def out_folder(self, out_folder):
         if type(out_folder) is not str and out_folder is not None:
             err_msg = 'Output folder must be an address or None.'
-            InputError(out_folder, err_msg).raise_()
+            InputError(out_folder, err_msg).__raise__()
         self._out_folder = out_folder
 
     @property
@@ -284,7 +284,7 @@ class Fitter:
         if self.star is None:
             er = InputError(self.star, err_msg)
             er.log(self.out + '/output.log')
-            er.raise_()
+            er.__raise__()
         star = self.star
         if not self._bma:
             global interpolator
@@ -477,11 +477,11 @@ class Fitter:
                 if par not in param_list:
                     er = PriorError(par, 0)
                     er.log(self.out_folder + '/output.log')
-                    er.raise_()
+                    er.__raise__()
                 if self.norm and (par == 'dist' or par == 'rad'):
                     er = PriorError(par, 1)
                     er.log(self.out_folder + '/output.log')
-                    er.raise_()
+                    er.__raise__()
                 if pri.lower() == 'uniform':
                     a, b = bo.split(',')
                     a, b = float(a), float(b)
@@ -725,7 +725,7 @@ class Fitter:
                 pickle.dump(self.sampler.results, open(dump_out, 'wb'))
                 er = DynestyError(dump_out, grid)
                 er.log(self.out + '/output.log')
-                er.raise_()
+                er.__raise__()
 
         results = self.sampler.results
         out_file = self.out_folder + '/' + grid + '_out.pkl'
