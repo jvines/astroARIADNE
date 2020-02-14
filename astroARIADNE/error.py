@@ -13,7 +13,7 @@ class Error(Exception):
         """Error identification for logging."""
         return self.errorname
 
-    def raise_(self):
+    def __raise__(self):
         """Raise an exception and print the error message."""
         try:
             raise self
@@ -84,6 +84,8 @@ class PriorError(Error):
     Type 0 error means the parameter isn't recognized.
     Type 1 occurs if norm parameter is found alongside dist or rad.
     Type 2 occurs if the selected prior is illegal.
+    Type 3 occurs if radius is 0
+    Type 4 occurs if parallax is invalid
 
     """
 
@@ -98,6 +100,14 @@ class PriorError(Error):
         if type == 1:
             self.message += ' has been found alongside norm. Parameters rad '
             self.message += 'and dist are incompatible with norm.'
+        if type == 2:
+            pass
+        if type == 3:
+            self.message = 'No radius found in Gaia, using default'
+            self.message += ' radius prior.'
+        if type == 4:
+            self.message = 'The Gaia parallax is negative. Fit for the'
+            self.message += ' normalization constant instead.'
 
 
 class CatalogWarning(Error):
