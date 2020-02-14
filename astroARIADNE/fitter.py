@@ -857,12 +857,12 @@ class Fitter:
         out['posterior_samples']['loglike'] = sp.zeros(
             posterior_samples.shape[0]
         )
-        out['posterior_samples']['priors'] = sp.zeros(
-            posterior_samples.shape[0]
-        )
-        out['posterior_samples']['posteriors'] = sp.zeros(
-            posterior_samples.shape[0]
-        )
+        # out['posterior_samples']['priors'] = sp.zeros(
+        #     posterior_samples.shape[0]
+        # )
+        # out['posterior_samples']['posteriors'] = sp.zeros(
+        #     posterior_samples.shape[0]
+        # )
 
         # If normalization constant was fitted, create a distribution of radii.
 
@@ -893,15 +893,16 @@ class Fitter:
 
         for i in range(posterior_samples.shape[0]):
             theta = build_params(
-                posterior_samples[i, :], self.star, coordinator, fixed,
-                self.norm)
+                posterior_samples[i, :], flux, flux_er, filts, coordinator,
+                fixed, self.norm)
             out['posterior_samples']['loglike'][i] = log_likelihood(
-                theta, self.star, interpolator, self.norm, av_law)
-            out['posterior_samples']['priors'][i] = log_prior(
-                theta, self.star, self.priors, self.coordinator, self.norm)
+                theta, flux, flux_er, wave, filts, interpolator, self.norm,
+                av_law)
+            # out['posterior_samples']['priors'][i] = log_prior(
+            #     theta, self.star, self.priors, self.coordinator, self.norm)
         lnlike = out['posterior_samples']['loglike']
-        lnprior = out['posterior_samples']['priors']
-        out['posterior_samples']['posteriors'] = (lnlike + lnprior) - lnz
+        # lnprior = out['posterior_samples']['priors']
+        # out['posterior_samples']['posteriors'] = (lnlike + lnprior) - lnz
 
         # Best fit
         # The logic is as follows:
@@ -1012,13 +1013,14 @@ class Fitter:
         # Fill in best loglike, prior and posterior.
 
         out['best_fit']['loglike'] = log_likelihood(
-            best_theta, self.star, interpolator, self.norm, av_law)
-        out['best_fit']['prior'] = log_prior(
-            best_theta, self.star, self.priors, self.coordinator, self.norm
-        )
+            best_theta, flux, flux_er, wave, filts, interpolator, self.norm,
+            av_law)
+        # out['best_fit']['prior'] = log_prior(
+        #     best_theta, self.star, self.priors, self.coordinator, self.norm
+        # )
         lnlike = out['best_fit']['loglike']
-        lnprior = out['best_fit']['prior']
-        out['best_fit']['posterior'] = (lnlike + lnprior) - lnz
+        # lnprior = out['best_fit']['prior']
+        # out['best_fit']['posterior'] = (lnlike + lnprior) - lnz
 
         # Spectral type
 
