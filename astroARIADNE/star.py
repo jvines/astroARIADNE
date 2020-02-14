@@ -403,6 +403,9 @@ class Star:
 
     def calculate_distance(self):
         """Calculate distance using parallax in solar radii."""
+        if self.plx == -1:
+            self.dist = -1
+            self.dist_e = -1
         dist = 1 / (0.001 * self.plx)
         dist_e = dist * self.plx_e / self.plx
         self.dist = dist
@@ -414,11 +417,11 @@ class Star:
         ers = self.mag_errs[self.filter_mask]
         filt = self.filter_names[self.filter_mask]
         master = sp.vstack([filt, mags, ers]).T
-        master = sp.vstack([['Filter', 'Mag', 'Err'], master])
+        headers = ['Filter', 'Magnitude', 'Uncertainty']
         if c is not None:
-            print(colored(tabulate(master), c))
+            print(colored(tabulate(master, headers=headers), c))
         else:
-            print(tabulate(master))
+            print(tabulate(master, headers=headers))
 
     def estimate_logg(self):
         """Estimate logg values from MIST isochrones."""

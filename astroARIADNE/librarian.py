@@ -67,12 +67,12 @@ class Librarian:
     __gaia_mags = ['Gmag', 'BPmag', 'RPmag']
     __gaia_errs = ['e_Gmag', 'e_BPmag', 'e_RPmag']
     __gaia_filters = ['GaiaDR2v2_G',  'GaiaDR2v2_BP', 'GaiaDR2v2_RP']
-    __sdss_mags = ['gmag', 'rmag', 'imag']
-    # __sdss_mags = ['umag', 'gmag', 'rmag', 'imag', 'zmag']
-    __sdss_errs = ['e_gmag', 'e_rmag', 'e_imag']
-    # __sdss_errs = ['e_umag', 'e_gmag', 'e_rmag', 'e_imag', 'e_zmag']
-    __sdss_filters = ['SDSS_g', 'SDSS_r', 'SDSS_i']
-    # __sdss_filters = ['SDSS_u', 'SDSS_g', 'SDSS_r', 'SDSS_i', 'SDSS_z']
+    # __sdss_mags = ['gmag', 'rmag', 'imag']
+    __sdss_mags = ['umag', 'gmag', 'rmag', 'imag', 'zmag']
+    # __sdss_errs = ['e_gmag', 'e_rmag', 'e_imag']
+    __sdss_errs = ['e_umag', 'e_gmag', 'e_rmag', 'e_imag', 'e_zmag']
+    # __sdss_filters = ['SDSS_g', 'SDSS_r', 'SDSS_i']
+    __sdss_filters = ['SDSS_u', 'SDSS_g', 'SDSS_r', 'SDSS_i', 'SDSS_z']
     __galex_mags = ['FUV', 'NUV']
     __galex_errs = ['e_FUV', 'e_NUV']
     __galex_filters = ['GALEX_FUV', 'GALEX_NUV']
@@ -190,7 +190,7 @@ class Librarian:
         plx = res['parallax'][0]
         if plx <= 0:
             CatalogWarning(0, 0).warn()
-            return 0, 0
+            return -1, -1
         plx_e = res['parallax_error'][0]
         # Parallax correction.
         return plx + 0.082, sp.sqrt(plx_e ** 2 + 0.033**2)
@@ -599,6 +599,8 @@ class Librarian:
             return False
         if err == 0:
             CatalogWarning(m, 4).warn()
+            return False
+        if err > 1:
             return False
         return True
 
