@@ -165,6 +165,7 @@ class SEDPlotter:
             flxs = self.star.flux[mask]
             errs = self.star.flux_er[mask]
             filters = self.star.filter_names[mask]
+            wave = self.star.wave[mask]
             for filt, flx, flx_e in zip(filters, flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = sp.append(self.order, p_)
@@ -202,7 +203,7 @@ class SEDPlotter:
             # self.theta = build_params(theta, self.coordinator, self.fixed)
 
             # Calculate best fit model.
-            self.model = model_grid(self.theta, self.star,
+            self.model = model_grid(self.theta, filters, wave,
                                     self.interpolator, self.norm, self.av_law)
 
             # Get archival fluxes.
@@ -332,8 +333,14 @@ class SEDPlotter:
         ymax = (self.flux * self.wave).max()
 
         # Get models residuals
+        mask = self.star.filter_mask
+        flxs = self.star.flux[mask]
+        errs = self.star.flux_er[mask]
+        filters = self.star.filter_names[mask]
+        wave = self.star.wave[mask]
         residuals, errors = get_residuals(
-            self.theta, self.star, self.interpolator, self.norm, self.av_law)
+            self.theta, flxs, errs, wave, filters, self.interpolator,
+            self.norm, self.av_law)
 
         n_filt = self.star.used_filters.sum()
         n_pars = int(len(self.theta) - n_filt)
@@ -681,7 +688,7 @@ class SEDPlotter:
             if 'noise' in param:
                 continue
             if not self.coordinator[i]:
-                f, ax = plt.subplots(figsize=(12, 4))
+                f, ax = plt.subplots(figsize=(12, 6))
                 for m in models:
                     # Get samples
                     samp = self.out['originals'][m][param]
@@ -693,8 +700,12 @@ class SEDPlotter:
                     bc = bins[:-1] + sp.diff(bins)
                     # Get reasonable p0
                     mu, sig = norm.fit(samp)
-                    popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-                                           p0=[mu, sig, n.max()], maxfev=5000)
+                    try:
+                        popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+                                               p0=[mu, sig, n.max()],
+                                               maxfev=50000)
+                    except RuntimeError:
+                        popt = (mu, sig, n.max())
                     xx = sp.linspace(bins[0], bins[-1], 100000)
                     # Plot best fit
                     ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
@@ -710,11 +721,28 @@ class SEDPlotter:
                                        p0=[mu, sig, n.max()])
                 xx = sp.linspace(bins[0], bins[-1], 100000)
                 ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
-                ax.set_ylabel('PDF')
+                ax.set_ylabel('PDF',
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
                 if param == 'z':
                     param = '[Fe/H]'
-                ax.set_xlabel(param)
-                plt.legend(loc=0)
+                ax.set_xlabel(param,
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+
+                for tick in ax.get_yticklabels():
+                    tick.set_fontname(self.fontname)
+                for tick in ax.get_xticklabels():
+                    tick.set_fontname(self.fontname)
+
+                ax.tick_params(
+                    axis='both', which='major',
+                    labelsize=self.tick_labelsize
+                )
+
+                plt.legend(loc=0, prop={'size': 16})
                 if param == '[Fe/H]':
                     param = 'Fe_H'
                 if self.png:
@@ -729,7 +757,7 @@ class SEDPlotter:
             if 'noise' in param:
                 continue
             if not self.coordinator[i]:
-                f, ax = plt.subplots(figsize=(12, 4))
+                f, ax = plt.subplots(figsize=(12, 6))
                 for m in models:
                     samp = self.out['originals'][m][param]
                     label = m + ' prob: {:.3f}'.format(self.out['weights'][m])
@@ -739,15 +767,35 @@ class SEDPlotter:
                     )
                     bc = bins[:-1] + sp.diff(bins)
                     mu, sig = norm.fit(samp)
-                    popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-                                           p0=[mu, sig, n.max()], maxfev=5000)
+                    try:
+                        popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+                                               p0=[mu, sig, n.max()],
+                                               maxfev=50000)
+                    except RuntimeError:
+                        popt = (mu, sig, n.max())
                     xx = sp.linspace(bins[0], bins[-1], 100000)
                     ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
                             alpha=.7)
-                ax.set_ylabel('N')
+                ax.set_ylabel('N',
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
                 if param == 'z':
                     param = '[Fe/H]'
-                ax.set_xlabel(param)
+                ax.set_xlabel(param,
+                              fontsize=self.fontsize,
+                              fontname=self.fontname
+                              )
+
+                for tick in ax.get_yticklabels():
+                    tick.set_fontname(self.fontname)
+                for tick in ax.get_xticklabels():
+                    tick.set_fontname(self.fontname)
+
+                ax.tick_params(
+                    axis='both', which='major',
+                    labelsize=self.tick_labelsize
+                )
                 plt.legend(loc=0)
                 if param == '[Fe/H]':
                     param = 'Fe_H'
