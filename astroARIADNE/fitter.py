@@ -1245,6 +1245,9 @@ class Fitter:
         out['confidence_interval']['mass_iso'] = (lo, up)
         logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
 
+        for k in avgd['weights'].keys():
+            logdat += '{}_probability\t{:.4f}\n'.format(k, avgd['weights'][k])
+
         for i, param in enumerate(order):
             if not self.coordinator[i]:
                 if 'noise' not in param:

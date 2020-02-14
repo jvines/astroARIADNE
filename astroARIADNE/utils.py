@@ -298,6 +298,12 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
         print(colored('{:.3f} +/-'.format(z), c), end=' ')
         print(colored('{:.3f}'.format(z_err), c))
+    else:
+        probs = out['weights']
+        for k in probs.keys():
+            text = '\t\t\t{} probability : '.format(k)
+            print(colored(text, c), end='')
+            print(colored('{:.4f}'.format(probs[k])))
     print(colored('\t\t\tElapsed time : ', c), end='')
     print(colored(elapsed_time, c))
     pass
