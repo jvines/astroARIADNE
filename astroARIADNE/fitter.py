@@ -526,11 +526,19 @@ class Fitter:
         if 'norm' in keys and ('rad' in keys or 'dist' in keys):
             er = PriorError('rad or dist', 1)
             er.log(self.out_folder + '/output.log')
-            er.raise_()
+            er.__raise__()
         for k in keys:
             if type(self.prior_setup[k]) == str:
-                prior_dict[k] = self.default_priors[k]
-                prior_out += k + '\tdefault\n'
+                if self.prior_setup[k] == 'default':
+                    prior_dict[k] = self.default_priors[k]
+                    prior_out += k + '\tdefault\n'
+                if self.prior_setup[k].lower() == 'rave':
+                    # RAVE prior only available for teff and logg. It's already
+                    # the default for [Fe/H]
+                    if k == 'teff' or k == 'logg':
+                        with closing(open(priorsdir + '/teff_ppf.pkl', 'rb')) \
+                                as jar:
+                            prior_dict[k] = pickle.load(jar)
             else:
                 prior = self.prior_setup[k][0]
                 if prior == 'fixed':
