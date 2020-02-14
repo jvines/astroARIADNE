@@ -406,6 +406,7 @@ class Star:
         if self.plx == -1:
             self.dist = -1
             self.dist_e = -1
+            return
         dist = 1 / (0.001 * self.plx)
         dist_e = dist * self.plx_e / self.plx
         self.dist = dist
