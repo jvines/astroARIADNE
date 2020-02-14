@@ -13,7 +13,7 @@ from .phot_utils import *
 from .utils import get_noise_name
 
 
-def build_params(theta, star, coordinator, fixed, use_norm):
+def build_params(theta, flux, flux_e, filts, coordinator, fixed, use_norm):
     """Build the parameter vector that goes into the model."""
     if use_norm:
         params = sp.zeros(len(coordinator) - 1)
@@ -23,10 +23,8 @@ def build_params(theta, star, coordinator, fixed, use_norm):
         order = sp.array(
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
-    mask = star.filter_mask
-    flxs = star.flux[mask]
-    errs = star.flux_er[mask]
-    for filt, flx, flx_e in zip(star.filter_names[mask], flxs, errs):
+
+    for filt, flx, flx_e in zip(filts, flux, flux_e):
         p_ = get_noise_name(filt) + '_noise'
         order = sp.append(order, p_)
     i = 0
@@ -37,7 +35,7 @@ def build_params(theta, star, coordinator, fixed, use_norm):
     return params
 
 
-def get_interpolated_flux(temp, logg, z, star, interpolators):
+def get_interpolated_flux(temp, logg, z, filts, interpolators):
     """Interpolate the grid of fluxes in a given teff, logg and z.
 
     Parameters
@@ -61,14 +59,12 @@ def get_interpolated_flux(temp, logg, z, star, interpolators):
 
     """
     values = (logg, temp, z)
-    mask = star.filter_mask
-    filts = star.filter_names[mask]
     vals = interpolators(values, filts)
     flux = vals
     return flux
 
 
-def model_grid(theta, star, interpolators, use_norm, av_law):
+def model_grid(theta, filts, wave, interpolators, use_norm, av_law):
     """Return the model grid in the selected filters.
 
     Parameters:
@@ -95,7 +91,6 @@ def model_grid(theta, star, interpolators, use_norm, av_law):
     """
     model = dict()
     Rv = 3.1  # For extinction.
-    mask = star.filter_mask
 
     if use_norm:
         teff, logg, z, norm, Av = theta[:5]
@@ -103,9 +98,9 @@ def model_grid(theta, star, interpolators, use_norm, av_law):
         teff, logg, z, dist, rad, Av = theta[:6]
         dist = (dist * u.pc).to(u.solRad).value
 
-    flux = get_interpolated_flux(teff, logg, z, star, interpolators)
+    flux = get_interpolated_flux(teff, logg, z, filts, interpolators)
 
-    wav = star.wave[mask] * 1e4
+    wav = wave * 1e4
     ext = av_law(wav, Av, Rv)
     if use_norm:
         model = apply(ext, flux) * norm
@@ -114,73 +109,22 @@ def model_grid(theta, star, interpolators, use_norm, av_law):
     return model
 
 
-def get_residuals(theta, star, interpolators, use_norm, av_law):
+def get_residuals(theta, flux, flux_er, wave, filts, interpolators, use_norm,
+                  av_law):
     """Calculate residuals of the model."""
-    model = model_grid(theta, star, interpolators, use_norm, av_law)
+    model = model_grid(theta, filts, wave, interpolators, use_norm, av_law)
     start = 5 if use_norm else 6
     inflation = theta[start:]
-    mask = star.filter_mask
-    residuals = model - star.flux[mask]
-    errs = star.flux_er[mask]
-    errs = sp.sqrt(errs ** 2 + inflation ** 2)
+    residuals = model - flux
+    errs = sp.sqrt(flux_er ** 2 + inflation**2)
     return residuals, errs
 
 
-def log_prior(theta, star, prior_dict, coordinator, use_norm):
-    """Calculate prior."""
-    # DEPRECATED
-    if use_norm:
-        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
-    else:
-        order = sp.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
-        )
-
-    lp = 0
-    i = 0
-    for fixed, par in zip(coordinator, order):
-        if fixed:
-            continue
-        if par == 'logg':
-            if not 0 <= theta[i] <= 5:
-                return -sp.inf
-            try:
-                lp += prior_dict['logg'].pdf(theta[i])
-            except AttributeError:
-                with closing(open(priorsdir + '/logg_kde.pkl', 'rb')) \
-                        as jar:
-                    prior = pickle.load(jar)['logg']
-                lp += prior(theta[i])
-            i += 1
-            continue
-        if par == 'teff':
-            if not 3500 <= theta[i] <= 12000:
-                return -sp.inf
-            lp += prior_dict['teff'].pdf(
-                theta[i]) if star.get_temp else prior_dict['teff'](theta[i])
-            i += 1
-            continue
-        if par == 'z' and not (-1 <= theta[i] <= 1):
-            return -sp.inf
-        if par == 'dist' and not (1 <= theta[i]):
-            return -sp.inf
-        if par == 'rad' and not (0 < theta[i]):
-            return -sp.inf
-        if par == 'norm' and not (theta[i] < 0):
-            return -sp.inf
-        if par == 'Av' and not (0 <= theta[i] <= star.Av):
-            return -sp.inf
-        if par == 'inflation' and not (0 <= theta[i] <= 5):
-            return -sp.inf
-        lp += prior_dict[par].pdf(theta[i])
-        i += 1
-
-    return lp
-
-
-def log_likelihood(theta, star, interpolators, use_norm, av_law):
+def log_likelihood(theta, flux, flux_er, wave, filts, interpolators, use_norm,
+                   av_law):
     """Calculate log likelihood of the model."""
-    res, ers = get_residuals(theta, star, interpolators, use_norm, av_law)
+    res, ers = get_residuals(theta, flux, flux_er, wave,
+                             filts, interpolators, use_norm, av_law)
 
     c = sp.log(2 * sp.pi * ers ** 2)
     lnl = (c + (res ** 2 / ers ** 2)).sum()
@@ -191,19 +135,8 @@ def log_likelihood(theta, star, interpolators, use_norm, av_law):
     return -.5 * lnl
 
 
-def log_probability(theta, star, prior_dict, coordinator, interpolators,
-                    fixed):
-    """Calculate unnormalized posterior probability of the model."""
-    # DEPRECATED
-    params = build_params(theta, star, coordinator, fixed)
-    lp = log_prior(params, prior_dict, coordinator)
-    lnl = log_likelihood(params, star, interpolators)
-    if not sp.isfinite(lnl) or not sp.isfinite(lp):
-        return -sp.inf
-    return lp + lnl
-
-
-def prior_transform_dynesty(u, star, prior_dict, coordinator, use_norm):
+def prior_transform_dynesty(u, flux, flux_er, filts, prior_dict, coordinator,
+                            use_norm):
     """Transform the prior from the unit cube to the parameter space."""
     u2 = sp.array(u)
     if use_norm:
@@ -213,10 +146,7 @@ def prior_transform_dynesty(u, star, prior_dict, coordinator, use_norm):
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
 
-    mask = star.filter_mask
-    flxs = star.flux[mask]
-    errs = star.flux_er[mask]
-    for filt, flx, flx_e in zip(star.filter_names[mask], flxs, errs):
+    for filt, flx, flx_e in zip(filts, flux, flux_er):
         p_ = get_noise_name(filt) + '_noise'
         order = sp.append(order, p_)
 
@@ -233,9 +163,9 @@ def prior_transform_dynesty(u, star, prior_dict, coordinator, use_norm):
             continue
         if par == 'teff':
             try:
-                u2[i] = prior_dict['teff'].ppf(u2[i])
-            except TypeError:
                 u2[i] = prior_dict['teff'](u2[i])
+            except TypeError:
+                u2[i] = prior_dict['teff'].ppf(u2[i])
             i += 1
             continue
         u2[i] = prior_dict[par].ppf(u2[i])

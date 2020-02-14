@@ -761,6 +761,13 @@ class Fitter:
 
     def fit_dynesty(self, out_file=None):
         """Run dynesty."""
+        # Set up some globals
+        global mask, flux, flux_er, filts, wave
+        mask = star.filter_mask
+        flux = star.flux[mask]
+        flux_er = star.flux_er[mask]
+        filts = star.filter_names[mask]
+        wave = star.wave[mask]
         if self._dynamic:
             if self._threads > 1:
                 with closing(Pool(self._threads)) as executor:
@@ -1424,13 +1431,16 @@ def dynesty_loglike_bma(cube, interpolator):
 
 def dynesty_log_like(cube):
     """Dynesty log likelihood wrapper."""
-    theta = build_params(cube, star, coordinator, fixed, use_norm)
-    return log_likelihood(theta, star, interpolator, use_norm, av_law)
+    theta = build_params(
+        cube, flux, flux_er, filts, coordinator, fixed, use_norm
+    )
+    return log_likelihood(theta, flux, flux_er, wave,
+                          filts, interpolator, use_norm, av_law)
 
 
 def pt_dynesty(cube):
     """Dynesty prior transform."""
-    return prior_transform_dynesty(cube, star, prior_dict,
+    return prior_transform_dynesty(cube, flux, flux_er, filts, prior_dict,
                                    coordinator, use_norm)
 
 
