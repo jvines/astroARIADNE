@@ -1348,10 +1348,11 @@ class SEDPlotter:
             if attr == 'figsize':
                 vals = splt[1].split('\n')[0].split(',')
                 val = (int(vals[0]), int(vals[1]))
-                setattr(self, attr, val)
+            elif 'alpha' in attr:
+                val = float(splt[1].split('\n')[0])
             else:
                 try:
                     val = int(splt[1].split('\n')[0])
                 except ValueError:
                     val = splt[1].split('\n')[0]
-                setattr(self, attr, val)
+            setattr(self, attr, val)
