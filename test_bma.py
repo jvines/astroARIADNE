@@ -20,7 +20,7 @@ if __name__ == '__main__':
 
     # Output setup
     out_folder = 'YOUR OUTPUT FOLDER HERE'
-    in_file = out_folder + '/BMA_out.pkl'
+    in_file = out_folder + '/BMA_out.pkl'  # used as input for plotting
     plots_out_folder = out_folder + '/plots'
 
     # Setup parameters
