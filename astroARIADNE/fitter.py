@@ -1282,8 +1282,8 @@ class Fitter:
             else:
                 continue
 
-        params['mass'] = (bf['mass'], max(unc['mass']))
-        params['logL'] = (sp.log10(bf['lum']), abs(sp.log10(max(unc['lum']))))
+        # params['mass'] = (bf['mass'], max(unc['mass']))
+        # params['logL'] = (sp.log10(bf['lum']), abs(sp.log10(max(unc['lum']))))
         mask = sp.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
                          0, 1, 0])
