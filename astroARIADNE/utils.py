@@ -12,6 +12,7 @@ from contextlib import closing
 
 import scipy as sp
 from scipy.special import erf
+from scipy.stats import gaussian_kde
 from termcolor import colored
 
 

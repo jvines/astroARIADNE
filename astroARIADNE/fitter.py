@@ -13,7 +13,6 @@ import scipy as sp
 import scipy.stats as st
 from astropy.constants import sigma_sb
 from isochrones.interp import DFInterpolator
-from scipy.stats import gaussian_kde
 from termcolor import colored
 
 from .config import filesdir, gridsdir, priorsdir
