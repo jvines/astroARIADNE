@@ -16,7 +16,7 @@ from .utils import get_noise_name
 def build_params(theta, flux, flux_e, filts, coordinator, fixed, use_norm):
     """Build the parameter vector that goes into the model."""
     if use_norm:
-        params = sp.zeros(len(coordinator) - 1)
+        params = sp.zeros(len(coordinator))
         order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
         params = sp.zeros(len(coordinator))
