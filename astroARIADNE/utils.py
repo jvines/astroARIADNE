@@ -202,17 +202,17 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
                 print(colored('{:.4e}'.format(uncert[i][0]), c), end=' ')
                 samp = out['posterior_samples']['norm']
                 _, lo, up = credibility_interval(samp, 3)
-                print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+                print(colored('[{:.4e}, {:.4e}]'.format(lo, up), c))
             else:
                 print(colored('fixed', c))
             rad = out['best_fit']['rad']
             unlo, unhi = out['uncertainties']['rad']
             lo, up = out['confidence_interval']['rad']
             print(colored('\t\t\trad : ', c), end='')
-            print(colored('{:.4e}'.format(rad), c), end=' ')
-            print(colored('+ {:.4e} -'.format(unhi), c), end=' ')
+            print(colored('{:.4f}'.format(rad), c), end=' ')
+            print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
             print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
-            print(colored('{:.4e} derived'.format(unlo), c))
+            print(colored('{:.4f} derived'.format(unlo), c))
         if p == 'z':
             p2 = '[Fe/H]'
         print(colored('\t\t\t' + p2 + ' : ', c), end='')
@@ -264,10 +264,10 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         print(colored('{:.4f}'.format(unlo), c), end=' ')
         print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
 
-        miso = out['best_fit']['mass_iso']
-        unlo, unhi = out['uncertainties']['mass_iso']
-        lo, up = out['confidence_interval']['mass_iso']
-        print(colored('\t\t\tmass_iso : ', c), end='')
+        miso = out['best_fit']['iso_mass']
+        unlo, unhi = out['uncertainties']['iso_mass']
+        lo, up = out['confidence_interval']['iso_mass']
+        print(colored('\t\t\tiso_mass : ', c), end='')
         print(colored('{:.4f}'.format(miso), c), end=' ')
         print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
         print(colored('{:.4f}'.format(unlo), c), end=' ')
