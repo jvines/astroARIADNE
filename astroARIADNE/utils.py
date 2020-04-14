@@ -190,6 +190,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     print(colored('\t\t\tFitting finished.', c))
     print(colored('\t\t\tBest fit parameters are:', c))
     for i, p in enumerate(order):
+        p2 = p
         if 'noise' in p:
             continue
         if p == 'norm':
