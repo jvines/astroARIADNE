@@ -411,7 +411,8 @@ class Fitter:
                 defaults['dist'] = st.norm(
                     loc=self.star.dist, scale=self.star.dist_e)
             else:
-                PriorError('distance', 4).__riase__()
+                PriorError('distance', 4).warn()
+                defaults['dist'] = st.uniform(loc=1, scale=1000)
             # Radius prior setup.
             if self.star.rad > 0:
                 a = - self.star.rad / self.star.rad_e

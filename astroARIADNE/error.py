@@ -106,8 +106,9 @@ class PriorError(Error):
             self.message = 'No radius found in Gaia, using default'
             self.message += ' radius prior.'
         if type == 4:
-            self.message = 'The Gaia parallax is negative. Fit for the'
-            self.message += ' normalization constant instead.'
+            self.message = 'The Gaia parallax is negative. Try fitting for the'
+            self.message += ' normalization constant instead or make sure to'
+            self.message += ' use a custom prior!'
 
 
 class CatalogWarning(Error):
