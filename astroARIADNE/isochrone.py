@@ -33,8 +33,6 @@ def estimate(bands, params, logg=True):
     """Estimate logg using MIST isochrones."""
     mist = get_ichrone('mist', bands=bands)
     model = SingleStarModel(mist, **params)
-    dist = 1 / (params['parallax'][0] * 0.001)
-    dist_e = dist * params['parallax'][1] / params['parallax'][0]
     if 'distance' in params.keys():
         dist, dist_e = params['distance']
     elif 'parallax' in params.keys():
