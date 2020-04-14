@@ -385,7 +385,7 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
         out['best_fit'][param] = best
         logdat += '{}\t{:.4{f}}\t'.format(name, best, f=fmt)
         _, lo, up = credibility_interval(samp)
-        out['uncertainties'][param] = (best - lo, up - best, f=fmt)
+        out['uncertainties'][param] = (best - lo, up - best)
         logdat += '{:.4{f}}\t{:.4{f}}\t'.format(up - best, best - lo, f=fmt)
         _, lo, up = credibility_interval(samp, 3)
         out['confidence_interval'][param] = (lo, up)
