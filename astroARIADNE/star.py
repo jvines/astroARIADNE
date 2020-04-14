@@ -310,7 +310,7 @@ class Star:
 
     def ra_dec_to_deg(self, ra, dec):
         """Transform ra, dec from selected uniot to degrees."""
-        if type(ra) == float and type(dec) == float:
+        if isinstance(ra, float) and isinstance(dec, float):
             self.ra = ra
             self.dec = dec
             return
