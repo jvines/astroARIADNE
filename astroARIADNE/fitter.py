@@ -953,7 +953,7 @@ class Fitter:
                 _, lo, up = credibility_interval(samp, 3)
                 out['confidence_interval'][param] = (lo, up)
                 logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
-                if param == 'norm' and star.distance != -1:
+                if param == 'norm' and star.dist != -1:
                     samp = out['posterior_samples']['rad']
                     best = self._get_max_from_kde(samp)
                     out['best_fit']['rad'] = best
