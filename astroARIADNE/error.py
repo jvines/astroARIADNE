@@ -45,9 +45,8 @@ class InputError(Error):
 
     """
 
-    def __init__(self, expression, message):
+    def __init__(self, message):
         self.errorname = 'InputError'
-        self.expression = expression
         self.message = message
 
 
