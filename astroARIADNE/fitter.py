@@ -1273,7 +1273,10 @@ class Fitter:
             if k == 'Av':
                 par = 'AV'
             if not self.coordinator[i]:
-                params[par] = (bf[k], max(unc[k]))
+                if k != 'norm':
+                    params[par] = (bf[k], max(unc[k]))
+                if k == 'norm' and star.dist != -1:
+                    params['distance'] = (star.dist, star.dist_e)
                 if par == 'distance':
                     err = max(unc[k])
                     params['parallax'] = (1000 / bf[k], 1000 * err / bf[k]**2)
