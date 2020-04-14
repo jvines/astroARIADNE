@@ -51,7 +51,7 @@ def estimate(bands, params, logg=True):
         model._priors['mass'] = GaussianPrior(m, m_e)
     if 'AV' in params.keys():
         av, av_e = params['AV']
-        model._priors['mass'] = GaussianPrior(av, av_e)
+        model._priors['AV'] = GaussianPrior(av, av_e)
     model._priors['distance'] = GaussianPrior(dist, dist_e)
     sampler = dynesty.NestedSampler(
         loglike, prior_transform, model.n_params + len(bands),
