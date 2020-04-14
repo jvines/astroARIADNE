@@ -957,13 +957,13 @@ class Fitter:
                     samp = out['posterior_samples']['rad']
                     best = self._get_max_from_kde(samp)
                     out['best_fit']['rad'] = best
-                    logdat += 'rad\t{:.4f}\t'.format(best)
+                    logdat += 'rad\t{:.4e}\t'.format(best)
                     _, lo, up = credibility_interval(samp)
                     out['uncertainties']['rad'] = (best - lo, up - best)
-                    logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+                    logdat += '{:.4e}\t{:.4e}\t'.format(up - best, best - lo)
                     _, lo, up = credibility_interval(samp, 3)
                     out['confidence_interval']['rad'] = (lo, up)
-                    logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+                    logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
             else:
                 out['best_fit'][param] = self.fixed[i]
                 out['uncertainties'][param] = sp.nan
@@ -1184,13 +1184,13 @@ class Fitter:
                     samp = out['posterior_samples']['rad']
                     best = self._get_max_from_kde(samp)
                     out['best_fit']['rad'] = best
-                    logdat += 'rad\t{:.4f}\t'.format(best)
+                    logdat += 'rad\t{:.4e}\t'.format(best)
                     _, lo, up = credibility_interval(samp)
                     out['uncertainties']['rad'] = (best - lo, up - best)
-                    logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+                    logdat += '{:.4e}\t{:.4e}\t'.format(up - best, best - lo)
                     _, lo, up = credibility_interval(samp, 3)
                     out['confidence_interval']['rad'] = (lo, up)
-                    logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+                    logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
             else:
                 out['best_fit'][param] = self.fixed[i]
                 out['uncertainties'][param] = sp.nan
