@@ -378,17 +378,24 @@ def get_noise_name(filt):
     return filt.split('_')[-1]
 
 
-def out_file_filler(samp, logdat):
+def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
     """Fill up the output file."""
     best = get_max_from_kde(samp)
-    out['best_fit']['rad'] = best
-    logdat += 'rad\t{:.4f}\t'.format(best)
-    _, lo, up = credibility_interval(samp)
-    out['uncertainties']['rad'] = (best - lo, up - best)
-    logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-    _, lo, up = credibility_interval(samp, 3)
-    out['confidence_interval']['rad'] = (lo, up)
-    logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+    if not fixed:
+        out['best_fit'][param] = best
+        logdat += '{}\t{:.4{f}}\t'.format(name, best, f=fmt)
+        _, lo, up = credibility_interval(samp)
+        out['uncertainties'][param] = (best - lo, up - best, f=fmt)
+        logdat += '{:.4{f}}\t{:.4{f}}\t'.format(up - best, best - lo, f=fmt)
+        _, lo, up = credibility_interval(samp, 3)
+        out['confidence_interval'][param] = (lo, up)
+        logdat += '[{:.4{f}}, {:.4{f}}]\n'.format(lo, up, f=fmt)
+    else:
+        out['best_fit'][param] = fixed
+        out['uncertainties'][param] = sp.nan
+        out['confidence_interval'][param] = sp.nan
+        logdat += '{}\t{:.4{f}}\t'.format(name, fixed, f=fmt)
+        logdat += '(FIXED)\n'
     return logdat
 
 
