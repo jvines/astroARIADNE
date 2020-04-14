@@ -1000,16 +1000,17 @@ class Fitter:
 
         # Add derived angular diameter to best fit dictionary.
 
-        samp = out['posterior_samples']['AD']
-        best = self._get_max_from_kde(samp)
-        out['best_fit']['AD'] = best
-        logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(samp)
-        out['uncertainties']['AD'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-        _, lo, up = credibility_interval(samp, 3)
-        out['confidence_interval']['AD'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        if not use_norm:
+            samp = out['posterior_samples']['AD']
+            best = self._get_max_from_kde(samp)
+            out['best_fit']['AD'] = best
+            logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
+            _, lo, up = credibility_interval(samp)
+            out['uncertainties']['AD'] = (best - lo, up - best)
+            logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+            _, lo, up = credibility_interval(samp, 3)
+            out['confidence_interval']['AD'] = (lo, up)
+            logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -1226,16 +1227,17 @@ class Fitter:
 
         # Add derived angular diameter to best fit dictionary.
 
-        samp = out['posterior_samples']['AD']
-        best = sp.median(samp)
-        out['best_fit']['AD'] = best
-        logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(samp)
-        out['uncertainties']['AD'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-        _, lo, up = credibility_interval(samp, 3)
-        out['confidence_interval']['AD'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        if not use_norm:
+            samp = out['posterior_samples']['AD']
+            best = sp.median(samp)
+            out['best_fit']['AD'] = best
+            logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
+            _, lo, up = credibility_interval(samp)
+            out['uncertainties']['AD'] = (best - lo, up - best)
+            logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+            _, lo, up = credibility_interval(samp, 3)
+            out['confidence_interval']['AD'] = (lo, up)
+            logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
 
         # Add estimated age to best fit dictionary.
 
