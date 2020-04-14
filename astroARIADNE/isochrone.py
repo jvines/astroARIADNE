@@ -37,6 +37,9 @@ def estimate(bands, params, logg=True):
     dist_e = dist * params['parallax'][1] / params['parallax'][0]
     if 'distance' in params.keys():
         dist, dist_e = params['distance']
+    else:
+        dist = 1 / (params['parallax'][0] * 0.001)
+        dist_e = dist * params['parallax'][1] / params['parallax'][0]
     if 'feh' in params.keys():
         fe, fe_e = params['feh']
         model._priors['feh'] = GaussianPrior(fe, fe_e)

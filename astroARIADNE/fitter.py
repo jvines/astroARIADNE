@@ -1399,7 +1399,8 @@ class Fitter:
             if not self.coordinator[i]:
                 params[par] = (bf[k], max(unc[k]))
                 if par == 'distance':
-                    params['parallax'] = (1000 / bf[k], self.star.plx_e)
+                    err = max(unc[k])
+                    params['parallax'] = (1000 / bf[k], 1000 * err / bf[k]**2)
             else:
                 continue
 
