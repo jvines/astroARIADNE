@@ -957,18 +957,18 @@ class Fitter:
         # Add derived mass to best fit dictionary.
 
         samp = out['posterior_samples']['grav_mass']
-        logdat = out_filler(samp, logdat, 'grav_mass', out)
+        logdat = out_filler(samp, logdat, 'grav_mass', 'grav_mass', out)
 
         # Add derived luminosity to best fit dictionary.
 
         samp = out['posterior_samples']['lum']
-        logdat = out_filler(samp, logdat, 'lum', out)
+        logdat = out_filler(samp, logdat, 'lum', 'lum', out)
 
         # Add derived angular diameter to best fit dictionary.
 
         if not use_norm:
             samp = out['posterior_samples']['AD']
-            logdat = out_filler(samp, logdat, 'AD', out)
+            logdat = out_filler(samp, logdat, 'AD', 'AD', out)
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -1134,18 +1134,18 @@ class Fitter:
         # Add derived mass to best fit dictionary.
 
         samp = out['posterior_samples']['grav_mass']
-        logdat = out_filler(samp, logdat, 'grav_mass', out)
+        logdat = out_filler(samp, logdat, 'grav_mass', 'grav_mass', out)
 
         # Add derived luminosity to best fit dictionary.
 
         samp = out['posterior_samples']['lum']
-        logdat = out_filler(samp, logdat, 'lum', out)
+        logdat = out_filler(samp, logdat, 'lum', 'lum', out)
 
         # Add derived angular diameter to best fit dictionary.
 
         if not use_norm:
             samp = out['posterior_samples']['AD']
-            logdat = out_filler(samp, logdat, 'AD', out)
+            logdat = out_filler(samp, logdat, 'AD', 'AD', out)
 
         # Add estimated age to best fit dictionary.
 
