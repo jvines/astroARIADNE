@@ -1,3 +1,4 @@
+# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """sed_library contain the model, prior and likelihood to be used."""
 
 import pickle
