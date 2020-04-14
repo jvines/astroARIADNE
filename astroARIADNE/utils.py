@@ -193,8 +193,8 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         if 'noise' in p:
             continue
         if p == 'norm':
-            p = '(R/D)^2'
-            print(colored('\t\t\t' + p + ' : ', c), end='')
+            p2 = '(R/D)^2'
+            print(colored('\t\t\t' + p2 + ' : ', c), end='')
             print(colored('{:.4e}'.format(theta[i]), c), end=' ')
             if not coordinator[i]:
                 print(colored('+ {:.4e} -'.format(uncert[i][1]), c), end=' ')
@@ -213,32 +213,31 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
             print(colored('{:.4e} derived'.format(unlo), c))
         if p == 'z':
-            p = '[Fe/H]'
-        print(colored('\t\t\t' + p + ' : ', c), end='')
+            p2 = '[Fe/H]'
+        print(colored('\t\t\t' + p2 + ' : ', c), end='')
         print(colored('{:.4f}'.format(theta[i]), c), end=' ')
         if not coordinator[i]:
             print(colored('+ {:.4f} -'.format(uncert[i][1]), c), end=' ')
             print(colored('{:.4f}'.format(uncert[i][0]), c), end=' ')
-            if p == '[Fe/H]':
-                p = 'z'
             samp = out['posterior_samples'][p]
             _, lo, up = credibility_interval(samp, 3)
             print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
         else:
             print(colored('fixed', c))
 
-    ad = out['best_fit']['AD']
-    unlo, unhi = out['uncertainties']['AD']
-    lo, up = out['confidence_interval']['AD']
-    print(colored('\t\t\tAngular diameter : ', c), end='')
-    print(colored('{:.4f}'.format(ad), c), end=' ')
-    print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
-    print(colored('{:.4f}'.format(unlo), c), end=' ')
-    print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+    if not use_norm:
+        ad = out['best_fit']['AD']
+        unlo, unhi = out['uncertainties']['AD']
+        lo, up = out['confidence_interval']['AD']
+        print(colored('\t\t\tAngular diameter : ', c), end='')
+        print(colored('{:.4f}'.format(ad), c), end=' ')
+        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
+        print(colored('{:.4f}'.format(unlo), c), end=' ')
+        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
 
-    mass = out['best_fit']['mass']
-    unlo, unhi = out['uncertainties']['mass']
-    lo, up = out['confidence_interval']['mass']
+    mass = out['best_fit']['grav_mass']
+    unlo, unhi = out['uncertainties']['grav_mass']
+    lo, up = out['confidence_interval']['grav_mass']
     print(colored('\t\t\tmass : ', c), end='')
     print(colored('{:.2f}'.format(mass), c), end=' ')
     print(colored('+ {:.2f} -'.format(unhi), c), end=' ')
