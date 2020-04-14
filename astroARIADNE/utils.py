@@ -1,3 +1,4 @@
+# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """Various utilities used throughout the code.
 
 Here go various utilities that don't belong directly in any class,
@@ -375,3 +376,28 @@ def get_noise_name(filt):
     if 'SDSS' in filt or 'PS1' in filt:
         return filt
     return filt.split('_')[-1]
+
+
+def out_file_filler(samp, logdat):
+    """Fill up the output file."""
+    best = get_max_from_kde(samp)
+    out['best_fit']['rad'] = best
+    logdat += 'rad\t{:.4f}\t'.format(best)
+    _, lo, up = credibility_interval(samp)
+    out['uncertainties']['rad'] = (best - lo, up - best)
+    logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
+    _, lo, up = credibility_interval(samp, 3)
+    out['confidence_interval']['rad'] = (lo, up)
+    logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+    return logdat
+
+
+def get_max_from_kde(samp):
+    """Get maximum of the given distribution."""
+    kde = gaussian_kde(samp)
+    xmin = samp.min()
+    xmax = samp.max()
+    xx = sp.linspace(xmin, xmax, 5000)
+    kde = kde(xx)
+    best = xx[kde.argmax()]
+    return best
