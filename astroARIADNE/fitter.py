@@ -893,7 +893,7 @@ class Fitter:
         logg_samp = out['posterior_samples']['logg']
         rad_samp = out['posterior_samples']['rad']
         mass_samp = self._get_mass(logg_samp, rad_samp)
-        out['posterior_samples']['mass'] = mass_samp
+        out['posterior_samples']['grav_mass'] = mass_samp
 
         # Create a distribution of luminosities.
 
@@ -938,95 +938,45 @@ class Fitter:
                 if 'noise' in param:
                     continue
                 samp = out['posterior_samples'][param]
-                best = self._get_max_from_kde(samp)
-                out['best_fit'][param] = best
+
                 if param == 'z':
-                    logdat += '[Fe/H]' + \
-                        '\t{:.4f}\t'.format(best)
+                    logdat = out_filler(samp, logdat, param, '[Fe/H]', out)
+                elif param == 'norm':
+                    logdat = out_filler(samp, logdat, param, '(R/D)^2', out,
+                                        fmt='e')
+                    if star.dist != 1:
+                        logdat = out_filler(
+                            out['posterior_samples']['rad'], logdat, 'rad',
+                            'R', out
+                        )
                 else:
-                    logdat += param + \
-                        '\t{:.4f}\t'.format(best)
-                _, lo, up = credibility_interval(samp)
-                out['uncertainties'][param] = (best - lo, up - best)
-                logdat += '{:.4f}\t{:.4f}\t'.format(
-                    up - best, best - lo)
-                _, lo, up = credibility_interval(samp, 3)
-                out['confidence_interval'][param] = (lo, up)
-                logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
-                if param == 'norm' and star.dist != -1:
-                    samp = out['posterior_samples']['rad']
-                    best = self._get_max_from_kde(samp)
-                    out['best_fit']['rad'] = best
-                    logdat += 'rad\t{:.4e}\t'.format(best)
-                    _, lo, up = credibility_interval(samp)
-                    out['uncertainties']['rad'] = (best - lo, up - best)
-                    logdat += '{:.4e}\t{:.4e}\t'.format(up - best, best - lo)
-                    _, lo, up = credibility_interval(samp, 3)
-                    out['confidence_interval']['rad'] = (lo, up)
-                    logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
+                    logdat = out_filler(samp, logdat, param, param, out)
             else:
-                out['best_fit'][param] = self.fixed[i]
-                out['uncertainties'][param] = sp.nan
-                out['confidence_interval'][param] = sp.nan
-                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
-                logdat += '(FIXED)\n'
+                logdat = out_filler(0, logdat, param, out, fixed=self.fixed[i])
             best_theta[i] = out['best_fit'][param]
 
         # Add derived mass to best fit dictionary.
 
-        samp = out['posterior_samples']['mass']
-        best = self._get_max_from_kde(samp)
-        out['best_fit']['mass'] = best
-        logdat += 'mass\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(samp)
-        out['uncertainties']['mass'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-        _, lo, up = credibility_interval(samp, 3)
-        out['confidence_interval']['mass'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        samp = out['posterior_samples']['grav_mass']
+        logdat = out_filler(samp, logdat, 'grav_mass', out)
 
         # Add derived luminosity to best fit dictionary.
 
         samp = out['posterior_samples']['lum']
-        best = self._get_max_from_kde(samp)
-        out['best_fit']['lum'] = best
-        logdat += 'lum\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(samp)
-        out['uncertainties']['lum'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-        _, lo, up = credibility_interval(samp, 3)
-        out['confidence_interval']['lum'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        logdat = out_filler(samp, logdat, 'lum', out)
 
         # Add derived angular diameter to best fit dictionary.
 
         if not use_norm:
             samp = out['posterior_samples']['AD']
-            best = self._get_max_from_kde(samp)
-            out['best_fit']['AD'] = best
-            logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
-            _, lo, up = credibility_interval(samp)
-            out['uncertainties']['AD'] = (best - lo, up - best)
-            logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-            _, lo, up = credibility_interval(samp, 3)
-            out['confidence_interval']['AD'] = (lo, up)
-            logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+            logdat = out_filler(samp, logdat, 'AD', out)
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
                 if 'noise' not in param:
                     continue
                 samp = out['posterior_samples'][param]
-                best = self._get_max_from_kde(samp)
-                out['best_fit'][param] = best
-                logdat += param + '\t{:.4e}\t'.format(best)
-                _, lo, up = credibility_interval(samp)
-                out['uncertainties'][param] = (best - lo, up - best)
-                logdat += '{:.4e}\t{:.4e}\t'.format(
-                    up - best, best - lo)
-                _, lo, up = credibility_interval(samp, 3)
-                out['confidence_interval'][param] = (lo, up)
-                logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
+                logdat = out_filler(samp, logdat, param, param, out, fmt='e')
 
         # Fill in best loglike, prior and posterior.
 
@@ -1135,7 +1085,7 @@ class Fitter:
         logg_samp = out['posterior_samples']['logg']
         rad_samp = out['posterior_samples']['rad']
         mass_samp = self._get_mass(logg_samp, rad_samp)
-        out['posterior_samples']['mass'] = mass_samp
+        out['posterior_samples']['grav_mass'] = mass_samp
 
         # Create a distribution of luminosities.
 
@@ -1165,105 +1115,45 @@ class Fitter:
                 if 'noise' in param:
                     continue
                 samp = out['posterior_samples'][param]
-                best = self._get_max_from_kde(samp)
-                out['best_fit'][param] = best
+
                 if param == 'z':
-                    logdat += '[Fe/H]' + \
-                        '\t{:.4f}\t'.format(best)
+                    logdat = out_filler(samp, logdat, param, '[Fe/H]', out)
+                elif param == 'norm':
+                    logdat = out_filler(samp, logdat, param, '(R/D)^2', out,
+                                        fmt='e')
+                    if star.dist != 1:
+                        logdat = out_filler(
+                            out['posterior_samples']['rad'], logdat, 'rad',
+                            'R', out
+                        )
                 else:
-                    logdat += param + \
-                        '\t{:.4f}\t'.format(best)
-                _, lo, up = credibility_interval(samp)
-                out['uncertainties'][param] = (best - lo, up - best)
-                logdat += '{:.4f}\t{:.4f}\t'.format(
-                    up - best, best - lo)
-                _, lo, up = credibility_interval(samp, 3)
-                out['confidence_interval'][param] = (lo, up)
-                logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
-                if param == 'norm' and star.dist != -1:
-                    samp = out['posterior_samples']['rad']
-                    best = self._get_max_from_kde(samp)
-                    out['best_fit']['rad'] = best
-                    logdat += 'rad\t{:.4e}\t'.format(best)
-                    _, lo, up = credibility_interval(samp)
-                    out['uncertainties']['rad'] = (best - lo, up - best)
-                    logdat += '{:.4e}\t{:.4e}\t'.format(up - best, best - lo)
-                    _, lo, up = credibility_interval(samp, 3)
-                    out['confidence_interval']['rad'] = (lo, up)
-                    logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
+                    logdat = out_filler(samp, logdat, param, param, out)
             else:
-                out['best_fit'][param] = self.fixed[i]
-                out['uncertainties'][param] = sp.nan
-                out['confidence_interval'][param] = sp.nan
-                logdat += param + '\t{:.4f}\t'.format(self.fixed[i])
-                logdat += '(FIXED)\n'
+                logdat = out_filler(0, logdat, param, out, fixed=self.fixed[i])
             best_theta[i] = out['best_fit'][param]
 
         # Add derived mass to best fit dictionary.
 
-        samp = out['posterior_samples']['mass']
-        best = sp.median(samp)
-        out['best_fit']['mass'] = best
-        logdat += 'mass\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(samp)
-        out['uncertainties']['mass'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-        _, lo, up = credibility_interval(samp, 3)
-        out['confidence_interval']['mass'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        samp = out['posterior_samples']['grav_mass']
+        logdat = out_filler(samp, logdat, 'grav_mass', out)
 
         # Add derived luminosity to best fit dictionary.
 
         samp = out['posterior_samples']['lum']
-        best = sp.median(samp)
-        out['best_fit']['lum'] = best
-        logdat += 'lum\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(samp)
-        out['uncertainties']['lum'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-        _, lo, up = credibility_interval(samp, 3)
-        out['confidence_interval']['lum'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        logdat = out_filler(samp, logdat, 'lum', out)
 
         # Add derived angular diameter to best fit dictionary.
 
         if not use_norm:
             samp = out['posterior_samples']['AD']
-            best = sp.median(samp)
-            out['best_fit']['AD'] = best
-            logdat += 'AngularDiameter\t{:.4f}\t'.format(best)
-            _, lo, up = credibility_interval(samp)
-            out['uncertainties']['AD'] = (best - lo, up - best)
-            logdat += '{:.4f}\t{:.4f}\t'.format(up - best, best - lo)
-            _, lo, up = credibility_interval(samp, 3)
-            out['confidence_interval']['AD'] = (lo, up)
-            logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+            logdat = out_filler(samp, logdat, 'AD', out)
 
         # Add estimated age to best fit dictionary.
 
         age_samp, mass_samp = self.estimate_age(out['best_fit'],
                                                 out['uncertainties'])
-        out['posterior_samples']['age'] = age_samp
-        best = sp.median(age_samp)
-        out['best_fit']['age'] = best
-        logdat += 'age\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(age_samp)
-        out['uncertainties']['age'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, abs(best - lo))
-        _, lo, up = credibility_interval(age_samp, 3)
-        out['confidence_interval']['age'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
-
-        out['posterior_samples']['mass_iso'] = mass_samp
-        best = sp.median(mass_samp)
-        out['best_fit']['mass_iso'] = best
-        logdat += 'mass_iso\t{:.4f}\t'.format(best)
-        _, lo, up = credibility_interval(mass_samp)
-        out['uncertainties']['mass_iso'] = (best - lo, up - best)
-        logdat += '{:.4f}\t{:.4f}\t'.format(up - best, abs(best - lo))
-        _, lo, up = credibility_interval(mass_samp, 3)
-        out['confidence_interval']['mass_iso'] = (lo, up)
-        logdat += '[{:.4f}, {:.4f}]\n'.format(lo, up)
+        logdat = out_filler(age_samp, logdat, 'age', 'age', out)
+        logdat = out_filler(mass_samp, logdat, 'iso_mass', 'iso_mass', out)
 
         for k in avgd['weights'].keys():
             logdat += '{}_probability\t{:.4f}\n'.format(k, avgd['weights'][k])
@@ -1273,16 +1163,7 @@ class Fitter:
                 if 'noise' not in param:
                     continue
                 samp = out['posterior_samples'][param]
-                best = self._get_max_from_kde(samp)
-                out['best_fit'][param] = best
-                logdat += param + '\t{:.4e}\t'.format(best)
-                _, lo, up = credibility_interval(samp)
-                out['uncertainties'][param] = (best - lo, up - best)
-                logdat += '{:.4e}\t{:.4e}\t'.format(
-                    up - best, best - lo)
-                _, lo, up = credibility_interval(samp, 3)
-                out['confidence_interval'][param] = (lo, up)
-                logdat += '[{:.4e}, {:.4e}]\n'.format(lo, up)
+                logdat = out_filler(samp, logdat, param, param, out, fmt='e')
 
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
@@ -1354,16 +1235,6 @@ class Fitter:
         diameter = 2 * rad
         ad = (diameter / (dist * u.pc.to(u.solRad))) * u.rad.to(u.marcsec)
         return ad
-
-    def _get_max_from_kde(self, samp):
-        """Get maximum of the given distribution."""
-        kde = gaussian_kde(samp)
-        xmin = samp.min()
-        xmax = samp.max()
-        xx = sp.linspace(xmin, xmax, 5000)
-        kde = kde(xx)
-        best = xx[kde.argmax()]
-        return best
 
     def estimate_age(self, bf, unc):
         """Estimate age using MIST isochrones.
