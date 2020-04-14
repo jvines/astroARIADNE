@@ -903,9 +903,10 @@ class Fitter:
 
         # Create a distribution of angular diameters.
 
-        dist_samp = out['posterior_samples']['dist']
-        ad_samp = self._get_angular_diameter(rad_samp, dist_samp)
-        out['posterior_samples']['AD'] = ad_samp
+        if not use_norm:
+            dist_samp = out['posterior_samples']['dist']
+            ad_samp = self._get_angular_diameter(rad_samp, dist_samp)
+            out['posterior_samples']['AD'] = ad_samp
 
         for i in range(posterior_samples.shape[0]):
             theta = build_params(
@@ -1143,9 +1144,10 @@ class Fitter:
 
         # Create a distribution of angular diameters.
 
-        dist_samp = out['posterior_samples']['dist']
-        ad_samp = self._get_angular_diameter(rad_samp, dist_samp)
-        out['posterior_samples']['AD'] = ad_samp
+        if not use_norm:
+            dist_samp = out['posterior_samples']['dist']
+            ad_samp = self._get_angular_diameter(rad_samp, dist_samp)
+            out['posterior_samples']['AD'] = ad_samp
 
         # Best fit
         # The logic is as follows:
