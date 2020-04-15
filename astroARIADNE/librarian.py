@@ -89,39 +89,45 @@ class Librarian:
     # APASS DR9, WISE, PAN-STARRS DR1, GAIA DR2, 2MASS, SDSS DR9
     catalogs = {
         'APASS': [
-            'II/336/apass9', zip(__apass_mags, __apass_errs, __apass_filters)
+            'II/336/apass9', list(zip(__apass_mags,
+                                      __apass_errs, __apass_filters))
         ],
         'Wise': [
-            'II/328/allwise', zip(__wise_mags, __wise_errs, __wise_filters)
+            'II/328/allwise', list(zip(__wise_mags,
+                                       __wise_errs, __wise_filters))
         ],
         'Pan-STARRS':
         [
-            'II/349/ps1', zip(__ps1_mags, __ps1_errs, __ps1_filters)
+            'II/349/ps1', list(zip(__ps1_mags, __ps1_errs, __ps1_filters))
         ],
         'Gaia':
         [
-            'I/345/gaia2', zip(__gaia_mags, __gaia_errs, __gaia_filters)
+            'I/345/gaia2', list(zip(__gaia_mags, __gaia_errs, __gaia_filters))
         ],
         '2MASS': [
-            'II/246/out', zip(__tmass_mags, __tmass_errs, __tmass_filters)
+            'II/246/out', list(zip(__tmass_mags,
+                                   __tmass_errs, __tmass_filters))
         ],
         'SDSS': [
-            'V/147/sdss12', zip(__sdss_mags, __sdss_errs, __sdss_filters)
+            'V/147/sdss12', list(zip(__sdss_mags, __sdss_errs, __sdss_filters))
         ],
         'GALEX': [
-            'II/312/ais', zip(__galex_mags, __galex_errs, __galex_filters)
+            'II/312/ais', list(zip(__galex_mags,
+                                   __galex_errs, __galex_filters))
         ],
         'ASCC': [
-            'I/280B/ascc', zip(__ascc_mags, __ascc_errs, __ascc_filters)
+            'I/280B/ascc', list(zip(__ascc_mags, __ascc_errs, __ascc_filters))
         ],
         'TYCHO2': [
-            'I/259/tyc2', zip(__tycho_mags, __tycho_errs, __tycho_filters)
+            'I/259/tyc2', list(zip(__tycho_mags,
+                                   __tycho_errs, __tycho_filters))
         ],
         'GLIMPSE': [
-            'II/293/glimpse', zip(__irac_mags, __irac_errs, __irac_filters)
+            'II/293/glimpse', list(zip(__irac_mags,
+                                       __irac_errs, __irac_filters))
         ],
         'TESS': [
-            'TIC', zip(__tess_mags, __tess_errs, __tess_filters)
+            'TIC', list(zip(__tess_mags, __tess_errs, __tess_filters))
         ],
         'STROMGREN': [
             'J/A+A/580/A23/catalog', -1
