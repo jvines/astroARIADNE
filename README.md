@@ -294,7 +294,7 @@ We offer customization on the priors as well, those are listed in the following 
 | :------: | :----------: |
 | Fixed | value |
 | Normal | mean, std |
-| TruncNorm | mean, std, upper\_lim, lower\_lim |
+| TruncNorm | mean, std, lower\_lim, upper\_lim |
 | Uniform | ini, end |
 | RAVE (Teff only) | --- |
 | Default | --- | 
