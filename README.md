@@ -1,9 +1,9 @@
 # ARIADNE (spectrAl eneRgy dIstribution bAyesian moDel averagiNg fittEr)
 ## Characterize stellar atmospheres easily!
-ARIADNE Is a code written in python 3 (sorry python 2 users!) designed to fit broadband photometry to different stellar atmosphere models automatically using Nested sampling algorithms.
+**ARIADNE** Is a code written in python 3 (sorry python 2 users!) designed to fit broadband photometry to different stellar atmosphere models automatically using Nested sampling algorithms.
 
 # Installation
-To install ARIADNE you can clone this repository with
+To install **ARIADNE** you can clone this repository with
 
 ```
 git clone https://github.com/jvines/astroARIADNE.git
@@ -41,8 +41,6 @@ But for the code to work, first you must install the necessary dependencies:
 - tabulate (<https://pypi.org/project/tabulate/>)
 
 Most can be easily installed with pip or conda but some might have special instructions (like PyMultinest!!)
-
-After installing, you can run ... to test the installation
 
 ## In order to plot the models, you have to download them first:
 But note that plotting the SED model is optional. You can run the code withouth them!
@@ -211,7 +209,7 @@ The way the photometry retrieval works is that Gaia DR2 crossmatch catalogs are 
 s.add_mag(13.751, 0.032, 'PS1_r')
 ```
 
-A list of allowed filters can be found here **_insert link_**
+A list of allowed filters can be found [here](https://github.com/jvines/astroARIADNE/blob/master/filters.md)
 
 After the photometry + stellar parameter retrieval has finished, we can estimate the star's log g to use as prior later with the `estimate_logg` method:
 
@@ -286,7 +284,20 @@ f.prior_setup = {
 }
 ```
 
-A quick explanation on the priors can be found here _**insert link here**_
+A quick explanation on the priors:
+
+The default priors for Teff, distance, and radius are the values found in Gaia DR2. the RAVE prior applies only to Teff and consists on the Teff distribution from the RAVE survey, the default prior for the metallicity `z` and log g are also their respective distributions from the RAVE survey, the default prior for Av is a flat prior that ranges from 0 to the maximum of line-of-sight as per the SFD map, finally the excess noise parameters all have gaussian priors centered around their respective uncertainties.
+
+We offer customization on the priors as well, those are listed in the following table.
+
+| Prior | Hyperparameters |
+| :------: | :----------: |
+| Fixed | value |
+| Normal | mean, std |
+| TruncNorm | mean, std, upper\_lim, lower\_lim |
+| Uniform | ini, end |
+| RAVE (Teff only) | --- |
+| Default | --- | 
 
 After having set up everything we can finally initialize the fitter and start fitting
 
@@ -340,6 +351,4 @@ If you don't have the models in your computer, then the `plot_SED` method will f
 An example usage file is provided in the repository called test_bma.py for the BMA approach and test.py for single model fitting.
 ## TODO
 
-- available filters
-- prior selection
 - customizing plots
