@@ -9,7 +9,7 @@ To install **ARIADNE** you can clone this repository with
 git clone https://github.com/jvines/astroARIADNE.git
 ```
 
-And the run
+And then run
 
 ```
 python setupy.py install
@@ -294,7 +294,7 @@ We offer customization on the priors as well, those are listed in the following 
 | :------: | :----------: |
 | Fixed | value |
 | Normal | mean, std |
-| TruncNorm | mean, std, lower\_lim, upper\_lim |
+| TruncNorm | mean, std, lower\_lim, uppern\_lim |
 | Uniform | ini, end |
 | RAVE (Teff only) | --- |
 | Default | --- | 
