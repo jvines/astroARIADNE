@@ -91,7 +91,7 @@ def model_grid(theta, filts, wave, interpolators, use_norm, av_law):
 
     """
     model = dict()
-    Rv = 5.5  # 3.1  # For extinction.
+    Rv = 3.1  # For extinction.
 
     if use_norm:
         teff, logg, z, norm, Av = theta[:5]
