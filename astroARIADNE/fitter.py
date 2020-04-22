@@ -1151,6 +1151,8 @@ class Fitter:
 
         age_samp, mass_samp = self.estimate_age(out['best_fit'],
                                                 out['uncertainties'])
+        out['posterior_samples']['age'] = age_samp
+        out['posterior_samples']['iso_mass'] = mass_samp
         logdat = out_filler(age_samp, logdat, 'age', 'age', out)
         logdat = out_filler(mass_samp, logdat, 'iso_mass', 'iso_mass', out)
 
