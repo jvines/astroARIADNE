@@ -1266,7 +1266,7 @@ class Fitter:
             if k == 'teff':
                 par = 'Teff'
             if k == 'z':
-                continue
+                par = 'feh'
             if k == 'dist':
                 par = 'distance'
             if k == 'rad':
@@ -1285,7 +1285,9 @@ class Fitter:
                 continue
 
         # params['mass'] = (bf['mass'], max(unc['mass']))
-        # params['logL'] = (sp.log10(bf['lum']), abs(sp.log10(max(unc['lum']))))
+        if star.lum != 0 and star.lum_e != 0:
+            params['logL'] = (sp.log10(bf['lum']),
+                              abs(sp.log10(max(unc['lum']))))
         mask = sp.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
                          0, 1, 0])
