@@ -240,7 +240,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     mass = out['best_fit']['grav_mass']
     unlo, unhi = out['uncertainties']['grav_mass']
     lo, up = out['confidence_interval']['grav_mass']
-    print(colored('\t\t\tmass : ', c), end='')
+    print(colored('\t\t\tgrav_mass : ', c), end='')
     print(colored('{:.2f}'.format(mass), c), end=' ')
     print(colored('+ {:.2f} -'.format(unhi), c), end=' ')
     print(colored('{:.2f}'.format(unlo), c), end=' ')
