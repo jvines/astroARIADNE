@@ -386,7 +386,7 @@ class Librarian:
             self.tic = int(cat['ID'][0])
             kic = cat['KIC'][0]
             self.kic = int(kic) if not sp.ma.is_masked(kic) else None
-            m, e, f = self.catalogs['TESS'][1].__next__()
+            m, e, f = self.catalogs['TESS'][1][0]
             filt_idx = sp.where(f == self.filter_names)[0]
             if self.used_filters[filt_idx] == 1:
                 CatalogWarning(f, 6).warn()
