@@ -11,7 +11,6 @@ import scipy as sp
 from astropy.coordinates import SkyCoord
 from dustmaps.sfd import SFDQuery
 from scipy.interpolate import RegularGridInterpolator
-from tabulate import tabulate
 from termcolor import colored
 
 from .config import gridsdir
@@ -302,7 +301,10 @@ class Star:
             self.bandpass[filt_idx] = bandpass[k]
 
         self.calculate_distance()
+        c = random.choice(self.colors)
         display_star_fin(self, c)
+        c = random.choice(self.colors)
+        self.print_mags(c)
 
     def __repr__(self):
         """Repr overload."""
@@ -414,15 +416,49 @@ class Star:
 
     def print_mags(self, c=None):
         """Pretty print of magnitudes and errors."""
+        master, headers = self.__prepare_mags()
+        if c is not None:
+            print(
+                colored('\t\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers), c)
+            )
+            print(colored(
+                '\t\t\t----------------\t---------\t-----------', c)
+            )
+            for i in range(master.shape[0]):
+                printer = '\t\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
+                print(colored(printer.format(*master[i]), c))
+        else:
+            print('\t\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers))
+            print('\t\t\t----------------\t---------\t-----------')
+            for i in range(master.shape[0]):
+                printer = '\t\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
+                print(printer.format(*master[i]))
+        print('')
+
+    def save_mags(self, out):
+        """Save the used magnitudes in a file."""
+        master, headers = self.__prepare_mags()
+        fmt = '%s %2.4f %2.4f'
+        sp.savetxt(out + 'mags.dat', master, header=' '.join(headers),
+                   delimiter=' ', fmt=fmt)
+
+    def __prepare_mags(self):
+        """Prepare mags for either printing or saving in a file."""
         mags = self.mags[self.filter_mask]
         ers = self.mag_errs[self.filter_mask]
         filt = self.filter_names[self.filter_mask]
-        master = sp.vstack([filt, mags, ers]).T
+        master = sp.zeros(
+            mags.size,
+            dtype=[
+                ('var1', 'U16'),
+                ('var2', float),
+                ('var3', float)
+            ])
+        master['var1'] = filt
+        master['var2'] = mags
+        master['var3'] = ers
         headers = ['Filter', 'Magnitude', 'Uncertainty']
-        if c is not None:
-            print(colored(tabulate(master, headers=headers), c))
-        else:
-            print(tabulate(master, headers=headers))
+        return master, headers
 
     def estimate_logg(self):
         """Estimate logg values from MIST isochrones."""
@@ -473,10 +509,10 @@ class Star:
         self.used_filters[mask] = 1
         self.filter_mask = sp.where(self.used_filters == 1)[0]
 
-        self._reload_fluxes()
+        self.__reload_fluxes()
         pass
 
-    def _reload_fluxes(self):
+    def __reload_fluxes(self):
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
