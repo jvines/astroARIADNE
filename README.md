@@ -202,6 +202,8 @@ WISE_RSR_W2           11.636          0.027
 GALEX_NUV             21.952          0.409
 TESS                  13.1686         0.0062
 ```
+**Note:** that this is no longer necessary as **ARIADNE** automatically prints the used magnitudes and filters.
+
 The way the photometry retrieval works is that Gaia DR2 crossmatch catalogs are queried for the Gaia ID, these crossmatch catalogs exist for ALL-WISE, APASS, Pan-STARRS1, SDSS, 2MASS and Tycho-2, so finding photometry relies on these crossmatches. In the case of NGTS-6, there are also Pan-STARRS1 photometry which **ARIADNE** couldn't find due to the Pan-STARRS1 source not being identified in the Gaia DR2 crossmatch, in this case if you wanted to add that photometry manually, you can do so by using the `add_mag` method from Star, for example, if we wanted to add the PS1_r mag to our Star object we would do:
 
 ```python
@@ -351,3 +353,4 @@ An example usage file is provided in the repository called test_bma.py for the B
 ## TODO
 
 - customizing plots
+- specify output files
