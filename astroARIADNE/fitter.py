@@ -308,6 +308,8 @@ class Fitter:
             self.out_folder = self.star.starname + '/'
         create_dir(self.out_folder)
 
+        self.star.save_mags(self.out_folder + '/')
+
         # Parameter coordination.
         # Order for the parameters are:
         # teff, logg, z, dist, rad, Av, noise
