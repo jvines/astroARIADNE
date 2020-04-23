@@ -14,5 +14,4 @@ PyAstronomy
 corner
 dynesty
 dustmaps
-tabulate
 pymultinest

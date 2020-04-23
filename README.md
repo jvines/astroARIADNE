@@ -38,7 +38,6 @@ But for the code to work, first you must install the necessary dependencies:
 - PyMultinest (<https://johannesbuchner.github.io/PyMultiNest/>)
 - dynesty (<https://dynesty.readthedocs.io/en/latest/>)
 - isochrones (<https://isochrones.readthedocs.io/en/latest/>)
-- tabulate (<https://pypi.org/project/tabulate/>)
 
 Most can be easily installed with pip or conda but some might have special instructions (like PyMultinest!!)
 
