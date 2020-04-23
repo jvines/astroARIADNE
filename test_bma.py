@@ -11,10 +11,6 @@ if __name__ == '__main__':
 
     s = Star(starname, ra, dec, g_id=gaia_id)
 
-    # For debugging purposes you can use this function to check if the
-    # retreived magnitudes are correct.
-    s.print_mags()
-
     # Comment to use a custom log g prior or the default prior
     s.estimate_logg()
 
