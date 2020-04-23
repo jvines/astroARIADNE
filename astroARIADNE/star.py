@@ -419,17 +419,17 @@ class Star:
         master, headers = self.__prepare_mags()
         if c is not None:
             print(
-                colored('\t\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers), c)
+                colored('\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers), c)
             )
             print(colored(
-                '\t\t\t----------------\t---------\t-----------', c)
+                '\t\t----------------\t---------\t-----------', c)
             )
             for i in range(master.shape[0]):
                 printer = '\t\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
                 print(colored(printer.format(*master[i]), c))
         else:
-            print('\t\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers))
-            print('\t\t\t----------------\t---------\t-----------')
+            print('\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers))
+            print('\t\t----------------\t---------\t-----------')
             for i in range(master.shape[0]):
                 printer = '\t\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
                 print(printer.format(*master[i]))
