@@ -11,7 +11,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="astroARIADNE",
-    version="0.0.1",
+    version="0.0.5",
     author="Jose Vines",
     author_email="jose.vines@ug.uchile.cl",
     maintainer="Jose Vines",
@@ -20,7 +20,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="MIT",
-    url="https://github.com/pypa/sampleproject",
+    url="https://github.com/jvines/astroARIADNE",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -31,7 +31,7 @@ setup(
     requires=["numpy", "scipy", "matplotlib", "astropy", "astroquery",
               "tabulate", "tqdm", "regions", "pyphot", "PyAstronomy",
               "termcolor"],
-    package_data={'astroARIADNE':['Datafiles']},
+    package_data={'astroARIADNE': ['Datafiles']},
     include_package_data=True,
     python_requires='>=3.6',
 )
