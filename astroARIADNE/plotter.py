@@ -241,7 +241,6 @@ class SEDPlotter:
 
     def plot_SED_no_model(self, s=None):
         """Plot raw photometry."""
-        create_dir(self.out_folder)
         if self.star is None:
             self.star = s
         self.__extract_info()
@@ -1034,6 +1033,10 @@ class SEDPlotter:
                 plt.savefig(self.out_folder + '/CORNER.png',
                             bbox_inches='tight')
         pass
+
+    def clean(self):
+        """Close opened figures."""
+        plt.clf('all')
 
     def fetch_Phoenix(self):
         """Fetch correct Phoenixv2 SED file.
