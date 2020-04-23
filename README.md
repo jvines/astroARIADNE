@@ -202,7 +202,7 @@ WISE_RSR_W2           11.636          0.027
 GALEX_NUV             21.952          0.409
 TESS                  13.1686         0.0062
 ```
-**Note:** that this is no longer necessary as **ARIADNE** automatically prints the used magnitudes and filters.
+**Note:** This is no longer necessary as **ARIADNE** automatically prints and saves the used magnitudes and filters to a file.
 
 The way the photometry retrieval works is that Gaia DR2 crossmatch catalogs are queried for the Gaia ID, these crossmatch catalogs exist for ALL-WISE, APASS, Pan-STARRS1, SDSS, 2MASS and Tycho-2, so finding photometry relies on these crossmatches. In the case of NGTS-6, there are also Pan-STARRS1 photometry which **ARIADNE** couldn't find due to the Pan-STARRS1 source not being identified in the Gaia DR2 crossmatch, in this case if you wanted to add that photometry manually, you can do so by using the `add_mag` method from Star, for example, if we wanted to add the PS1_r mag to our Star object we would do:
 
@@ -345,6 +345,8 @@ artist.plot_corner()
 ```
 
 The number given to `plot_bma_HR` is the number of extra tracks you want to plot, drawn randomly from the posterior distribution.
+
+If you're iterating through lots of stars you can call the SEDPlotter `clean` method to clear opened figures with `artist.clean()`
 
 If you don't have the models in your computer, then the `plot_SED` method will fail, as it needs the complete model grid.
 
