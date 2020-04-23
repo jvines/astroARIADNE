@@ -739,7 +739,7 @@ class Fitter:
 
         results = self.sampler.results
         out_file = self.out_folder + '/' + grid + '_out.pkl'
-        self.save(results=results, out_file=out_file)
+        self.save(out_file, results=results)
         pass
 
     def fit_multinest(self):
@@ -874,14 +874,9 @@ class Fitter:
         out['posterior_samples']['loglike'] = sp.zeros(
             posterior_samples.shape[0]
         )
-        # out['posterior_samples']['priors'] = sp.zeros(
-        #     posterior_samples.shape[0]
-        # )
-        # out['posterior_samples']['posteriors'] = sp.zeros(
-        #     posterior_samples.shape[0]
-        # )
 
-        # If normalization constant was fitted, create a distribution of radii.
+        # If normalization constant was fitted, create a distribution of radii
+        # only if there's a distance available.
 
         if use_norm and star.dist != -1:
             rad = self._get_rad(
@@ -916,11 +911,7 @@ class Fitter:
             out['posterior_samples']['loglike'][i] = log_likelihood(
                 theta, flux, flux_er, wave, filts, interpolator, self.norm,
                 av_law)
-            # out['posterior_samples']['priors'][i] = log_prior(
-            #     theta, self.star, self.priors, self.coordinator, self.norm)
         lnlike = out['posterior_samples']['loglike']
-        # lnprior = out['posterior_samples']['priors']
-        # out['posterior_samples']['posteriors'] = (lnlike + lnprior) - lnz
 
         # Best fit
         # The logic is as follows:
@@ -929,80 +920,80 @@ class Fitter:
         # peak is best fit.
         # do only if not bma
 
-        out['best_fit'] = dict()
-        out['uncertainties'] = dict()
-        out['confidence_interval'] = dict()
-        best_theta = sp.zeros(order.shape[0])
+        if not self.bma:
+            out['best_fit'] = dict()
+            out['uncertainties'] = dict()
+            out['confidence_interval'] = dict()
+            best_theta = sp.zeros(order.shape[0])
 
-        for i, param in enumerate(order):
-            if not self.coordinator[i]:
-                if 'noise' in param:
-                    continue
-                samp = out['posterior_samples'][param]
+            for i, param in enumerate(order):
+                if not self.coordinator[i]:
+                    if 'noise' in param:
+                        continue
+                    samp = out['posterior_samples'][param]
 
-                if param == 'z':
-                    logdat = out_filler(samp, logdat, param, '[Fe/H]', out)
-                elif param == 'norm':
-                    logdat = out_filler(samp, logdat, param, '(R/D)^2', out,
-                                        fmt='e')
-                    if star.dist != 1:
-                        logdat = out_filler(
-                            out['posterior_samples']['rad'], logdat, 'rad',
-                            'R', out
-                        )
+                    if param == 'z':
+                        logdat = out_filler(samp, logdat, param, '[Fe/H]', out)
+                    elif param == 'norm':
+                        logdat = out_filler(samp, logdat, param, '(R/D)^2',
+                                            out, fmt='e')
+                        if star.dist != 1:
+                            logdat = out_filler(
+                                out['posterior_samples']['rad'], logdat, 'rad',
+                                'R', out
+                            )
+                    else:
+                        logdat = out_filler(samp, logdat, param, param, out)
                 else:
-                    logdat = out_filler(samp, logdat, param, param, out)
-            else:
-                logdat = out_filler(0, logdat, param, out, fixed=self.fixed[i])
-            best_theta[i] = out['best_fit'][param]
+                    logdat = out_filler(
+                        0, logdat, param, out, fixed=self.fixed[i]
+                    )
+                best_theta[i] = out['best_fit'][param]
 
-        # Add derived mass to best fit dictionary.
+            # Add derived mass to best fit dictionary.
 
-        samp = out['posterior_samples']['grav_mass']
-        logdat = out_filler(samp, logdat, 'grav_mass', 'grav_mass', out)
+            samp = out['posterior_samples']['grav_mass']
+            logdat = out_filler(samp, logdat, 'grav_mass', 'grav_mass', out)
 
-        # Add derived luminosity to best fit dictionary.
+            # Add derived luminosity to best fit dictionary.
 
-        samp = out['posterior_samples']['lum']
-        logdat = out_filler(samp, logdat, 'lum', 'lum', out)
+            samp = out['posterior_samples']['lum']
+            logdat = out_filler(samp, logdat, 'lum', 'lum', out)
 
-        # Add derived angular diameter to best fit dictionary.
+            # Add derived angular diameter to best fit dictionary.
 
-        if not use_norm:
-            samp = out['posterior_samples']['AD']
-            logdat = out_filler(samp, logdat, 'AD', 'AD', out)
+            if not use_norm:
+                samp = out['posterior_samples']['AD']
+                logdat = out_filler(samp, logdat, 'AD', 'AD', out)
 
-        for i, param in enumerate(order):
-            if not self.coordinator[i]:
-                if 'noise' not in param:
-                    continue
-                samp = out['posterior_samples'][param]
-                logdat = out_filler(samp, logdat, param, param, out, fmt='e')
+            for i, param in enumerate(order):
+                if not self.coordinator[i]:
+                    if 'noise' not in param:
+                        continue
+                    samp = out['posterior_samples'][param]
+                    logdat = out_filler(samp, logdat, param,
+                                        param, out, fmt='e')
 
-        # Fill in best loglike, prior and posterior.
+            # Fill in best loglike, prior and posterior.
 
-        out['best_fit']['loglike'] = log_likelihood(
-            best_theta, flux, flux_er, wave, filts, interpolator, self.norm,
-            av_law)
-        # out['best_fit']['prior'] = log_prior(
-        #     best_theta, self.star, self.priors, self.coordinator, self.norm
-        # )
-        lnlike = out['best_fit']['loglike']
-        # lnprior = out['best_fit']['prior']
-        # out['best_fit']['posterior'] = (lnlike + lnprior) - lnz
+            out['best_fit']['loglike'] = log_likelihood(
+                best_theta, flux, flux_er, wave,
+                filts, interpolator, self.norm, av_law
+                )
+            lnlike = out['best_fit']['loglike']
 
-        # Spectral type
+            # Spectral type
 
-        # Load Mamajek spt table
-        mamajek_spt = sp.loadtxt(
-            filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
-        mamajek_temp = sp.loadtxt(
-            filesdir + '/mamajek_spt.dat', usecols=[1])
+            # Load Mamajek spt table
+            mamajek_spt = sp.loadtxt(
+                filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
+            mamajek_temp = sp.loadtxt(
+                filesdir + '/mamajek_spt.dat', usecols=[1])
 
-        # Find spt
-        spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
-        spt = mamajek_spt[spt_idx]
-        out['spectral_type'] = spt
+            # Find spt
+            spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+            spt = mamajek_spt[spt_idx]
+            out['spectral_type'] = spt
 
         # Utilities for plotting.
 
@@ -1013,8 +1004,9 @@ class Fitter:
         out['norm'] = self.norm
         out['model_grid'] = self.grid
         out['av_law'] = av_law
-        with closing(open(log_out, 'w')) as logfile:
-            logfile.write(logdat)
+        if not self.bma:
+            with closing(open(log_out, 'w')) as logfile:
+                logfile.write(logdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
 
