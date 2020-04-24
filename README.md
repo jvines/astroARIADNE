@@ -17,7 +17,7 @@ python setupy.py install
 
 Or try ```pip install astroARIADNE``` (Soon to be available!)
 
-But for the code to work, first you must install the necessary dependencies:
+But for the code to work, first you must install the necessary dependencies.
 
 ## Dependencies:
 - Numpy (<https://numpy.org/>)
@@ -184,23 +184,23 @@ s.print_mags()
 This will print the filters used, magnitudes and uncertainties. For NGTS-6 this would look like this:
 
 ```
-Filter              Magnitude    Uncertainty
-----------------  -----------  -------------
-2MASS_H               11.767          0.038
-2MASS_J               12.222          0.033
-2MASS_Ks              11.65           0.032
-GROUND_JOHNSON_V      14.087          0.021
-GROUND_JOHNSON_B      15.171          0.014
-GaiaDR2v2_G           13.8175         0.0006
-GaiaDR2v2_RP          13.1127         0.0015
-GaiaDR2v2_BP          14.4012         0.0027
-SDSS_g                14.639          0.058
-SDSS_i                13.378          0.057
-SDSS_r                13.703          0.032
-WISE_RSR_W1           11.555          0.027
-WISE_RSR_W2           11.636          0.027
-GALEX_NUV             21.952          0.409
-TESS                  13.1686         0.0062
+		     Filter     	Magnitude	Uncertainty
+		----------------	---------	-----------
+		    2MASS_H     	 11.7670 	  0.0380
+		    2MASS_J     	 12.2220 	  0.0330
+		    2MASS_Ks    	 11.6500 	  0.0320
+		GROUND_JOHNSON_V	 14.0870 	  0.0210
+		GROUND_JOHNSON_B	 15.1710 	  0.0140
+		  GaiaDR2v2_G   	 13.8175 	  0.0006
+		  GaiaDR2v2_RP  	 13.1127 	  0.0015
+		  GaiaDR2v2_BP  	 14.4012 	  0.0027
+		     SDSS_g     	 14.6390 	  0.0580
+		     SDSS_i     	 13.3780 	  0.0570
+		     SDSS_r     	 13.7030 	  0.0320
+		  WISE_RSR_W1   	 11.5550 	  0.0270
+		  WISE_RSR_W2   	 11.6360 	  0.0270
+		   GALEX_NUV    	 21.9520 	  0.4090
+		      TESS      	 13.1686 	  0.0062
 ```
 **Note:** This is no longer necessary as **ARIADNE** automatically prints and saves the used magnitudes and filters to a file.
 
