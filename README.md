@@ -352,7 +352,21 @@ If you don't have the models in your computer, then the `plot_SED` method will f
 
 
 An example usage file is provided in the repository called test_bma.py for the BMA approach and test.py for single model fitting.
+
+## OUTPUT FILES
+After **ARIADNE** has finished running, it will output a series of files and plots showing the results of the fit and other information.
+
+The most important file is the `best_fit.dat` which contains the best fiting parameters with the 1 sigma error bars and the 3 sigma confidence interval. Then there are pickle files for each of the used models plus a last one for the BMA, these contain raw information about the results. There is a `prior.dat` file that shows the priors used and a `mags.dat` file with the used magnitudes and filters.
+
+Another important output are the plots. Inside the plots folder you can find `CORNER.png/pdf` with the cornerplot (the plot showing the distribution of the parameters agains eachother), `HR_diagram.png/pdf` only for the BMA, with the HR diagram showing the position of the star, `SED_no_model.png/pdf` with the RAW SED showing each photometry point color coded to their respective filter, and `SED.png/pdf` with the SED with the catalog photometry plus synthetic photometry. If BMA was done, there's also a `histograms` folder inside the plot folder with various histograms of the fitted parameters and their distribution per model, highlighting the benefits of BMA.
+
+Examples of those figures:
+
+![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/SED.png)
+![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/HR_diagram.png)
+![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/CORNER.png)
+![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/rad.png)
+
 ## TODO
 
 - customizing plots
-- specify output files
