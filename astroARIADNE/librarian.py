@@ -198,8 +198,8 @@ class Librarian:
             CatalogWarning(0, 0).warn()
             return -1, -1
         plx_e = res['parallax_error'][0]
-        # Parallax correction.
-        return plx + 0.082, sp.sqrt(plx_e ** 2 + 0.033**2)
+        # Parallax correction −52.8 ± 2.4 µas from Zinn+19
+        return plx + 0.0528, sp.sqrt(plx_e ** 2 + 0.0024**2)
 
     def _get_radius(self, res):
         rad = res['radius_val'][0]
