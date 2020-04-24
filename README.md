@@ -362,10 +362,10 @@ Another important output are the plots. Inside the plots folder you can find `CO
 
 Examples of those figures:
 
-![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/SED.png)
-![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/HR_diagram.png)
-![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/CORNER.png)
-![SED plot](https://github.com/jvines/astroARIADNE/tree/master/img/rad.png)
+![SED plot](https://github.com/jvines/astroARIADNE/blob/master/img/SED.png)
+![HR Diagram](https://github.com/jvines/astroARIADNE/blob/master/img/HR_diagram.png)
+![Corner plot](https://github.com/jvines/astroARIADNE/blob/master/img/CORNER.png)
+![Histogram example](https://github.com/jvines/astroARIADNE/blob/master/img/rad.png)
 
 ## TODO
 
