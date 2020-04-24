@@ -425,7 +425,7 @@ class Star:
                 '\t\t----------------\t---------\t-----------', c)
             )
             for i in range(master.shape[0]):
-                printer = '\t\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
+                printer = '\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
                 print(colored(printer.format(*master[i]), c))
         else:
             print('\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers))
