@@ -285,12 +285,12 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             p1 += '_' + p2
             p2 = p3
         print(colored('\t\t\t' + p_ + p1 + ' ' + p2 + ' : ', c), end='')
-        print(colored('{:.4e}'.format(theta[i]), c), end=' ')
-        print(colored('+ {:.4e}'.format(uncert[i][1]), c), end=' ')
-        print(colored('- {:.4e}'.format(uncert[i][0]), c), end=' ')
+        print(colored('{:.4f}'.format(theta[i]), c), end=' ')
+        print(colored('+ {:.4f}'.format(uncert[i][1]), c), end=' ')
+        print(colored('- {:.4f}'.format(uncert[i][0]), c), end=' ')
         samp = out['posterior_samples'][p]
         _, lo, up = credibility_interval(samp, 3)
-        print(colored('[{:.4e}, {:.4e}]'.format(lo, up), c))
+        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
 
     spt = out['spectral_type']
     print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
@@ -382,8 +382,8 @@ def get_noise_name(filt):
 
 def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
     """Fill up the output file."""
-    best = get_max_from_kde(samp)
     if not fixed:
+        best = get_max_from_kde(samp)
         out['best_fit'][param] = best
         logdat += '{}\t{:.4{f}}\t'.format(name, best, f=fmt)
         _, lo, up = credibility_interval(samp)

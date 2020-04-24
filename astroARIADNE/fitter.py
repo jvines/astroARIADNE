@@ -30,7 +30,6 @@ try:
 except ModuleNotFoundError:
     wrn = 'Dynesty package not found. BMA and log g estimation unavailable.'
     warnings.warn(wrn)
-    iso_flag = False
     bma_flag = False
 try:
     import pymultinest
@@ -41,6 +40,47 @@ except ModuleNotFoundError:
 
 
 class Fitter:
+    """The Fitter class handles the fitting routines and parameter estimation.
+
+    Examples
+    --------
+    The fitter isn't instantiaded with any arguments, rather you instantiate a
+    Fitter object, then you set up the configurations and finally you
+    initialize the object by running the initialize method.
+    >>> f = Fitter()
+    >>> # f.star = s  # s must be a valid Star object.
+    >>> f.initialize()
+
+    Attributes
+    ----------
+    out_folder : type
+        Description of attribute `out_folder`.
+    verbose : type
+        Description of attribute `verbose`.
+    star : type
+        Description of attribute `star`.
+    setup : type
+        Description of attribute `setup`.
+    norm : type
+        Description of attribute `norm`.
+    grid : type
+        Description of attribute `grid`.
+    estimate_logg : type
+        Description of attribute `estimate_logg`.
+    priorfile : type
+        Description of attribute `priorfile`.
+    av_law : type
+        Description of attribute `av_law`.
+    n_samples : type
+        Description of attribute `n_samples`.
+    bma : type
+        Description of attribute `bma`.
+    prior_setup : type
+        Description of attribute `prior_setup`.
+    sequential : type
+        Description of attribute `sequential`.
+
+    """
 
     def __init__(self):
 
@@ -862,9 +902,16 @@ class Fitter:
 
         out['posterior_samples'] = dict()
         j = 0
+        k = 0  # filter counter
         for i, param in enumerate(order):
             if not self.coordinator[i]:
-                out['posterior_samples'][param] = posterior_samples[:, j]
+                samples = posterior_samples[:, j]
+                if 'noise' in param:
+                    filt = self.star.filter_names[mask][k]
+                    flx = self.star.flux[mask][k]
+                    _, samples = flux_to_mag(flx, samples, filt)
+                    k += 1
+                out['posterior_samples'][param] = samples
                 j += 1
             else:
                 out['posterior_samples'][param] = self.fixed[i]
@@ -950,36 +997,38 @@ class Fitter:
                     )
                 best_theta[i] = out['best_fit'][param]
 
-            # Add derived mass to best fit dictionary.
+                # Add derived mass to best fit dictionary.
 
-            samp = out['posterior_samples']['grav_mass']
-            logdat = out_filler(samp, logdat, 'grav_mass', 'grav_mass', out)
+                samp = out['posterior_samples']['grav_mass']
+                logdat = out_filler(
+                    samp, logdat, 'grav_mass', 'grav_mass', out
+                )
 
-            # Add derived luminosity to best fit dictionary.
+                # Add derived luminosity to best fit dictionary.
 
-            samp = out['posterior_samples']['lum']
-            logdat = out_filler(samp, logdat, 'lum', 'lum', out)
+                samp = out['posterior_samples']['lum']
+                logdat = out_filler(samp, logdat, 'lum', 'lum', out)
 
-            # Add derived angular diameter to best fit dictionary.
+                # Add derived angular diameter to best fit dictionary.
 
-            if not use_norm:
-                samp = out['posterior_samples']['AD']
-                logdat = out_filler(samp, logdat, 'AD', 'AD', out)
+                if not use_norm:
+                    samp = out['posterior_samples']['AD']
+                    logdat = out_filler(samp, logdat, 'AD', 'AD', out)
 
-            for i, param in enumerate(order):
-                if not self.coordinator[i]:
-                    if 'noise' not in param:
-                        continue
-                    samp = out['posterior_samples'][param]
-                    logdat = out_filler(samp, logdat, param,
-                                        param, out, fmt='e')
+                for i, param in enumerate(order):
+                    if not self.coordinator[i]:
+                        if 'noise' not in param:
+                            continue
+                        samp = out['posterior_samples'][param]
+                        logdat = out_filler(samp, logdat, param,
+                                            param, out, fmt='f')
 
             # Fill in best loglike, prior and posterior.
 
             out['best_fit']['loglike'] = log_likelihood(
                 best_theta, flux, flux_er, wave,
                 filts, interpolator, self.norm, av_law
-                )
+            )
             lnlike = out['best_fit']['loglike']
 
             # Spectral type
@@ -1054,12 +1103,6 @@ class Fitter:
         j = 0
         for i, par in enumerate(order):
             if not self.coordinator[i]:
-                if par == 'inflation':
-                    for filt in self.star.filter_names[mask]:
-                        _p = get_noise_name(filt)
-                        samp = avgd['averaged_samples'][_p + '_noise']
-                        out['posterior_samples'][_p + '_noise'] = samp
-                    continue
                 out['posterior_samples'][par] = avgd['averaged_samples'][par]
                 j += 1
             else:
@@ -1122,7 +1165,9 @@ class Fitter:
                 else:
                     logdat = out_filler(samp, logdat, param, param, out)
             else:
-                logdat = out_filler(0, logdat, param, out, fixed=self.fixed[i])
+                logdat = out_filler(
+                    0, logdat, param, param, out, fixed=self.fixed[i]
+                )
             best_theta[i] = out['best_fit'][param]
 
         # Add derived mass to best fit dictionary.
@@ -1158,7 +1203,7 @@ class Fitter:
                 if 'noise' not in param:
                     continue
                 samp = out['posterior_samples'][param]
-                logdat = out_filler(samp, logdat, param, param, out, fmt='e')
+                logdat = out_filler(samp, logdat, param, param, out, fmt='f')
 
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
