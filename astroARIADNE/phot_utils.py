@@ -94,7 +94,8 @@ def flux_to_mag(flux, flux_err, band):
     else:
         f0 = get_band_info(band)
     mag = -2.5 * sp.log10(flux / f0)
-    return mag
+    mag_err = 2.5 * flux_err / (sp.log(10) * flux)
+    return mag, mag_err
 
 
 def get_band_info(band):
