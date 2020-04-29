@@ -1036,7 +1036,7 @@ class SEDPlotter:
 
     def clean(self):
         """Close opened figures."""
-        plt.clf('all')
+        plt.close('all')
 
     def fetch_Phoenix(self):
         """Fetch correct Phoenixv2 SED file.
