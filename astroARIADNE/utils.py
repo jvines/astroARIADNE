@@ -57,21 +57,24 @@ def display_star_fin(star, c):
     rad, rad_e = star.rad, star.rad_e
     plx, plx_e = star.plx, star.plx_e
     lum, lum_e = star.lum, star.lum_e
+    dist, dist_e = star.dist, star.dist_e
     print(colored('\t\t\tGaia DR2 ID : {}'.format(star.g_id), c))
     if star.tic:
         print(colored('\t\t\tTIC : {}'.format(star.tic), c))
     if star.kic:
         print(colored('\t\t\tKIC : {}'.format(star.kic), c))
-    print(colored('\t\t\tEffective temperature : ', c), end='')
+    print(colored('\t\t\tGaia Effective temperature : ', c), end='')
     print(colored('{:.3f} +/- {:.3f}'.format(temp, temp_e), c))
     if rad is not None:
-        print(colored('\t\t\tStellar radius : ', c), end='')
+        print(colored('\t\t\tGaia Stellar radius : ', c), end='')
         print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
     if lum is not None:
-        print(colored('\t\t\tStellar Luminosity : ', c), end='')
+        print(colored('\t\t\tGaia Stellar Luminosity : ', c), end='')
         print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
-    print(colored('\t\t\tParallax : ', c), end='')
+    print(colored('\t\t\tGaia Parallax : ', c), end='')
     print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
+    print(colored('\t\t\tBailer-Jones distance : ', c), end='')
+    print(colored('{:.3f} +/- {:.3f}'.format(dist, dist_e), c))
     print(colored('\t\t\tMaximum Av : ', c), end='')
     print(colored('{:.3f}'.format(star.Av), c))
     print('')
