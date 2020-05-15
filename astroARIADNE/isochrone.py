@@ -8,8 +8,8 @@ import scipy as sp
 from isochrones import SingleStarModel, get_ichrone
 from isochrones.mist import MIST_Isochrone
 from isochrones.priors import GaussianPrior
-from numba.errors import (NumbaDeprecationWarning,
-                          NumbaPendingDeprecationWarning)
+from numba.core.errors import (NumbaDeprecationWarning,
+                               NumbaPendingDeprecationWarning)
 
 import dynesty
 from dynesty.utils import resample_equal
