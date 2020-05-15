@@ -401,11 +401,19 @@ class Fitter:
                     with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
                 if mod.lower() == 'ck04':
-                    with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pickle.load(intp))
+                    if self.star.temp > 4000:
+                        with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
+                            df = DFInterpolator(pickle.load(intp))
+                    else:
+                        # Warning temp too low for model
+                        continue
                 if mod.lower() == 'kurucz':
-                    with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pickle.load(intp))
+                    if self.star.temp > 4000:
+                        with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
+                            df = DFInterpolator(pickle.load(intp))
+                    else:
+                        # Warning temp too low for model.
+                        continue
                 if mod.lower() == 'coelho':
                     with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pickle.load(intp))
@@ -437,18 +445,14 @@ class Fitter:
         else:
             with closing(open(priorsdir + '/logg_ppf.pkl', 'rb')) as jar:
                 defaults['logg'] = pickle.load(jar)
-        # Teff prior setup.
-        if self.star.get_temp:
-            defaults['teff'] = st.norm(
-                loc=self.star.temp, scale=self.star.temp_e)
-        else:
-            with closing(open(priorsdir + '/teff_ppf.pkl', 'rb')) as jar:
-                defaults['teff'] = pickle.load(jar)
+        # Teff prior from RAVE
+        with closing(open(priorsdir + '/teff_ppf.pkl', 'rb')) as jar:
+            defaults['teff'] = pickle.load(jar)
         # [Fe/H] prior setup.
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
         # Distance prior setup.
         if not self._norm:
-            if self.star.plx != -1:
+            if self.star.dist != -1:
                 defaults['dist'] = st.norm(
                     loc=self.star.dist, scale=self.star.dist_e)
             else:
@@ -462,11 +466,11 @@ class Fitter:
                     loc=self.star.rad, scale=self.star.rad_e, a=a, b=b)
             else:
                 PriorError('rad', 3).warn()
-                defaults['rad'] = st.uniform(loc=0.05, scale=10)
+                defaults['rad'] = st.uniform(loc=0.05, scale=20)
         # Normalization prior setup.
         else:
             up = 1 / 1e-20
-            defaults['norm'] = st.truncnorm(a=0, b=up, loc=0, scale=1e-20)
+            defaults['norm'] = st.truncnorm(a=0, b=up, loc=0, scale=1e-15)
         # Extinction prior setup.
         if self.star.Av == 0.:
             av_idx = 4 if self._norm else 5
