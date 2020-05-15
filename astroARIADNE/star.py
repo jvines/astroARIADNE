@@ -174,6 +174,7 @@ class Star:
                  temp=None, temp_e=None,
                  lum=None, lum_e=None,
                  logg=None, logg_e=None,
+                 dist=None, dist_e=None,
                  Av=None,
                  mag_dict=None, verbose=True, ignore=[]):
         """See class docstring."""
@@ -206,6 +207,7 @@ class Star:
                 print('Overriding coordinate search.')
 
         self.get_rad = True if rad is None else False
+        self.get_dist = True if dist is None else False
         self.get_plx = True if plx is None else False
         self.get_temp = True if temp is None else False
         self.get_lum = True if lum is None else False
@@ -233,6 +235,13 @@ class Star:
             else:
                 self.plx = plx
                 self.plx_e = plx_e
+
+            if self.get_dist:
+                self.dist = lib.dist
+                self.dist_e = lib.dist_e
+            else:
+                self.dist = dist
+                self.dist_e = dist_e
 
             if self.get_rad:
                 self.rad = lib.rad
