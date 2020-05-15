@@ -5,7 +5,7 @@ import sys
 import warnings
 
 import astropy.units as u
-import scipy as sp
+import numpy as np
 from astropy.coordinates import Angle, SkyCoord
 from astropy.utils.exceptions import AstropyWarning
 from astroquery.gaia import Gaia
@@ -31,7 +31,7 @@ class Librarian:
 
     # pyphot filter names
 
-    filter_names = sp.array([
+    filter_names = np.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
         'GROUND_COUSINS_I', 'GROUND_COUSINS_R',
         'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
@@ -143,9 +143,9 @@ class Librarian:
         self.tic = None
         self.kic = None
 
-        self.used_filters = sp.zeros(self.filter_names.shape[0])
-        self.mags = sp.zeros(self.filter_names.shape[0])
-        self.mag_errs = sp.zeros(self.filter_names.shape[0])
+        self.used_filters = np.zeros(self.filter_names.shape[0])
+        self.mags = np.zeros(self.filter_names.shape[0])
+        self.mag_errs = np.zeros(self.filter_names.shape[0])
 
         # self.create_logfile()
 
@@ -171,7 +171,7 @@ class Librarian:
     def gaia_params(self):
         """Retrieve parallax, radius, teff and lum from Gaia."""
         # If gaia DR2 id is provided, query by id
-        fields = sp.array([
+        fields = np.array([
             'parallax', 'parallax_error', 'teff_val',
             'teff_percentile_lower', 'teff_percentile_upper',
             'radius_val', 'radius_percentile_lower',
@@ -190,7 +190,25 @@ class Librarian:
         self.temp, self.temp_e = self._get_teff(res)
         self.rad, self.rad_e = self._get_radius(res)
         self.lum, self.lum_e = self._get_lum(res)
+        self.dist, self.dist_e = self._get_distance()
         pass
+
+    def _get_distance(self):
+        """Retrieve Bailer-Jones DR2 distance."""
+        cat = Vizier.query_region(
+            SkyCoord(
+                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
+            ), radius=self.radius, catalog='I/347/gaia2dis'
+        )['I/347/gaia2dis']
+        cat.sort('_r')
+        idx = np.where(cat['Source'] == self.g_id)[0]
+        if len(idx) == 0:
+            # Raise exception, for now do nothing
+            return -1, -1
+        dist = cat[idx]['rest']
+        lo = dist - cat[idx]['b_rest']
+        hi = cat[idx]['B_rest'] - dist
+        return dist, max(lo, hi)
 
     def _get_parallax(self, res):
         plx = res['parallax'][0]
@@ -199,11 +217,11 @@ class Librarian:
             return -1, -1
         plx_e = res['parallax_error'][0]
         # Parallax correction −52.8 ± 2.4 µas from Zinn+19
-        return plx + 0.0528, sp.sqrt(plx_e ** 2 + 0.0024**2)
+        return plx + 0.0528, np.sqrt(plx_e ** 2 + 0.0024**2)
 
     def _get_radius(self, res):
         rad = res['radius_val'][0]
-        if sp.ma.is_masked(rad):
+        if np.ma.is_masked(rad):
             CatalogWarning('radius', 1).warn()
             return 0, 0
         lo = res['radius_percentile_lower'][0]
@@ -213,7 +231,7 @@ class Librarian:
 
     def _get_teff(self, res):
         teff = res['teff_val'][0]
-        if sp.ma.is_masked(teff):
+        if np.ma.is_masked(teff):
             CatalogWarning('teff', 1).warn()
             return 0, 0
         lo = res['teff_percentile_lower'][0]
@@ -223,7 +241,7 @@ class Librarian:
 
     def _get_lum(self, res):
         lum = res['lum_val'][0]
-        if sp.ma.is_masked(lum):
+        if np.ma.is_masked(lum):
             CatalogWarning('lum', 1).warn()
             return 0, 0
         lo = res['lum_percentile_lower'][0]
@@ -385,9 +403,9 @@ class Librarian:
                 return
             self.tic = int(cat['ID'][0])
             kic = cat['KIC'][0]
-            self.kic = int(kic) if not sp.ma.is_masked(kic) else None
+            self.kic = int(kic) if not np.ma.is_masked(kic) else None
             m, e, f = self.catalogs['TESS'][1][0]
-            filt_idx = sp.where(f == self.filter_names)[0]
+            filt_idx = np.where(f == self.filter_names)[0]
             if self.used_filters[filt_idx] == 1:
                 CatalogWarning(f, 6).warn()
                 return
@@ -402,7 +420,7 @@ class Librarian:
 
     def _retrieve_from_cat(self, cat, name):
         for m, e, f in self.catalogs[name][1]:
-            filt_idx = sp.where(f == self.filter_names)[0]
+            filt_idx = np.where(f == self.filter_names)[0]
 
             if self.used_filters[filt_idx] == 1:
                 CatalogWarning(f, 6).warn()
@@ -428,9 +446,9 @@ class Librarian:
         b = by + y
         v = m1 + by + b
         u = c1 + m1 + by + v
-        b_e = sp.sqrt(by_e**2 + y_e**2)
-        v_e = sp.sqrt(m1_e**2 + by_e**2 + b_e**2)
-        u_e = sp.sqrt(c1_e**2 + m1_e**2 + by_e**2 + v_e**2)
+        b_e = np.sqrt(by_e**2 + y_e**2)
+        v_e = np.sqrt(m1_e**2 + by_e**2 + b_e**2)
+        u_e = np.sqrt(c1_e**2 + m1_e**2 + by_e**2 + v_e**2)
         mags = [u, v, b, y]
         err = [u_e, v_e, b_e, y_e]
         filts = ['STROMGREN_u', 'STROMGREN_v', 'STROMGREN_b', 'STROMGREN_y']
@@ -451,7 +469,7 @@ class Librarian:
             if f == 'GALEX_NUV' and Nexf > 0:
                 CatalogWarning(f, 8).warn()
                 continue
-            filt_idx = sp.where(f == self.filter_names)[0]
+            filt_idx = np.where(f == self.filter_names)[0]
 
             if self.used_filters[filt_idx] == 1:
                 CatalogWarning(f, 6).warn()
@@ -466,7 +484,7 @@ class Librarian:
     def _retrieve_from_2mass(self, cat, name):
         qflg = cat['Qflg']
         for m, e, f in self.catalogs[name][1]:
-            filt_idx = sp.where(f == self.filter_names)[0]
+            filt_idx = np.where(f == self.filter_names)[0]
 
             if f == '2MASS_J':
                 if qflg[0][0] not in 'ABCD':
@@ -494,7 +512,7 @@ class Librarian:
     def _retrieve_from_wise(self, cat, name):
         qph = cat['qph']
         for m, e, f in self.catalogs[name][1]:
-            filt_idx = sp.where(f == self.filter_names)[0]
+            filt_idx = np.where(f == self.filter_names)[0]
 
             if f == 'WISE_RSR_W1':
                 if qph[0][0] not in 'ABC':
@@ -516,7 +534,7 @@ class Librarian:
             self._add_mags(mag, err, f)
 
     def _add_mags(self, mag, er, filt):
-        filt_idx = sp.where(filt == self.filter_names)[0]
+        filt_idx = np.where(filt == self.filter_names)[0]
         self.used_filters[filt_idx] = 1
         self.mags[filt_idx] = mag
         self.mag_errs[filt_idx] = er
@@ -597,10 +615,10 @@ class Librarian:
         self._retrieve_from_cat(cat[mask], 'Gaia')
 
     def _qc_mags(self, mag, err, m):
-        if sp.ma.is_masked(mag):
+        if np.ma.is_masked(mag):
             CatalogWarning(m, 2).warn()
             return False
-        if sp.ma.is_masked(err):
+        if np.ma.is_masked(err):
             CatalogWarning(m, 3).warn()
             return False
         if err == 0:
