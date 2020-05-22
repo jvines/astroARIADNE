@@ -51,10 +51,10 @@ class Librarian:
     __apass_errs = ['e_Vmag', 'e_Bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
     __apass_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
                        'SDSS_g', 'SDSS_r', 'SDSS_i']
-    __ascc_mags = ['Vmag', 'Bmag', 'Jmag', 'Hmag', 'Kmag']
-    __ascc_errs = ['e_Vmag', 'e_Bmag', 'e_Jmag', 'e_Hmag', 'e_Kmag']
-    __ascc_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
-                      '2MASS_J', '2MASS_H', '2MASS_Ks']
+    __ascc_mags = ['Vmag', 'Bmag']  # , 'Jmag', 'Hmag', 'Kmag']
+    __ascc_errs = ['e_Vmag', 'e_Bmag']  # , 'e_Jmag', 'e_Hmag', 'e_Kmag']
+    __ascc_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B']
+    # '2MASS_J', '2MASS_H', '2MASS_Ks']
     __wise_mags = ['W1mag', 'W2mag']
     __wise_errs = ['e_W1mag', 'e_W2mag']
     __wise_filters = ['WISE_RSR_W1', 'WISE_RSR_W2']
@@ -483,19 +483,20 @@ class Librarian:
 
     def _retrieve_from_2mass(self, cat, name):
         qflg = cat['Qflg']
+        cflg = cat['Cflg']
         for m, e, f in self.catalogs[name][1]:
             filt_idx = np.where(f == self.filter_names)[0]
 
             if f == '2MASS_J':
-                if qflg[0][0] not in 'ABCD':
+                if qflg[0][0] not in 'ABCD' or clfg[0][0] != '0':
                     CatalogWarning(f, 8).warn()
                     continue
             if f == '2MASS_H':
-                if qflg[0][1] not in 'ABCD':
+                if qflg[0][1] not in 'ABCD' or clfg[0][1] != '0':
                     CatalogWarning(f, 8).warn()
                     continue
             if f == '2MASS_Ks':
-                if qflg[0][2] not in 'ABCD':
+                if qflg[0][2] not in 'ABCD' or clfg[0][2] != '0':
                     CatalogWarning(f, 8).warn()
                     continue
 
