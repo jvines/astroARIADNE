@@ -155,7 +155,8 @@ class CatalogWarning(Error):
             self.message = 'Catalog ' + par + ' manually skipped!'
         if type == 8:
             self.message = 'Catalog ' + par + ' entry is either an extended'
-            self.message += ' source or is of bad quality. Skipping.'
+            self.message += ' source, is of bad quality or is contaminated.'
+            self.message += ' Skipping.'
 
     def warn(self):
         """Print error message."""
