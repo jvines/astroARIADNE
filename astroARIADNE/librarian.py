@@ -488,15 +488,15 @@ class Librarian:
             filt_idx = np.where(f == self.filter_names)[0]
 
             if f == '2MASS_J':
-                if qflg[0][0] not in 'ABCD' or clfg[0][0] != '0':
+                if qflg[0][0] not in 'ABCD' or cflg[0][0] != '0':
                     CatalogWarning(f, 8).warn()
                     continue
             if f == '2MASS_H':
-                if qflg[0][1] not in 'ABCD' or clfg[0][1] != '0':
+                if qflg[0][1] not in 'ABCD' or cflg[0][1] != '0':
                     CatalogWarning(f, 8).warn()
                     continue
             if f == '2MASS_Ks':
-                if qflg[0][2] not in 'ABCD' or clfg[0][2] != '0':
+                if qflg[0][2] not in 'ABCD' or cflg[0][2] != '0':
                     CatalogWarning(f, 8).warn()
                     continue
 
