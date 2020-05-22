@@ -456,17 +456,17 @@ class Fitter:
                 defaults['dist'] = st.norm(
                     loc=self.star.dist, scale=self.star.dist_e)
             else:
-                PriorError('distance', 4).warn()
+                # PriorError('distance', 4).warn()
                 defaults['dist'] = st.uniform(loc=1, scale=1000)
             # Radius prior setup.
-            if self.star.rad > 0:
-                a = - self.star.rad / self.star.rad_e
-                b = sp.inf
-                defaults['rad'] = st.truncnorm(
-                    loc=self.star.rad, scale=self.star.rad_e, a=a, b=b)
-            else:
-                PriorError('rad', 3).warn()
-                defaults['rad'] = st.uniform(loc=0.05, scale=20)
+            # if self.star.rad > 0:
+            #     a = - self.star.rad / self.star.rad_e
+            #     b = sp.inf
+            #     defaults['rad'] = st.truncnorm(
+            #         loc=self.star.rad, scale=self.star.rad_e, a=a, b=b)
+            # else:
+                # PriorError('rad', 3).warn()
+            defaults['rad'] = st.uniform(loc=0.05, scale=20)
         # Normalization prior setup.
         else:
             up = 1 / 1e-20
