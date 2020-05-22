@@ -214,8 +214,8 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             print(colored('\t\t\trad : ', c), end='')
             print(colored('{:.4f}'.format(rad), c), end=' ')
             print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
-            print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c), end=' ')
-            print(colored('{:.4f} derived'.format(unlo), c))
+            print(colored('{:.4f}'.format(unlo), c), end=' ')
+            print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
             continue
         if p == 'z':
             p2 = '[Fe/H]'
