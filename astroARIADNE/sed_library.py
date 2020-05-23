@@ -174,7 +174,8 @@ def prior_transform_dynesty(u, flux, flux_er, filts, prior_dict, coordinator,
     return u2
 
 
-def prior_transform_multinest(u, star, prior_dict, coordinator, use_norm):
+def prior_transform_multinest(u, flux, flux_er, filts, prior_dict, coordinator,
+                              use_norm):
     """Transform the prior from the unit cube to the parameter space."""
     if use_norm:
         order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
@@ -183,10 +184,7 @@ def prior_transform_multinest(u, star, prior_dict, coordinator, use_norm):
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
 
-    mask = star.filter_mask
-    flxs = star.flux[mask]
-    errs = star.flux_er[mask]
-    for filt, flx, flx_e in zip(star.filter_names[mask], flxs, errs):
+    for filt, flx, flx_e in zip(filts, flux, flux_er):
         p_ = get_noise_name(filt) + '_noise'
         order = sp.append(order, p_)
 
@@ -202,8 +200,10 @@ def prior_transform_multinest(u, star, prior_dict, coordinator, use_norm):
             i += 1
             continue
         if par == 'teff':
-            u[i] = prior_dict['teff'].ppf(
-                u[i]) if star.get_temp else prior_dict['teff'](u[i])
+            try:
+                u[i] = prior_dict['teff'](u[i])
+            except TypeError:
+                u[i] = prior_dict['teff'].ppf(u[i])
             i += 1
             continue
         u[i] = prior_dict[par].ppf(u[i])

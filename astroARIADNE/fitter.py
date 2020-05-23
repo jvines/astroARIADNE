@@ -788,7 +788,14 @@ class Fitter:
 
     def fit_multinest(self):
         """Run MuiltiNest."""
-        path = self.out_folder + 'multinest/'
+        # Set up some globals
+        global mask, flux, flux_er, filts, wave
+        mask = star.filter_mask
+        flux = star.flux[mask]
+        flux_er = star.flux_er[mask]
+        filts = star.filter_names[mask]
+        wave = star.wave[mask]
+        path = self.out_folder + '/mnest/'
         create_dir(path)  # Create multinest path.
         pymultinest.run(
             multinest_log_like, pt_multinest, self.ndim,
@@ -1001,31 +1008,31 @@ class Fitter:
                     )
                 best_theta[i] = out['best_fit'][param]
 
-                # Add derived mass to best fit dictionary.
+            # Add derived mass to best fit dictionary.
 
-                samp = out['posterior_samples']['grav_mass']
-                logdat = out_filler(
-                    samp, logdat, 'grav_mass', 'grav_mass', out
-                )
+            samp = out['posterior_samples']['grav_mass']
+            logdat = out_filler(
+                samp, logdat, 'grav_mass', 'grav_mass', out
+            )
 
-                # Add derived luminosity to best fit dictionary.
+            # Add derived luminosity to best fit dictionary.
 
-                samp = out['posterior_samples']['lum']
-                logdat = out_filler(samp, logdat, 'lum', 'lum', out)
+            samp = out['posterior_samples']['lum']
+            logdat = out_filler(samp, logdat, 'lum', 'lum', out)
 
-                # Add derived angular diameter to best fit dictionary.
+            # Add derived angular diameter to best fit dictionary.
 
-                if not use_norm:
-                    samp = out['posterior_samples']['AD']
-                    logdat = out_filler(samp, logdat, 'AD', 'AD', out)
+            if not use_norm:
+                samp = out['posterior_samples']['AD']
+                logdat = out_filler(samp, logdat, 'AD', 'AD', out)
 
-                for i, param in enumerate(order):
-                    if not self.coordinator[i]:
-                        if 'noise' not in param:
-                            continue
-                        samp = out['posterior_samples'][param]
-                        logdat = out_filler(samp, logdat, param,
-                                            param, out, fmt='f')
+            for i, param in enumerate(order):
+                if not self.coordinator[i]:
+                    if 'noise' not in param:
+                        continue
+                    samp = out['posterior_samples'][param]
+                    logdat = out_filler(samp, logdat, param,
+                                        param, out, fmt='f')
 
             # Fill in best loglike, prior and posterior.
 
@@ -1235,7 +1242,7 @@ class Fitter:
 
     def multinest_results(self):
         """Extract posterior samples, global evidence and its error."""
-        path = self.out_folder + 'multinest/'
+        path = self.out_folder + '/mnest/'
         output = pymultinest.Analyzer(outputfiles_basename=path + 'chains',
                                       n_params=self.ndim)
         posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
@@ -1373,10 +1380,14 @@ def pt_dynesty(cube):
 def multinest_log_like(cube, ndim, nparams):
     """Multinest log likelihood wrapper."""
     theta = [cube[i] for i in range(ndim)]
-    theta = build_params(theta, star, coordinator, fixed, use_norm)
-    return log_likelihood(theta, star, interpolator, use_norm, av_law)
+    theta = build_params(
+        theta, flux, flux_er, filts, coordinator, fixed, use_norm
+    )
+    return log_likelihood(theta, flux, flux_er, wave,
+                          filts, interpolator, use_norm, av_law)
 
 
 def pt_multinest(cube, ndim, nparams):
     """Multinest prior transform."""
-    prior_transform_multinest(cube, star, prior_dict, coordinator, use_norm)
+    prior_transform_multinest(cube, flux, flux_er, filts, prior_dict,
+                              coordinator, use_norm)
