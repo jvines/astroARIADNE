@@ -131,6 +131,9 @@ class Librarian:
         ],
         'STROMGREN': [
             'J/A+A/580/A23/catalog', -1
+        ],
+        'MERMILLIOD': [
+            'II/168/ubvmeans', -1
         ]
     }
 
@@ -366,7 +369,7 @@ class Librarian:
             elif c == 'TYCHO2':
                 self._get_ascc_tycho2_stromgren(cats, False, 'TYCHO2')
                 self._get_ascc_tycho2_stromgren(cats, False, 'ASCC')
-                # self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN')
+                self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN')
                 continue
             elif c == 'SDSS':
                 self._get_sdss(current_cat)
@@ -387,6 +390,13 @@ class Librarian:
                     CatalogWarning(c, 5).warn()
                     continue
                 self._retrieve_from_galex(current_cat, c)
+                continue
+            elif c == 'MERMILLIOD':
+                current_cat = self._gaia_mermilliod_xmatch(cats)
+                if len(current_cat) == 0:
+                    CatalogWarning(c, 5).warn()
+                    continue
+                self._retrieve_from_mermilliod(current_cat)
                 continue
         pass
 
@@ -435,6 +445,25 @@ class Librarian:
         else:
             CatalogWarning(name, 5).warn()
 
+    def _retrieve_from_mermilliod(self, cat):
+        v = cat['Vmag']
+        v_e = cat['e_Vmag']
+        if not self._qc_mags(v, v_e, 'vmag'):
+            return
+        bv = cat['B-V']
+        bv_e = cat['e_B-V']
+        ub = cat['U-B']
+        ub_e = cat['e_U-B']
+        b = bv + v
+        u = ub + b
+        b_e = np.sqrt(v_e**2 + bv_e**2)
+        u_e = np.sqrt(b_e**2 + ub_e**2)
+        mags = [u, b, v]
+        err = [u_e, b_e, v_e]
+        filts = ['GROUND_JOHNSON_U', 'GROUND_JOHNSON_B', 'GROUND_JOHNSON_V']
+        for m, e, f in zip(mags, err, filts):
+            self._add_mags(m, e, f)
+
     def _retrieve_from_stromgren(self, cat):
         y = cat['Vmag']
         y_e = cat['e_Vmag']
@@ -456,6 +485,10 @@ class Librarian:
         err = [u_e, v_e, b_e, y_e]
         filts = ['STROMGREN_u', 'STROMGREN_v', 'STROMGREN_b', 'STROMGREN_y']
         for m, e, f in zip(mags, err, filts):
+            filt_idx = np.where(f == self.filter_names)[0]
+            if self.used_filters[filt_idx] == 1:
+                CatalogWarning(f, 6).warn()
+                continue
             self._add_mags(m, e, f)
         pass
 
@@ -638,6 +671,17 @@ class Librarian:
                          dec=self.dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=2 * u.arcmin)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=galex,
+                          colRA2='RAJ2000', colDec2='DEJ2000',
+                          area=region, max_distance=2 * u.arcmin)
+        xm.sort('angDist')
+        return xm
+
+    def _gaia_mermilliod_xmatch(self, cats):
+        mermilliod = cats['II/168/ubvmeans']
+        coord = SkyCoord(ra=self.ra * u.deg,
+                         dec=self.dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=2 * u.arcmin)
+        xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='RAJ2000', colDec2='DEJ2000',
                           area=region, max_distance=2 * u.arcmin)
         xm.sort('angDist')
