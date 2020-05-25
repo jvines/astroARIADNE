@@ -590,6 +590,7 @@ class Fitter:
                         with closing(open(priorsdir + '/teff_ppf.pkl', 'rb')) \
                                 as jar:
                             prior_dict[k] = pickle.load(jar)
+                        prior_out += k + '\tRAVE\n'
             else:
                 prior = self.prior_setup[k][0]
                 if prior == 'fixed':
