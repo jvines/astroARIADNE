@@ -419,18 +419,21 @@ class Librarian:
             CatalogWarning('TIC', 5).warn()
 
     def _retrieve_from_cat(self, cat, name):
-        for m, e, f in self.catalogs[name][1]:
-            filt_idx = np.where(f == self.filter_names)[0]
+        if len(cat):
+            for m, e, f in self.catalogs[name][1]:
+                filt_idx = np.where(f == self.filter_names)[0]
 
-            if self.used_filters[filt_idx] == 1:
-                CatalogWarning(f, 6).warn()
-                continue
-            mag = cat[m][0]
-            err = cat[e][0]
-            if not self._qc_mags(mag, err, m):
-                continue
+                if self.used_filters[filt_idx] == 1:
+                    CatalogWarning(f, 6).warn()
+                    continue
+                mag = cat[m][0]
+                err = cat[e][0]
+                if not self._qc_mags(mag, err, m):
+                    continue
 
-            self._add_mags(mag, err, f)
+                self._add_mags(mag, err, f)
+        else:
+            CatalogWarning(name, 5).warn()
 
     def _retrieve_from_stromgren(self, cat):
         y = cat['Vmag']
