@@ -415,8 +415,12 @@ class Fitter:
                         # Warning temp too low for model.
                         continue
                 if mod.lower() == 'coelho':
-                    with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pickle.load(intp))
+                    if self.star.temp > 3500:
+                        with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
+                            df = DFInterpolator(pickle.load(intp))
+                    else:
+                        # Warning
+                        continue
                 self._interpolators.append(df)
                 self._grids.append(mod)
             thr = self._threads if self._sequential else len(
