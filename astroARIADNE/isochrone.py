@@ -46,7 +46,7 @@ def estimate(bands, params, logg=True):
     if 'feh' in params.keys():
         fe, fe_e = params['feh']
         if fe > 0.5:
-            fe = 0.5
+            fe = 0.49
         model._priors['feh'] = GaussianPrior(fe, fe_e)
     if 'mass' in params.keys():
         m, m_e = params['mass']
