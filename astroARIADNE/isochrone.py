@@ -7,7 +7,7 @@ import pandas as pd
 import scipy as sp
 from isochrones import SingleStarModel, get_ichrone
 from isochrones.mist import MIST_Isochrone
-from isochrones.priors import GaussianPrior
+from isochrones.priors import FlatPrior, GaussianPrior
 from numba.core.errors import (NumbaDeprecationWarning,
                                NumbaPendingDeprecationWarning)
 
@@ -46,7 +46,8 @@ def estimate(bands, params, logg=True):
     if 'feh' in params.keys():
         fe, fe_e = params['feh']
         if fe > 0.5:
-            fe = 0.49
+            fe = 0.45
+            fe_e = 0.0001
         model._priors['feh'] = GaussianPrior(fe, fe_e)
     if 'mass' in params.keys():
         m, m_e = params['mass']

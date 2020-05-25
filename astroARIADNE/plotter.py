@@ -332,21 +332,28 @@ class SEDPlotter:
         ymin = (self.flux * self.wave).min()
         ymax = (self.flux * self.wave).max()
 
+        n_filt = self.star.used_filters.sum()
+        n_pars = int(len(self.theta) - n_filt)
+
         # Get models residuals
         mask = self.star.filter_mask
+        mags = self.star.mags[mask]
         flxs = self.star.flux[mask]
         errs = self.star.flux_er[mask]
         filters = self.star.filter_names[mask]
         wave = self.star.wave[mask]
+        theta = copy.deepcopy(self.theta)
+        for i, th in enumerate(self.theta[n_pars:]):
+            mag = mags[i]
+            filt = filters[i]
+            _, er = mag_to_flux(mag, th, filt)
+            theta[n_pars + i] = er
+
         residuals, errors = get_residuals(
-            self.theta, flxs, errs, wave, filters, self.interpolator,
-            self.norm, self.av_law)
+            theta, flxs, errs, wave, filters, self.interpolator, self.norm,
+            self.av_law)
 
-        n_filt = self.star.used_filters.sum()
-        n_pars = int(len(self.theta) - n_filt)
-
-        # resdiuals = residuals / errors
-        norm_res = residuals / sp.sqrt(errors**2 + self.theta[n_pars:]**2)
+        norm_res = residuals / errors
 
         # Create plot layout
 
@@ -360,7 +367,7 @@ class SEDPlotter:
 
         # Model plot
         ax.errorbar(self.wave, self.flux * self.wave,
-                    xerr=self.bandpass, yerr=self.flux_er,
+                    xerr=self.bandpass, yerr=errors,
                     fmt=',',
                     ecolor=self.error_color,
                     # color='turquoise',
@@ -470,9 +477,14 @@ class SEDPlotter:
     def SED(self, ax):
         """Plot the SED model."""
         Rv = 3.1  # For extinction.
-        rad = self.theta[4]
-        dist = self.theta[3] * u.pc.to(u.solRad)
-        Av = self.theta[5]
+        if not self.norm:
+            rad = self.theta[4]
+            dist = self.theta[3] * u.pc.to(u.solRad)
+            norm = (rad / dist) ** 2
+            Av = self.theta[5]
+        else:
+            norm = self.theta[3]
+            Av = self.theta[4]
 
         # SED plot.
         if self.grid == 'phoenix':
@@ -497,7 +509,7 @@ class SEDPlotter:
             )
             brf = brf[lower_lim * upper_lim]
             brf = apply(ext, brf)
-            flx = brf * (rad / dist) ** 2 * new_w
+            flx = brf * norm * new_w
             ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color='k', zorder=0)
 
         elif self.grid == 'btsettl':
@@ -518,7 +530,7 @@ class SEDPlotter:
                 fullout=True, maxsig=8
             )
             flx = apply(ext, brf)
-            flx *= wave * (rad / dist) ** 2
+            flx *= wave * norm
             ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
 
         elif self.grid == 'btnextgen':
@@ -539,7 +551,7 @@ class SEDPlotter:
                 fullout=True, maxsig=8
             )
             flx = apply(ext, brf)
-            flx *= wave * (rad / dist) ** 2
+            flx *= wave * norm
             ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
 
         elif self.grid == 'btcond':
@@ -560,7 +572,7 @@ class SEDPlotter:
                 fullout=True, maxsig=8
             )
             flx = apply(ext, brf)
-            flx *= wave * (rad / dist) ** 2
+            flx *= wave * norm
             ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
 
         elif self.grid == 'ck04':
@@ -573,7 +585,7 @@ class SEDPlotter:
             flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
-            flux *= wave * (rad / dist) ** 2
+            flux *= wave * norm
             ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
 
         elif self.grid == 'kurucz':
@@ -586,7 +598,20 @@ class SEDPlotter:
             flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
-            flux *= wave * (rad / dist) ** 2
+            flux *= wave * norm
+            ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
+
+        elif self.grid == 'coelho':
+            wave, flux = self.fetch_coelho()
+
+            lower_lim = 0.15 < wave
+            upper_lim = wave < 4.629296073126975
+
+            wave = wave[lower_lim * upper_lim]
+            flux = flux[lower_lim * upper_lim]
+            ext = self.av_law(wave * 1e4, Av, Rv)
+            flux = apply(ext, flux)
+            flux *= wave * norm
             ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
         pass
 
@@ -921,8 +946,8 @@ class SEDPlotter:
             axis='both', which='major',
             labelsize=self.tick_labelsize
         )
-        for l in cbar.ax.yaxis.get_ticklabels():
-            l.set_fontsize(self.tick_labelsize)
+        for ll in cbar.ax.yaxis.get_ticklabels():
+            ll.set_fontsize(self.tick_labelsize)
         for tick in ax.get_yticklabels():
             tick.set_fontname(self.fontname)
         for tick in ax.get_yticklabels():
@@ -1283,6 +1308,46 @@ class SEDPlotter:
         tab = Table(fits.open(selected_SED)[1].data)
         wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
         flux = sp.array(tab[lgg].tolist()) * conversion
+        return wave, flux
+
+    def fetch_coelho(self):
+        """Fetch correct Coelho 2014 SED file.
+
+        The directory containing the Coelho spectra must be called
+        Coelho14. Within Coelho14 there should be a group of
+        files called t[0X]XXXX_g[+-]Y.Y_[mp]ZZp0[14]_sed.fits
+        where X is the temperature, Y is the logg and Z the metallicity.
+        """
+        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        teff = self.theta[0]
+        logg = self.theta[1]
+        z = self.theta[2]
+        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
+        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
+        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
+        sel_teff = int(sp.unique(self.star.teff)[select_teff])
+        sel_logg = sp.unique(self.star.logg)[select_logg]
+        sel_z = sp.unique(self.star.z)[select_z]
+        sel_teff = str(sel_teff) if sel_teff >= 1e5 else '0{}'.format(sel_teff)
+        selected_SED = self.moddir + 'Coelho14/t' + sel_teff + '_g'
+        sel_logg = '+{:.1f}'.format(sel_logg) if sel_logg > 0 else '-0.5'
+        selected_SED += sel_logg
+        if sel_z < 0:
+            selected_SED += '_m{:02.0f}'.format(-sel_z * 10)
+        else:
+            selected_SED += '_p{:02.0f}'.format(sel_z * 10)
+
+        selected_SED = glob.glob(selected_SED + 'p0[04]_sed.fits')
+        selected_SED = selected_SED[0]
+        hdul = fits.open(selected_SED)
+        head = hdul[0].header
+        data = hdul[0].data
+        flux = data * conversion
+        CRVAL1 = head['CRVAL1']
+        CDEL1 = head['CDELT1']
+        wave = 10**sp.array([CRVAL1 + CDEL1 * i for i in range(data.shape[0])])
+        wave *= u.angstrom.to(u.um)
         return wave, flux
 
     def __create_titles(self, titles, theta, theta_up, theta_lo):
