@@ -306,6 +306,7 @@ class Librarian:
                 print('Star not found in catalog ' + cat, end='.\n')
         IDS['GALEX'] = ''
         IDS['TESS'] = ''
+        IDS['MERMILLIOD'] = ''
         self.ids = IDS
 
     def get_catalogs(self):
@@ -341,6 +342,7 @@ class Librarian:
 
         cats = self.get_catalogs()
         skips = ['ASCC', 'STROMGREN', 'GLIMPSE']
+
         for c in self.catalogs.keys():
             if c in skips:
                 continue
