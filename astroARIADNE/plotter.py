@@ -255,15 +255,15 @@ class SEDPlotter:
         used_f = self.star.filter_names[self.star.filter_mask]
         n_used = int(self.star.used_filters.sum())
         colors = sp.array([
-            'indianred', 'firebrick', 'maroon',
-            'salmon', 'red',
-            'darkorange', 'tan', 'orange',
-            'goldenrod', 'gold',
+            'tomato', 'indianred', 'tab:red',
+            'salmon', 'coral',
+            'mediumorchid', 'mediumslateblue', 'tab:blue',
+            'darkslateblue', 'darkblue',
             'olivedrab', 'yellowgreen', 'greenyellow', 'yellow',
             'orangered', 'chocolate', 'khaki',
             'limegreen', 'darkgreen', 'lime', 'seagreen', 'lawngreen', 'green',
             'aquamarine', 'turquoise', 'lightseagreen', 'teal', 'cadetblue',
-            'steelblue', 'dodgerblue',
+            'firebrick', 'darkred',
             'blueviolet', 'darkviolet',
             'midnightblue', 'blue',
             'deeppink', 'fuchsia', 'mediumslateblue'
