@@ -10,6 +10,7 @@ from random import choice
 import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+import pandas as pd
 import scipy as sp
 from astropy import units as u
 from astropy.io import fits
@@ -172,25 +173,25 @@ class SEDPlotter:
 
             if self.grid.lower() == 'phoenix':
                 with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pickle.load(intp))
+                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
             if self.grid.lower() == 'btsettl':
                 with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pickle.load(intp))
+                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
             if self.grid.lower() == 'btnextgen':
                 with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pickle.load(intp))
+                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
             if self.grid.lower() == 'btcond':
                 with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pickle.load(intp))
+                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
             if self.grid.lower() == 'ck04':
                 with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pickle.load(intp))
+                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
             if self.grid.lower() == 'kurucz':
                 with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pickle.load(intp))
+                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
             if self.grid.lower() == 'coelho':
                 with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pickle.load(intp))
+                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
 
             # Get best fit parameters.
             mask = self.star.filter_mask
