@@ -448,6 +448,8 @@ class Librarian:
             CatalogWarning(name, 5).warn()
 
     def _retrieve_from_mermilliod(self, cat):
+        mask = cat['source_id'] == self.g_id
+        cat = cat[mask][0]
         v = cat['Vmag']
         v_e = cat['e_Vmag']
         if not self._qc_mags(v, v_e, 'vmag'):
@@ -684,7 +686,7 @@ class Librarian:
                          dec=self.dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=2 * u.arcmin)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
-                          colRA2='RAJ2000', colDec2='DEJ2000',
+                          colRA2='_RA', colDec2='_DE',
                           area=region, max_distance=2 * u.arcmin)
         xm.sort('angDist')
         return xm
