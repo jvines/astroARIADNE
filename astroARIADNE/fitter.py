@@ -9,6 +9,7 @@ from contextlib import closing
 from multiprocessing import Pool, Process, cpu_count
 
 import astropy.units as u
+import pandas as pd
 import scipy as sp
 import scipy.stats as st
 from astropy.constants import sigma_sb
@@ -178,25 +179,25 @@ class Fitter:
         # directory = './'
         if grid.lower() == 'phoenix':
             with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pickle.load(intp))
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
         if grid.lower() == 'btsettl':
             with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pickle.load(intp))
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
         if grid.lower() == 'btnextgen':
             with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pickle.load(intp))
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
         if grid.lower() == 'btcond':
             with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pickle.load(intp))
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
         if grid.lower() == 'ck04':
             with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pickle.load(intp))
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
         if grid.lower() == 'kurucz':
             with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pickle.load(intp))
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
         if grid.lower() == 'coelho':
             with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pickle.load(intp))
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
 
     @property
     def bma(self):
@@ -390,34 +391,34 @@ class Fitter:
                 directory = './'
                 if mod.lower() == 'phoenix':
                     with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pickle.load(intp))
+                        df = DFInterpolator(pd.read_pickle(intp))
                 if mod.lower() == 'btsettl':
                     with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pickle.load(intp))
+                        df = DFInterpolator(pd.read_pickle(intp))
                 if mod.lower() == 'btnextgen':
                     with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pickle.load(intp))
+                        df = DFInterpolator(pd.read_pickle(intp))
                 if mod.lower() == 'btcond':
                     with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pickle.load(intp))
+                        df = DFInterpolator(pd.read_pickle(intp))
                 if mod.lower() == 'ck04':
                     if self.star.temp > 4000:
                         with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                            df = DFInterpolator(pickle.load(intp))
+                            df = DFInterpolator(pd.read_pickle(intp))
                     else:
                         # Warning temp too low for model
                         continue
                 if mod.lower() == 'kurucz':
                     if self.star.temp > 4000:
                         with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                            df = DFInterpolator(pickle.load(intp))
+                            df = DFInterpolator(pd.read_pickle(intp))
                     else:
                         # Warning temp too low for model.
                         continue
                 if mod.lower() == 'coelho':
                     if self.star.temp > 3500:
                         with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                            df = DFInterpolator(pickle.load(intp))
+                            df = DFInterpolator(pd.read_pickle(intp))
                     else:
                         # Warning
                         continue
