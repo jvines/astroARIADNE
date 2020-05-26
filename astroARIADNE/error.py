@@ -145,7 +145,7 @@ class CatalogWarning(Error):
         if type == 3:
             self.message = par + ' magnitude error not found, assigning error.'
         if type == 4:
-            self.message = par + ' magnitude error is 0. Skipping.'
+            self.message = par + ' magnitude error is 0, assigning error.'
         if type == 5:
             self.message = 'Star is not available in catalog ' + par
             self.message += '. Skipping'

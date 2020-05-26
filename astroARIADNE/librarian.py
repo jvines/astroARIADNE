@@ -454,6 +454,7 @@ class Librarian:
             CatalogWarning(name, 5).warn()
 
     def _retrieve_from_mermilliod(self, cat):
+        print('Checking catalog Mermilliod')
         mask = cat['source_id'] == self.g_id
         cat = cat[mask][0]
         v = cat['Vmag']
@@ -479,6 +480,8 @@ class Librarian:
         y_e = cat['e_Vmag']
         if not self._qc_mags(y, y_e, 'ymag'):
             return
+        if np.isnan(y_e):
+            y_e = 0
         by = cat['b-y']
         by_e = cat['e_b-y']
         m1 = cat['m1']
