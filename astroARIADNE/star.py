@@ -309,6 +309,13 @@ class Star:
             self.flux_er[filt_idx] = flux_er[k]
             self.bandpass[filt_idx] = bandpass[k]
 
+        rel_er = self.flux_er[self.filter_mask] / self.flux[self.filter_mask]
+        mx_rel_er = rel_er.max() + 0.1
+        upper = self.flux_er[self.filter_mask] == 0
+        flx = self.flux[self.filter_mask][upper]
+        for i, f in zip(self.filter_mask[upper], flx):
+            self.flux_er[i] = mx_rel_er * f
+
         self.calculate_distance()
         c = random.choice(self.colors)
         display_star_fin(self, c)

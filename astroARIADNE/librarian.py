@@ -129,8 +129,11 @@ class Librarian:
         'TESS': [
             'TIC', list(zip(__tess_mags, __tess_errs, __tess_filters))
         ],
-        'STROMGREN': [
+        'STROMGREN_PAUNZ': [
             'J/A+A/580/A23/catalog', -1
+        ],
+        'STROMGREN_HAUCK': [
+            'II/215', -1
         ],
         'MERMILLIOD': [
             'II/168/ubvmeans', -1
@@ -167,6 +170,8 @@ class Librarian:
         if mags:
             self.gaia_query()
             self.get_magnitudes()
+            idx = self.used_filters >= 1
+            self.used_filters[idx] = 1
 
         # self.close_logfile()
         pass
@@ -341,7 +346,7 @@ class Librarian:
         print(self.starname)
 
         cats = self.get_catalogs()
-        skips = ['ASCC', 'STROMGREN', 'GLIMPSE']
+        skips = ['ASCC', 'STROMGREN_PAUNZ', 'STROMGREN_HAUCK', 'GLIMPSE']
 
         for c in self.catalogs.keys():
             if c in skips:
@@ -371,7 +376,8 @@ class Librarian:
             elif c == 'TYCHO2':
                 self._get_ascc_tycho2_stromgren(cats, False, 'TYCHO2')
                 self._get_ascc_tycho2_stromgren(cats, False, 'ASCC')
-                self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN')
+                self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN_PAUNZ')
+                self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN_HAUCK')
                 continue
             elif c == 'SDSS':
                 self._get_sdss(current_cat)
@@ -480,11 +486,11 @@ class Librarian:
         c1 = cat['c1']
         c1_e = cat['e_c1']
         b = by + y
-        v = m1 + by + b
-        u = c1 + m1 + by + v
+        v = m1 + 2 * by + y
+        u = c1 + 2 * m1 + 3 * by + y
         b_e = np.sqrt(by_e**2 + y_e**2)
-        v_e = np.sqrt(m1_e**2 + by_e**2 + b_e**2)
-        u_e = np.sqrt(c1_e**2 + m1_e**2 + by_e**2 + v_e**2)
+        v_e = np.sqrt(m1_e**2 + 4 * by_e**2 + y_e**2)
+        u_e = np.sqrt(c1_e**2 + 4 * m1_e**2 + 9 * by_e**2 + y_e**2)
         mags = [u, v, b, y]
         err = [u_e, v_e, b_e, y_e]
         filts = ['STROMGREN_u', 'STROMGREN_v', 'STROMGREN_b', 'STROMGREN_y']
@@ -576,7 +582,10 @@ class Librarian:
 
     def _add_mags(self, mag, er, filt):
         filt_idx = np.where(filt == self.filter_names)[0]
-        self.used_filters[filt_idx] = 1
+        if er == 0 or np.ma.is_masked(er):
+            self.used_filters[filt_idx] = 2
+        else:
+            self.used_filters[filt_idx] = 1
         self.mags[filt_idx] = mag
         self.mag_errs[filt_idx] = er
 
@@ -595,7 +604,7 @@ class Librarian:
             mask *= cat['TYC3'] == int(tyc3)
         else:
             mask = [0]
-        if name != 'STROMGREN':
+        if 'STROMGREN' not in name:
             self._retrieve_from_cat(cat[mask], name)
         else:
             self._retrieve_from_stromgren(cat[mask])
@@ -661,10 +670,10 @@ class Librarian:
             return False
         if np.ma.is_masked(err):
             CatalogWarning(m, 3).warn()
-            return False
+            return True
         if err == 0:
             CatalogWarning(m, 4).warn()
-            return False
+            return True
         if err > 1:
             return False
         return True

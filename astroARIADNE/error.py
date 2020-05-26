@@ -143,7 +143,7 @@ class CatalogWarning(Error):
         if type == 2:
             self.message = par + ' magnitude not found! Skipping.'
         if type == 3:
-            self.message = par + ' magnitude error not found! Skipping.'
+            self.message = par + ' magnitude error not found, assigning error.'
         if type == 4:
             self.message = par + ' magnitude error is 0. Skipping.'
         if type == 5:

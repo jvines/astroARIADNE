@@ -491,7 +491,7 @@ class Fitter:
         for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
             p_ = get_noise_name(filt) + '_noise'
             mu = 0
-            sigma = flx_e * 3
+            sigma = flx_e * 5
             b = (1 - flx) / flx_e
             defaults[p_] = st.truncnorm(loc=mu, scale=sigma, a=0, b=b)
             # defaults[p_] = st.uniform(loc=0, scale=5)
@@ -644,6 +644,9 @@ class Fitter:
 
         Only works with dynesty.
         """
+        if len(self.star.filter_names[self.star.filter_mask]) <= 5:
+            print(colored('\t\t\tNOT ENOUGH POINTS TO MAKE THE FIT! !', 'red'))
+            return
         thr = self._threads if self._sequential else len(self._interpolators)
         # display('Bayesian Model Averaging', self.star, self._nlive,
         #         self._dlogz, self.ndim, self._bound, self._sample,
