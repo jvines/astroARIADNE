@@ -312,6 +312,8 @@ class Librarian:
         IDS['GALEX'] = ''
         IDS['TESS'] = ''
         IDS['MERMILLIOD'] = ''
+        IDS['STROMGREN_PAUNZ'] = ''
+        IDS['STROMGREN_HAUCK'] = ''
         self.ids = IDS
 
     def get_catalogs(self):
@@ -346,7 +348,7 @@ class Librarian:
         print(self.starname)
 
         cats = self.get_catalogs()
-        skips = ['ASCC', 'STROMGREN_PAUNZ', 'STROMGREN_HAUCK', 'GLIMPSE']
+        skips = ['ASCC', 'GLIMPSE']
 
         for c in self.catalogs.keys():
             if c in skips:
@@ -376,8 +378,6 @@ class Librarian:
             elif c == 'TYCHO2':
                 self._get_ascc_tycho2_stromgren(cats, False, 'TYCHO2')
                 self._get_ascc_tycho2_stromgren(cats, False, 'ASCC')
-                self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN_PAUNZ')
-                self._get_ascc_tycho2_stromgren(cats, True, 'STROMGREN_HAUCK')
                 continue
             elif c == 'SDSS':
                 self._get_sdss(current_cat)
@@ -405,6 +405,20 @@ class Librarian:
                     CatalogWarning(c, 5).warn()
                     continue
                 self._retrieve_from_mermilliod(current_cat)
+                continue
+            elif c == 'STROMGREN_PAUNZ':
+                current_cat = self._gaia_paunzen_xmatch(cats)
+                if len(current_cat) == 0:
+                    CatalogWarning(c, 5).warn()
+                    continue
+                self._retrieve_from_stromgren(current_cat, 'STROMGREN_PAUNZEN')
+                continue
+            elif c == 'STROMGREN_HAUCK':
+                current_cat = self._gaia_hauck_xmatch(cats)
+                if len(current_cat) == 0:
+                    CatalogWarning(c, 5).warn()
+                    continue
+                self._retrieve_from_stromgren(current_cat, 'STROMGREN_HAUCK')
                 continue
         pass
 
@@ -475,7 +489,10 @@ class Librarian:
         for m, e, f in zip(mags, err, filts):
             self._add_mags(m, e, f)
 
-    def _retrieve_from_stromgren(self, cat):
+    def _retrieve_from_stromgren(self, cat, n):
+        print('Checking catalog ' + n)
+        mask = cat['source_id'] == self.g_id
+        cat = cat[mask][0]
         y = cat['Vmag']
         y_e = cat['e_Vmag']
         if not self._qc_mags(y, y_e, 'ymag'):
@@ -699,6 +716,28 @@ class Librarian:
         region = CircleSkyRegion(coord, radius=2 * u.arcmin)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='_RA', colDec2='_DE',
+                          area=region, max_distance=2 * u.arcmin)
+        xm.sort('angDist')
+        return xm
+
+    def _gaia_paunzen_xmatch(self, cats):
+        mermilliod = cats['J/A+A/580/A23/catalog']
+        coord = SkyCoord(ra=self.ra * u.deg,
+                         dec=self.dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=2 * u.arcmin)
+        xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
+                          colRA2='RAJ2000', colDec2='DEJ2000',
+                          area=region, max_distance=2 * u.arcmin)
+        xm.sort('angDist')
+        return xm
+
+    def _gaia_hauck_xmatch(self, cats):
+        mermilliod = cats['J/A+A/580/A23/catalog']
+        coord = SkyCoord(ra=self.ra * u.deg,
+                         dec=self.dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=2 * u.arcmin)
+        xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
+                          colRA2='_RA.icrs', colDec2='_DE.icrs',
                           area=region, max_distance=2 * u.arcmin)
         xm.sort('angDist')
         return xm
