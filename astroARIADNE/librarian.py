@@ -76,7 +76,7 @@ class Librarian:
     __galex_mags = ['FUV', 'NUV']
     __galex_errs = ['e_FUV', 'e_NUV']
     __galex_filters = ['GALEX_FUV', 'GALEX_NUV']
-    __irac_mags = ['3.6mag', '4.5mag']
+    __irac_mags = ['_3.6mag', '_4.5mag']
     __irac_errs = ['e_3.6mag', 'e_4.5mag']
     __irac_filters = ['SPITZER_IRAC_36', 'SPITZER_IRAC_45']
     __tycho_mags = ['BTmag', 'VTmag']
