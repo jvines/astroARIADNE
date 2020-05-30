@@ -475,18 +475,26 @@ class Librarian:
         v_e = cat['e_Vmag']
         if not self._qc_mags(v, v_e, 'vmag'):
             return
-        bv = cat['B-V']
-        bv_e = cat['e_B-V']
-        ub = cat['U-B']
-        ub_e = cat['e_U-B']
-        b = bv + v
-        u = ub + b
-        b_e = np.sqrt(v_e**2 + bv_e**2)
-        u_e = np.sqrt(b_e**2 + ub_e**2)
-        mags = [u, b, v]
-        err = [u_e, b_e, v_e]
-        filts = ['GROUND_JOHNSON_U', 'GROUND_JOHNSON_B', 'GROUND_JOHNSON_V']
-        for m, e, f in zip(mags, err, filts):
+        filts = ['GROUND_JOHNSON_V']
+        mags = [v]
+        err = [v_e]
+        if self._qc_mags(bv, bv_e, 'B-V'):
+            bv = cat['B-V']
+            bv_e = cat['e_B-V']
+            b = bv + v
+            b_e = np.sqrt(v_e**2 + bv_e**2)
+            filts.append('GROUND_JOHNSON_B')
+            mags.append(b)
+            err.append(b_e)
+        if self._qc_mags(ub, ub_e, 'U-B'):
+            ub = cat['U-B']
+            ub_e = cat['e_U-B']
+            u = ub + b
+            u_e = np.sqrt(b_e**2 + ub_e**2)
+            filts.append('GROUND_JOHNSON_U')
+            mags.append(u)
+            err.append(u_e)
+        for m, e, f, o in zip(mags, err, filts):
             self._add_mags(m, e, f)
 
     def _retrieve_from_stromgren(self, cat, n):
