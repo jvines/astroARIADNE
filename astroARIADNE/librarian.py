@@ -473,28 +473,33 @@ class Librarian:
         cat = cat[mask][0]
         v = cat['Vmag']
         v_e = cat['e_Vmag']
+        bv = cat['B-V']
+        bv_e = cat['e_B-V']
+        ub = cat['U-B']
+        ub_e = cat['e_U-B']
         if not self._qc_mags(v, v_e, 'vmag'):
             return
         filts = ['GROUND_JOHNSON_V']
         mags = [v]
         err = [v_e]
         if self._qc_mags(bv, bv_e, 'B-V'):
-            bv = cat['B-V']
-            bv_e = cat['e_B-V']
             b = bv + v
             b_e = np.sqrt(v_e**2 + bv_e**2)
             filts.append('GROUND_JOHNSON_B')
             mags.append(b)
             err.append(b_e)
         if self._qc_mags(ub, ub_e, 'U-B'):
-            ub = cat['U-B']
-            ub_e = cat['e_U-B']
             u = ub + b
             u_e = np.sqrt(b_e**2 + ub_e**2)
             filts.append('GROUND_JOHNSON_U')
             mags.append(u)
             err.append(u_e)
-        for m, e, f, o in zip(mags, err, filts):
+        for m, e, f in zip(mags, err, filts):
+            filt_idx = np.where(f == self.filter_names)[0]
+
+            if self.used_filters[filt_idx] == 1:
+                CatalogWarning(f, 6).warn()
+                continue
             self._add_mags(m, e, f)
 
     def _retrieve_from_stromgren(self, cat, n):
