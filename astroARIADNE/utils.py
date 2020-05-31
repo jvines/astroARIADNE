@@ -385,7 +385,7 @@ def get_noise_name(filt):
 
 def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
     """Fill up the output file."""
-    if not fixed:
+    if fixed is False:
         best = get_max_from_kde(samp)
         out['best_fit'][param] = best
         logdat += '{}\t{:.4{f}}\t'.format(name, best, f=fmt)
