@@ -156,7 +156,7 @@ class Librarian:
         # self.create_logfile()
 
         if radius is None:
-            self.radius = 2 * u.arcmin
+            self.radius = 3 * u.arcmin
         else:
             self.radius = radius
         if g_id is None:
@@ -715,10 +715,10 @@ class Librarian:
         galex = cats['II/312/ais']
         coord = SkyCoord(ra=self.ra * u.deg,
                          dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=2 * u.arcmin)
+        region = CircleSkyRegion(coord, radius=self.radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=galex,
                           colRA2='RAJ2000', colDec2='DEJ2000',
-                          area=region, max_distance=2 * u.arcmin)
+                          area=region, max_distance=self.radius)
         xm.sort('angDist')
         return xm
 
@@ -726,10 +726,10 @@ class Librarian:
         mermilliod = cats['II/168/ubvmeans']
         coord = SkyCoord(ra=self.ra * u.deg,
                          dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=2 * u.arcmin)
+        region = CircleSkyRegion(coord, radius=self.radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='_RA', colDec2='_DE',
-                          area=region, max_distance=2 * u.arcmin)
+                          area=region, max_distance=self.radius)
         xm.sort('angDist')
         return xm
 
@@ -737,10 +737,10 @@ class Librarian:
         mermilliod = cats['J/A+A/580/A23/catalog']
         coord = SkyCoord(ra=self.ra * u.deg,
                          dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=2 * u.arcmin)
+        region = CircleSkyRegion(coord, radius=self.radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='RAJ2000', colDec2='DEJ2000',
-                          area=region, max_distance=2 * u.arcmin)
+                          area=region, max_distance=self.radius)
         xm.sort('angDist')
         return xm
 
@@ -748,10 +748,10 @@ class Librarian:
         mermilliod = cats['J/A+A/580/A23/catalog']
         coord = SkyCoord(ra=self.ra * u.deg,
                          dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=2 * u.arcmin)
+        region = CircleSkyRegion(coord, radius=self.radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='_RA.icrs', colDec2='_DE.icrs',
-                          area=region, max_distance=2 * u.arcmin)
+                          area=region, max_distance=self.radius)
         xm.sort('angDist')
         return xm
 
