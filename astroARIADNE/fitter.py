@@ -459,7 +459,7 @@ class Fitter:
         if not self._norm:
             if self.star.dist != -1:
                 defaults['dist'] = st.norm(
-                    loc=self.star.dist, scale=self.star.dist_e)
+                    loc=self.star.dist, scale=3 * self.star.dist_e)
             else:
                 # PriorError('distance', 4).warn()
                 defaults['dist'] = st.uniform(loc=1, scale=1000)
@@ -836,7 +836,7 @@ class Fitter:
                     self.sampler = dynesty.DynamicNestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         bound=self._bound, sample=self._sample,
-                        pool=executor,
+                        pool=executor, walks=25,
                         queue_size=self._threads - 1
                     )
                     self.sampler.run_nested(dlogz_init=self._dlogz,
@@ -844,7 +844,7 @@ class Fitter:
                                             wt_kwargs={'pfrac': 1})
             else:
                 self.sampler = dynesty.DynamicNestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim,
+                    dynesty_log_like, pt_dynesty, self.ndim, walks=25,
                     bound=self._bound, sample=self._sample
 
                 )
@@ -858,13 +858,13 @@ class Fitter:
                         dynesty_log_like, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
                         sample=self._sample,
-                        pool=executor,
-                        queue_size=self._threads - 1
+                        pool=executor, walks=25,
+                        queue_size=self._threads - 1,
                     )
                     self.sampler.run_nested(dlogz=self._dlogz)
             else:
                 self.sampler = dynesty.NestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim,
+                    dynesty_log_like, pt_dynesty, self.ndim, walks=25,
                     nlive=self._nlive, bound=self._bound,
                     sample=self._sample
                 )
