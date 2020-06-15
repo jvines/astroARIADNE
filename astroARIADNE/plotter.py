@@ -729,12 +729,14 @@ class SEDPlotter:
                         popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
                                                p0=[mu, sig, n.max()],
                                                maxfev=50000)
+                        fit = True
                     except RuntimeError:
-                        popt = (mu, sig, n.max())
-                    xx = sp.linspace(bins[0], bins[-1], 100000)
-                    # Plot best fit
-                    ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
-                            alpha=.7)
+                        fit = False
+                    if fit and param != 'norm':
+                        xx = sp.linspace(bins[0], bins[-1], 100000)
+                        # Plot best fit
+                        ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
+                                alpha=.7)
                 # The same but for the averaged samples
                 n, bins, patches = ax.hist(
                     self.out['posterior_samples'][param], alpha=.3,
@@ -742,10 +744,15 @@ class SEDPlotter:
                 )
                 bc = bins[:-1] + sp.diff(bins)
                 mu, sig = norm.fit(self.out['posterior_samples'][param])
-                popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-                                       p0=[mu, sig, n.max()])
-                xx = sp.linspace(bins[0], bins[-1], 100000)
-                ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
+                try:
+                    popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
+                                           p0=[mu, sig, n.max()])
+                    fit = True
+                except RuntimeError:
+                    fit = False
+                if fit and param != 'norm':
+                    xx = sp.linspace(bins[0], bins[-1], 100000)
+                    ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
                 ax.set_ylabel('PDF',
                               fontsize=self.fontsize,
                               fontname=self.fontname
