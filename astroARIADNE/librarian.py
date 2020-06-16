@@ -213,9 +213,9 @@ class Librarian:
         if len(idx) == 0:
             # Raise exception, for now do nothing
             return -1, -1
-        dist = cat[idx]['rest']
-        lo = dist - cat[idx]['b_rest']
-        hi = cat[idx]['B_rest'] - dist
+        dist = cat[idx]['rest'][0]
+        lo = dist - cat[idx]['b_rest'][0]
+        hi = cat[idx]['B_rest'][0] - dist
         return dist, max(lo, hi)
 
     def _get_parallax(self, res):
