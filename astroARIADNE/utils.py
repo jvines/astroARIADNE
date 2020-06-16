@@ -369,9 +369,9 @@ def get_noise_name(filt):
     if filt == 'TYCHO_V_MvB':
         return 'VT'
     if filt == 'SPITZER_IRAC_36':
-        return 'IRAC_36'
+        return 'IRAC 36'
     if filt == 'SPITZER_IRAC_45':
-        return 'IRAC_45'
+        return 'IRAC 45'
     if filt == 'NGTS_I':
         return 'NGTS'
     if filt == 'WISE_RSR_W1':
