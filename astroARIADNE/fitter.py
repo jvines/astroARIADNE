@@ -402,14 +402,14 @@ class Fitter:
                     with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pd.read_pickle(intp))
                 if mod.lower() == 'ck04':
-                    if self.star.temp > 4000:
+                    if self.star.temp > 4500:
                         with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
                             df = DFInterpolator(pd.read_pickle(intp))
                     else:
                         # Warning temp too low for model
                         continue
                 if mod.lower() == 'kurucz':
-                    if self.star.temp > 4000:
+                    if self.star.temp > 4500:
                         with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
                             df = DFInterpolator(pd.read_pickle(intp))
                     else:
