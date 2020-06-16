@@ -316,7 +316,7 @@ class Star:
         for i, f in zip(self.filter_mask[upper], flx):
             self.flux_er[i] = mx_rel_er * f
 
-        self.calculate_distance()
+        # self.calculate_distance()
         c = random.choice(self.colors)
         display_star_fin(self, c)
         c = random.choice(self.colors)
