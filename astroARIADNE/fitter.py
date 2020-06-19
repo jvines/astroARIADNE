@@ -901,7 +901,7 @@ class Fitter:
 
         """
         out = dict()
-        logdat = 'Parameter\tmedian\tupper\tlower\t3sig_CI\n'
+        logdat = '#Parameter\tmedian\tupper\tlower\t3sig_CI\n'
         log_out = self.out_folder + '/' + 'best_fit.dat'
         if self._engine == 'multinest':
             lnz, lnzer, posterior_samples = self.multinest_results()
@@ -1103,7 +1103,7 @@ class Fitter:
 
         """
         out = dict()
-        logdat = 'Parameter\tmedian\tupper\tlower\t3sig_CI\n'
+        logdat = '#Parameter\tmedian\tupper\tlower\t3sig_CI\n'
         log_out = self.out_folder + '/' + 'best_fit.dat'
 
         n = int(self.star.used_filters.sum())
