@@ -1103,7 +1103,7 @@ class Fitter:
 
         """
         out = dict()
-        logdat = '#Parameter\tmedian\tupper\tlower\t3sig_CI\n'
+        logdat = '#Parameter\tmedian\tupper\tlower\t3sig_low\t3sig_up\n'
         log_out = self.out_folder + '/best_fit.dat'
         prob_out = self.out_folder + '/model_probabilities.dat'
 
