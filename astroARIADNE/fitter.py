@@ -1104,7 +1104,8 @@ class Fitter:
         """
         out = dict()
         logdat = '#Parameter\tmedian\tupper\tlower\t3sig_CI\n'
-        log_out = self.out_folder + '/' + 'best_fit.dat'
+        log_out = self.out_folder + '/best_fit.dat'
+        prob_out = self.out_folder + '/model_probabilities.dat'
 
         n = int(self.star.used_filters.sum())
         mask = self.star.filter_mask
@@ -1214,9 +1215,10 @@ class Fitter:
         out['posterior_samples']['iso_mass'] = mass_samp
         logdat = out_filler(age_samp, logdat, 'age', 'age', out)
         logdat = out_filler(mass_samp, logdat, 'iso_mass', 'iso_mass', out)
+        probdat = ''
 
         for k in avgd['weights'].keys():
-            logdat += '{}_probability\t{:.4f}\n'.format(k, avgd['weights'][k])
+            probdat += '{}_probability\t{:.4f}\n'.format(k, avgd['weights'][k])
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -1246,6 +1248,8 @@ class Fitter:
         out_file = self.out_folder + '/BMA_out.pkl'
         with closing(open(log_out, 'w')) as logfile:
             logfile.write(logdat)
+        with closing(open(prob_out, 'w')) as logfile:
+            logfile.write(probdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
 

@@ -394,7 +394,7 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
         logdat += '{:.4{f}}\t{:.4{f}}\t'.format(up - best, best - lo, f=fmt)
         _, lo, up = credibility_interval(samp, 3)
         out['confidence_interval'][param] = (lo, up)
-        logdat += '[{:.4{f}}, {:.4{f}}]\n'.format(lo, up, f=fmt)
+        logdat += '{:.4{f}}\t{:.4{f}}\n'.format(lo, up, f=fmt)
     else:
         out['best_fit'][param] = fixed
         out['uncertainties'][param] = sp.nan
