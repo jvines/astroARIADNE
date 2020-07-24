@@ -491,7 +491,7 @@ class Fitter:
         for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
             p_ = get_noise_name(filt) + '_noise'
             mu = 0
-            sigma = flx_e * 5
+            sigma = flx_e * 3
             b = (1 - flx) / flx_e
             defaults[p_] = st.truncnorm(loc=mu, scale=sigma, a=0, b=b)
             # defaults[p_] = st.uniform(loc=0, scale=5)

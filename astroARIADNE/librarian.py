@@ -541,11 +541,13 @@ class Librarian:
         cat = cat[mask][0]
         Fexf = cat['Fexf']
         Nexf = cat['Nexf']
+        Fafl = cat['Fafl']
+        Nafl = cat['Nafl']
         for m, e, f in self.catalogs[name][1]:
-            if f == 'GALEX_FUV' and Fexf > 0:
+            if f == 'GALEX_FUV' and (Fexf > 0 or Fafl > 0):
                 CatalogWarning(f, 8).warn()
                 continue
-            if f == 'GALEX_NUV' and Nexf > 0:
+            if f == 'GALEX_NUV' and (Nexf > 0 or Nafl > 0):
                 CatalogWarning(f, 8).warn()
                 continue
             filt_idx = np.where(f == self.filter_names)[0]
