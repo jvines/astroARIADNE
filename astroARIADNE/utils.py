@@ -10,15 +10,15 @@ import random
 import time
 from contextlib import closing
 
-import scipy as sp
+import numpy as np
 from scipy.special import erf
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, norm
 from termcolor import colored
 
 
 def norm_fit(x, mu, sigma, A):
     """Gaussian function."""
-    return A * sp.stats.norm.pdf(x, loc=mu, scale=sigma)
+    return A * norm.pdf(x, loc=mu, scale=sigma)
 
 
 def credibility_interval(post, alpha=1.):
@@ -41,11 +41,11 @@ def credibility_interval(post, alpha=1.):
         Upper part of the credibility interval.
 
     """
-    z = erf(alpha / sp.sqrt(2))
+    z = erf(alpha / np.sqrt(2))
 
     lower_percentile = 100 * (1 - z) / 2
     upper_percentile = 100 * (1 + z) / 2
-    low, med, up = sp.percentile(
+    low, med, up = np.percentile(
         post, [lower_percentile, 50, upper_percentile]
     )
     return med, low, up
@@ -151,9 +151,9 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     ]
     c = random.choice(colors)
     if use_norm:
-        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
-        order = sp.array(
+        order = np.array(
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
     if engine == 'Bayesian Model Averaging':
@@ -168,9 +168,9 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     n = int(star.used_filters.sum())
     for filt in star.filter_names[mask]:
         p_ = get_noise_name(filt) + '_noise'
-        order = sp.append(order, p_)
+        order = np.append(order, p_)
 
-    theta = sp.zeros(order.shape[0] - 1 + n)
+    theta = np.zeros(order.shape[0] - 1 + n)
     for i, param in enumerate(order):
         if param != 'loglike':
             theta[i] = out['best_fit'][param]
@@ -409,7 +409,7 @@ def get_max_from_kde(samp):
     kde = gaussian_kde(samp)
     xmin = samp.min()
     xmax = samp.max()
-    xx = sp.linspace(xmin, xmax, 5000)
+    xx = np.linspace(xmin, xmax, 5000)
     kde = kde(xx)
     best = xx[kde.argmax()]
     return best
