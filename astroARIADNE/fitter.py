@@ -434,7 +434,6 @@ class Fitter:
                 self._interpolators)
         else:
             thr = self._threads
-        import ipdb; ipdb.set_trace()
         en = 'Bayesian Model Averaging' if self._bma else self._engine
         display_routine(en, self._nlive, self._dlogz, self.ndim, self._bound,
                         self._sample, thr, self._dynamic)
