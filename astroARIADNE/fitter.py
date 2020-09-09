@@ -1214,12 +1214,14 @@ class Fitter:
 
         # Add estimated age to best fit dictionary.
 
-        age_samp, mass_samp = self.estimate_age(out['best_fit'],
-                                                out['uncertainties'])
+        age_samp, mass_samp, eep_samp = self.estimate_age(out['best_fit'],
+                                                          out['uncertainties'])
         out['posterior_samples']['age'] = age_samp
         out['posterior_samples']['iso_mass'] = mass_samp
+        out['posterior_samples']['eep'] = eep_samp
         logdat = out_filler(age_samp, logdat, 'age', 'age', out)
         logdat = out_filler(mass_samp, logdat, 'iso_mass', 'iso_mass', out)
+        logdat = out_filler(eep_samp, logdat, 'eep', 'eep', out)
         probdat = ''
 
         for k in avgd['weights'].keys():
@@ -1367,8 +1369,8 @@ class Fitter:
             if m != 0:
                 params[b] = (m, e)
                 used_bands.append(b)
-        age_samp, mass_samp = estimate(used_bands, params, logg=False)
-        return age_samp, mass_samp
+        age_samp, mass_samp, eep_samp = estimate(used_bands, params, logg=False)
+        return age_samp, mass_samp, eep_samp
 
 #####################
 # Dynesty and multinest wrappers

@@ -92,7 +92,8 @@ def estimate(bands, params, logg=True):
     else:
         age_samples = 10 ** (model._derived_samples['age'] - 9)
         mass_samples = model._derived_samples['mass']
-        return age_samples, mass_samples
+        eep_samples = model._derived_samples['eep']
+        return age_samples, mass_samples, eep_samples
 
 
 # Written by Dan Foreman-mackey
