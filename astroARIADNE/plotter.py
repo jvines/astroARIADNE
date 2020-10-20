@@ -370,21 +370,21 @@ class SEDPlotter:
                     xerr=self.bandpass, yerr=errors,
                     fmt=',',
                     ecolor=self.error_color,
-                    # color='turquoise',
+                    zorder=0,
                     marker=None)
 
         ax.scatter(self.wave, self.flux * self.wave,
                    edgecolors=self.edgecolors,
                    marker=self.marker,
                    c=self.marker_colors,
-                   s=self.scatter_size,
+                   s=self.scatter_size, zorder=1,
                    alpha=self.scatter_alpha)
 
         ax.scatter(self.wave, self.model * self.wave,
                    marker=self.marker_model,
                    edgecolors=self.marker_colors_model,
                    s=self.scatter_size,
-                   facecolor='',
+                   facecolor='', zorder=3,
                    lw=3)
 
         # Residual plot
@@ -412,7 +412,7 @@ class SEDPlotter:
 
         # Formatting
         res_std = norm_res.std()
-        ax.set_ylim([ymin * .05, ymax * 1.8])
+        ax.set_ylim([ymin * 0.8, ymax * 1.2])
         # ax_r.set_ylim([-5, 5])
         ax_r.set_ylim([-4 * res_std, 4 * res_std])
         ax.set_xscale('log', nonposx='clip')
@@ -938,8 +938,10 @@ class SEDPlotter:
             ax.plot(logt, logl, color='gray')
 
         ax.errorbar(teff, lum, xerr=[[teff_lo], [teff_hi]],
-                    yerr=[[lum_lo], [lum_hi]], color='red', zorder=1001)
-        ax.scatter(teff, lum, s=120, color='red', zorder=1002, edgecolors='k')
+                    yerr=[[lum_lo], [lum_hi]], color='greenyellow',
+                    zorder=1001)
+        ax.scatter(teff, lum, s=350, color='greenyellow', zorder=1002,
+                   edgecolors='k', marker='*')
         # ax.set_xlim(logteff.max() + .05, logteff.min() - .05)
         # ax.set_ylim(loglum.min() - .25, loglum.max() + .25)
         ax.invert_xaxis()
