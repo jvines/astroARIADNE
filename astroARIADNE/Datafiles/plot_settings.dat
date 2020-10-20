@@ -9,8 +9,8 @@ scatter_size 60
 edgecolors black
 marker o
 marker_model D
-marker_colors deepskyblue
-marker_colors_model mediumvioletred
+marker_colors aqua
+marker_colors_model deeppink
 scatter_alpha 0.85
 scatter_linewidths 1
 
@@ -19,9 +19,9 @@ error_color tab:blue
 error_alpha 1
 
 ### TEXT FORMAT
-fontsize 22
+fontsize 26
 fontname serif
-tick_labelsize 18
+tick_labelsize 22
 
 ### CORNER PLOT
 corner_med_c firebrick
