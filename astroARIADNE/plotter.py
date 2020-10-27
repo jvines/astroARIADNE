@@ -1,23 +1,18 @@
-# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """plot_utils module for plotting SEDs."""
 
 import copy
 import glob
-import os
-from contextlib import closing
 from random import choice
 
-import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import pandas as pd
-import scipy as sp
+import numpy as np
 from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table
 from extinction import apply
 from isochrones.interp import DFInterpolator
-from matplotlib import rcParams
 from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
@@ -132,10 +127,10 @@ class SEDPlotter:
                 if self.engine != 'Bayesian Model Averaging':
                     self.grid = out['model_grid']
                 else:
-                    zs = sp.array([out['lnZ'][key]
+                    zs = np.array([out['lnZ'][key]
                                    for key in out['lnZ'].keys()])
-                    keys = sp.array([key for key in out['lnZ'].keys()])
-                    grid = keys[sp.argmax(zs)]
+                    keys = np.array([key for key in out['lnZ'].keys()])
+                    grid = keys[np.argmax(zs)]
                     self.grid = grid
             else:
                 self.grid = model
@@ -152,15 +147,15 @@ class SEDPlotter:
             self.star.load_grid(self.grid)
 
             if not self.norm:
-                self.order = sp.array(
+                self.order = np.array(
                     [
                         'teff', 'logg', 'z',
-                        'dist', 'rad', 'Av',
+                        'dist', 'rad', 'av',
                     ]
                 )
             else:
-                self.order = sp.array(
-                    ['teff', 'logg', 'z', 'norm', 'Av'])
+                self.order = np.array(
+                    ['teff', 'logg', 'z', 'norm', 'av'])
 
             mask = self.star.filter_mask
             flxs = self.star.flux[mask]
@@ -169,7 +164,7 @@ class SEDPlotter:
             wave = self.star.wave[mask]
             for filt, flx, flx_e in zip(filters, flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
-                self.order = sp.append(self.order, p_)
+                self.order = np.append(self.order, p_)
 
             if self.grid.lower() == 'phoenix':
                 with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
@@ -196,7 +191,7 @@ class SEDPlotter:
             # Get best fit parameters.
             mask = self.star.filter_mask
             n = int(self.star.used_filters.sum())
-            theta = sp.zeros(self.order.shape[0])
+            theta = np.zeros(self.order.shape[0])
             for i, param in enumerate(self.order):
                 if param != 'likelihood' and param != 'inflation':
                     theta[i] = out['best_fit'][param]
@@ -235,10 +230,10 @@ class SEDPlotter:
             if i:
                 self.bandpass.append(bp)
 
-        self.flux = sp.array(self.flux)
-        self.flux_er = sp.array(self.flux_er)
-        self.wave = sp.array(self.wave)
-        self.bandpass = sp.array(self.bandpass).T
+        self.flux = np.array(self.flux)
+        self.flux_er = np.array(self.flux_er)
+        self.wave = np.array(self.wave)
+        self.bandpass = np.array(self.bandpass).T
 
     def plot_SED_no_model(self, s=None):
         """Plot raw photometry."""
@@ -254,7 +249,7 @@ class SEDPlotter:
         # Model plot
         used_f = self.star.filter_names[self.star.filter_mask]
         n_used = int(self.star.used_filters.sum())
-        colors = sp.array([
+        colors = np.array([
             'tomato', 'indianred', 'tab:red',
             'salmon', 'coral',
             'mediumorchid', 'mediumslateblue', 'tab:blue',
@@ -300,16 +295,9 @@ class SEDPlotter:
             axis='both', which='major',
             labelsize=self.tick_labelsize
         )
-        ax.set_xticks(sp.linspace(1, 10, 10))
+        ax.set_xticks(np.linspace(1, 10, 10))
         ax.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
-        ylocmin = ticker.LinearLocator(numticks=4)
-
         ax.set_xlim([0.1, 6])
-
-        labels = [item.get_text() for item in ax.get_xticklabels()]
-
-        # empty_string_labels = [''] * len(labels)
-        # ax.set_xticklabels(empty_string_labels)
 
         for tick in ax.get_yticklabels():
             tick.set_fontname(self.fontname)
@@ -390,13 +378,13 @@ class SEDPlotter:
         # Residual plot
         ax_r.axhline(y=0, lw=2, ls='--', c='k', alpha=.7)
 
-        ax_r.errorbar(self.wave, sp.zeros(self.wave.shape[0]),
+        ax_r.errorbar(self.wave, np.zeros(self.wave.shape[0]),
                       xerr=self.bandpass, yerr=self.flux_er,
                       fmt=',',
                       ecolor=self.error_color,
                       # color='turquoise',
                       marker=None)
-        ax_r.scatter(self.wave, sp.zeros(self.wave.shape[0]),
+        ax_r.scatter(self.wave, np.zeros(self.wave.shape[0]),
                      edgecolors=self.edgecolors,
                      marker=self.marker,
                      c=self.marker_colors,
@@ -439,9 +427,9 @@ class SEDPlotter:
             axis='both', which='major',
             labelsize=self.tick_labelsize
         )
-        ax_r.set_xticks(sp.linspace(1, 10, 10))
+        ax_r.set_xticks(np.linspace(1, 10, 10))
         ax_r.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
-        ax.set_xticks(sp.linspace(1, 10, 10))
+        ax.set_xticks(np.linspace(1, 10, 10))
         ax.get_xaxis().set_major_formatter(ticker.NullFormatter())
         ylocmin = ticker.LinearLocator(numticks=4)
 
@@ -498,7 +486,7 @@ class SEDPlotter:
 
             new_w = wave[lower_lim * upper_lim]
 
-            new_ww = sp.linspace(new_w[0], new_w[-1], len(new_w))
+            new_ww = np.linspace(new_w[0], new_w[-1], len(new_w))
 
             ext = self.av_law(new_w * 1e4, Av, Rv)
 
@@ -522,7 +510,7 @@ class SEDPlotter:
             flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
 
-            new_w = sp.linspace(wave[0], wave[-1], len(wave))
+            new_w = np.linspace(wave[0], wave[-1], len(wave))
 
             brf, _ = pyasl.instrBroadGaussFast(
                 new_w, flux, 1500,
@@ -543,7 +531,7 @@ class SEDPlotter:
             flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
 
-            new_w = sp.linspace(wave[0], wave[-1], len(wave))
+            new_w = np.linspace(wave[0], wave[-1], len(wave))
 
             brf, _ = pyasl.instrBroadGaussFast(
                 new_w, flux, 1500,
@@ -564,7 +552,7 @@ class SEDPlotter:
             flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
 
-            new_w = sp.linspace(wave[0], wave[-1], len(wave))
+            new_w = np.linspace(wave[0], wave[-1], len(wave))
 
             brf, _ = pyasl.instrBroadGaussFast(
                 new_w, flux, 1500,
@@ -632,7 +620,7 @@ class SEDPlotter:
                               fontname=self.fontname
                               )
                 best = self.out['best_fit'][param]
-                # ax.axhline(sp.median(samples[param]), color='red', lw=2)
+                # ax.axhline(np.median(samples[param]), color='red', lw=2)
                 ax.axhline(best, color='red', lw=2)
                 ax.tick_params(
                     axis='both', which='major',
@@ -651,7 +639,7 @@ class SEDPlotter:
                 f, ax = plt.subplots(figsize=(12, 4))
                 ax.scatter(samples[param], samples['loglike'], alpha=0.5, s=40)
                 best = self.out['best_fit'][param]
-                # ax.axvline(sp.median(samples[param]), color='red', lw=1.5)
+                # ax.axvline(np.median(samples[param]), color='red', lw=1.5)
                 ax.axvline(best, color='red', lw=1.5)
                 ax.set_ylabel('log likelihood',
                               fontsize=self.fontsize,
@@ -686,7 +674,7 @@ class SEDPlotter:
                 ax.scatter(samples[param], samples['posteriors'], alpha=0.5,
                            s=40)
                 best = self.out['best_fit'][param]
-                # ax.axvline(sp.median(samples[param]), color='red', lw=1.5)
+                # ax.axvline(np.median(samples[param]), color='red', lw=1.5)
                 ax.axvline(best, color='red', lw=1.5)
                 ax.set_ylabel('log posterior',
                               fontsize=self.fontsize,
@@ -722,7 +710,7 @@ class SEDPlotter:
                     n, bins, patches = ax.hist(samp, alpha=.3, bins=50,
                                                label=label, density=True)
                     # Fit gaussian distribution to data
-                    bc = bins[:-1] + sp.diff(bins)
+                    bc = bins[:-1] + np.diff(bins)
                     # Get reasonable p0
                     mu, sig = norm.fit(samp)
                     try:
@@ -733,7 +721,7 @@ class SEDPlotter:
                     except RuntimeError:
                         fit = False
                     if fit and param != 'norm':
-                        xx = sp.linspace(bins[0], bins[-1], 100000)
+                        xx = np.linspace(bins[0], bins[-1], 100000)
                         # Plot best fit
                         ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
                                 alpha=.7)
@@ -742,7 +730,7 @@ class SEDPlotter:
                     self.out['posterior_samples'][param], alpha=.3,
                     bins=50, label='Average', density=True
                 )
-                bc = bins[:-1] + sp.diff(bins)
+                bc = bins[:-1] + np.diff(bins)
                 mu, sig = norm.fit(self.out['posterior_samples'][param])
                 try:
                     popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
@@ -751,7 +739,7 @@ class SEDPlotter:
                 except RuntimeError:
                     fit = False
                 if fit and param != 'norm':
-                    xx = sp.linspace(bins[0], bins[-1], 100000)
+                    xx = np.linspace(bins[0], bins[-1], 100000)
                     ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
                 ax.set_ylabel('PDF',
                               fontsize=self.fontsize,
@@ -797,7 +785,7 @@ class SEDPlotter:
                         samp, alpha=.3, bins=50, label=label,
                         weights=[self.out['weights'][m]] * len(samp)
                     )
-                    bc = bins[:-1] + sp.diff(bins)
+                    bc = bins[:-1] + np.diff(bins)
                     mu, sig = norm.fit(samp)
                     try:
                         popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
@@ -805,7 +793,7 @@ class SEDPlotter:
                                                maxfev=50000)
                     except RuntimeError:
                         popt = (mu, sig, n.max())
-                    xx = sp.linspace(bins[0], bins[-1], 100000)
+                    xx = np.linspace(bins[0], bins[-1], 100000)
                     ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
                             alpha=.7)
                 ax.set_ylabel('N',
@@ -844,11 +832,11 @@ class SEDPlotter:
         # n, bins, patches = ax.hist(
         #     samp, alpha=.3, bins=50, label='MIST', density=True
         # )
-        # bc = bins[:-1] + sp.diff(bins)
+        # bc = bins[:-1] + np.diff(bins)
         # mu, sig = norm.fit(samp)
         # popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
         #                        p0=[mu, sig, n.max()], maxfev=50000)
-        # xx = sp.linspace(bins[0], bins[-1], 100000)
+        # xx = np.linspace(bins[0], bins[-1], 100000)
         # ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
         # ax.set_ylabel('PDF')
         # ax.set_xlabel('Age')
@@ -866,11 +854,11 @@ class SEDPlotter:
         # n, bins, patches = ax.hist(
         #     samp, alpha=.3, bins=50, label='MIST', density=True
         # )
-        # bc = bins[:-1] + sp.diff(bins)
+        # bc = bins[:-1] + np.diff(bins)
         # mu, sig = norm.fit(samp)
         # popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
         #                        p0=[mu, sig, n.max()])
-        # xx = sp.linspace(bins[0], bins[-1], 100000)
+        # xx = np.linspace(bins[0], bins[-1], 100000)
         # ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
         # ax.set_ylabel('PDF')
         # ax.set_xlabel('Mass')
@@ -888,21 +876,21 @@ class SEDPlotter:
         # Get necessary info from the star.
         age = self.out['best_fit']['age']
         feh = self.out['best_fit']['z']
-        teff = sp.log10(self.out['best_fit']['teff'])
-        lum = sp.log10(self.out['best_fit']['lum'])
+        teff = np.log10(self.out['best_fit']['teff'])
+        lum = np.log10(self.out['best_fit']['lum'])
         teff_lo, teff_hi = self.out['uncertainties']['teff']
         lum_lo, lum_hi = self.out['uncertainties']['lum']
-        teff_lo = teff_lo / (10**teff * sp.log(10))
-        teff_hi = teff_hi / (10**teff * sp.log(10))
-        lum_lo = lum_lo / (10**lum * sp.log(10))
-        lum_hi = lum_hi / (10**lum * sp.log(10))
+        teff_lo = teff_lo / (10**teff * np.log(10))
+        teff_hi = teff_hi / (10**teff * np.log(10))
+        lum_lo = lum_lo / (10**lum * np.log(10))
+        lum_hi = lum_hi / (10**lum * np.log(10))
         ages = self.out['posterior_samples']['age']
         fehs = self.out['posterior_samples']['z']
 
         if feh > 0.5:
             feh = 0.5
 
-        iso_bf = get_isochrone(sp.log10(age) + 9, feh)
+        iso_bf = get_isochrone(np.log10(age) + 9, feh)
 
         logteff = iso_bf['logTeff'].values
         loglum = iso_bf['logL'].values
@@ -910,8 +898,8 @@ class SEDPlotter:
 
         fig, ax = plt.subplots(figsize=(12, 8))
 
-        points = sp.array([logteff, loglum]).T.reshape(-1, 1, 2)
-        segments = sp.concatenate([points[:-1], points[1:]], axis=1)
+        points = np.array([logteff, loglum]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
         norm = plt.Normalize(mass.min(), mass.max())
         lc = LineCollection(segments, cmap='cool', norm=norm, linewidths=5)
@@ -927,7 +915,7 @@ class SEDPlotter:
                        labelpad=20)
 
         for i in range(nsamp):
-            a = sp.log10(choice(ages)) + 9
+            a = np.log10(choice(ages)) + 9
             z = choice(fehs)
             if z > 0.5:
                 z = 0.5
@@ -994,7 +982,7 @@ class SEDPlotter:
                 theta_up.append(up)
                 all_samps.append(samples[param])
 
-        corner_samp = sp.vstack(all_samps)
+        corner_samp = np.vstack(all_samps)
 
         titles = self.__create_titles(used_params, theta, theta_up, theta_lo)
         labels = self.__create_labels(used_params)
@@ -1008,7 +996,7 @@ class SEDPlotter:
             max_n_ticks=4
         )
 
-        axes = sp.array(fig.axes).reshape((theta.shape[0], theta.shape[0]))
+        axes = np.array(fig.axes).reshape((theta.shape[0], theta.shape[0]))
 
         for i in range(theta.shape[0]):
             ax = axes[i, i]
@@ -1085,12 +1073,12 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
-        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
-        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
-        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
-        sel_teff = int(sp.unique(self.star.teff)[select_teff])
-        sel_logg = sp.unique(self.star.logg)[select_logg]
-        sel_z = sp.unique(self.star.z)[select_z]
+        select_teff = np.argmin((abs(teff - np.unique(self.star.teff))))
+        select_logg = np.argmin((abs(logg - np.unique(self.star.logg))))
+        select_z = np.argmin((abs(z - np.unique(self.star.z))))
+        sel_teff = int(np.unique(self.star.teff)[select_teff])
+        sel_logg = np.unique(self.star.logg)[select_logg]
+        sel_z = np.unique(self.star.z)[select_z]
         selected_SED = self.moddir + 'PHOENIXv2/Z'
         metal_add = ''
         if sel_z < 0:
@@ -1129,12 +1117,12 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
-        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
-        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
-        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
-        sel_teff = int(sp.unique(self.star.teff)[select_teff]) // 100
-        sel_logg = sp.unique(self.star.logg)[select_logg]
-        sel_z = sp.unique(self.star.z)[select_z]
+        select_teff = np.argmin((abs(teff - np.unique(self.star.teff))))
+        select_logg = np.argmin((abs(logg - np.unique(self.star.logg))))
+        select_z = np.argmin((abs(z - np.unique(self.star.z))))
+        sel_teff = int(np.unique(self.star.teff)[select_teff]) // 100
+        sel_logg = np.unique(self.star.logg)[select_logg]
+        sel_z = np.unique(self.star.z)[select_z]
         metal_add = ''
         if sel_z < 0:
             metal_add = str(sel_z)
@@ -1149,8 +1137,8 @@ class SEDPlotter:
         gl = glob.glob(selected_SED)
         selected_SED = gl[0]
         tab = Table(fits.open(selected_SED)[1].data)
-        flux = sp.array(tab['FLUX'].tolist()) * conversion
-        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        flux = np.array(tab['FLUX'].tolist()) * conversion
+        wave = np.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
         return wave, flux
 
     def fetch_btnextgen(self):
@@ -1172,12 +1160,12 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
-        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
-        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
-        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
-        sel_teff = int(sp.unique(self.star.teff)[select_teff]) // 100
-        sel_logg = sp.unique(self.star.logg)[select_logg]
-        sel_z = sp.unique(self.star.z)[select_z]
+        select_teff = np.argmin((abs(teff - np.unique(self.star.teff))))
+        select_logg = np.argmin((abs(logg - np.unique(self.star.logg))))
+        select_z = np.argmin((abs(z - np.unique(self.star.z))))
+        sel_teff = int(np.unique(self.star.teff)[select_teff]) // 100
+        sel_logg = np.unique(self.star.logg)[select_logg]
+        sel_z = np.unique(self.star.z)[select_z]
         metal_add = ''
         if sel_z < 0:
             metal_add = str(sel_z)
@@ -1192,8 +1180,8 @@ class SEDPlotter:
         gl = glob.glob(selected_SED)
         selected_SED = gl[0]
         tab = Table(fits.open(selected_SED)[1].data)
-        flux = sp.array(tab['FLUX'].tolist()) * conversion
-        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        flux = np.array(tab['FLUX'].tolist()) * conversion
+        wave = np.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
         return wave, flux
 
     def fetch_btcond(self):
@@ -1215,12 +1203,12 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
-        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
-        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
-        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
-        sel_teff = int(sp.unique(self.star.teff)[select_teff]) // 100
-        sel_logg = sp.unique(self.star.logg)[select_logg]
-        sel_z = sp.unique(self.star.z)[select_z]
+        select_teff = np.argmin((abs(teff - np.unique(self.star.teff))))
+        select_logg = np.argmin((abs(logg - np.unique(self.star.logg))))
+        select_z = np.argmin((abs(z - np.unique(self.star.z))))
+        sel_teff = int(np.unique(self.star.teff)[select_teff]) // 100
+        sel_logg = np.unique(self.star.logg)[select_logg]
+        sel_z = np.unique(self.star.z)[select_z]
         metal_add = ''
         if sel_z < 0:
             metal_add = str(sel_z)
@@ -1235,8 +1223,8 @@ class SEDPlotter:
         gl = glob.glob(selected_SED)
         selected_SED = gl[0]
         tab = Table(fits.open(selected_SED)[1].data)
-        flux = sp.array(tab['FLUX'].tolist()) * conversion
-        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        flux = np.array(tab['FLUX'].tolist()) * conversion
+        wave = np.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
         return wave, flux
 
     def fetch_ck04(self):
@@ -1257,12 +1245,12 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
-        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
-        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
-        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
-        sel_teff = int(sp.unique(self.star.teff)[select_teff])
-        sel_logg = sp.unique(self.star.logg)[select_logg]
-        sel_z = sp.unique(self.star.z)[select_z]
+        select_teff = np.argmin((abs(teff - np.unique(self.star.teff))))
+        select_logg = np.argmin((abs(logg - np.unique(self.star.logg))))
+        select_z = np.argmin((abs(z - np.unique(self.star.z))))
+        sel_teff = int(np.unique(self.star.teff)[select_teff])
+        sel_logg = np.unique(self.star.logg)[select_logg]
+        sel_z = np.unique(self.star.z)[select_z]
         metal_add = ''
         if sel_z < 0:
             metal_add = 'm' + str(-sel_z).replace('.', '')
@@ -1275,8 +1263,8 @@ class SEDPlotter:
         selected_SED = self.moddir + 'Castelli_Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
-        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
-        flux = sp.array(tab[lgg].tolist()) * conversion
+        wave = np.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        flux = np.array(tab[lgg].tolist()) * conversion
         return wave, flux
 
     def fetch_kurucz(self):
@@ -1297,12 +1285,12 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
-        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
-        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
-        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
-        sel_teff = int(sp.unique(self.star.teff)[select_teff])
-        sel_logg = sp.unique(self.star.logg)[select_logg]
-        sel_z = sp.unique(self.star.z)[select_z]
+        select_teff = np.argmin((abs(teff - np.unique(self.star.teff))))
+        select_logg = np.argmin((abs(logg - np.unique(self.star.logg))))
+        select_z = np.argmin((abs(z - np.unique(self.star.z))))
+        sel_teff = int(np.unique(self.star.teff)[select_teff])
+        sel_logg = np.unique(self.star.logg)[select_logg]
+        sel_z = np.unique(self.star.z)[select_z]
         metal_add = ''
         if sel_z < 0:
             metal_add = 'm' + str(-sel_z).replace('.', '')
@@ -1315,8 +1303,8 @@ class SEDPlotter:
         selected_SED = self.moddir + 'Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
-        wave = sp.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
-        flux = sp.array(tab[lgg].tolist()) * conversion
+        wave = np.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
+        flux = np.array(tab[lgg].tolist()) * conversion
         return wave, flux
 
     def fetch_coelho(self):
@@ -1332,12 +1320,12 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
-        select_teff = sp.argmin((abs(teff - sp.unique(self.star.teff))))
-        select_logg = sp.argmin((abs(logg - sp.unique(self.star.logg))))
-        select_z = sp.argmin((abs(z - sp.unique(self.star.z))))
-        sel_teff = int(sp.unique(self.star.teff)[select_teff])
-        sel_logg = sp.unique(self.star.logg)[select_logg]
-        sel_z = sp.unique(self.star.z)[select_z]
+        select_teff = np.argmin((abs(teff - np.unique(self.star.teff))))
+        select_logg = np.argmin((abs(logg - np.unique(self.star.logg))))
+        select_z = np.argmin((abs(z - np.unique(self.star.z))))
+        sel_teff = int(np.unique(self.star.teff)[select_teff])
+        sel_logg = np.unique(self.star.logg)[select_logg]
+        sel_z = np.unique(self.star.z)[select_z]
         sel_teff = str(sel_teff) if sel_teff >= 1e5 else '0{}'.format(sel_teff)
         selected_SED = self.moddir + 'Coelho14/t' + sel_teff + '_g'
         sel_logg = '+{:.1f}'.format(sel_logg) if sel_logg > 0 else '-0.5'
@@ -1355,12 +1343,12 @@ class SEDPlotter:
         flux = data * conversion
         CRVAL1 = head['CRVAL1']
         CDEL1 = head['CDELT1']
-        wave = 10**sp.array([CRVAL1 + CDEL1 * i for i in range(data.shape[0])])
+        wave = 10**np.array([CRVAL1 + CDEL1 * i for i in range(data.shape[0])])
         wave *= u.angstrom.to(u.um)
         return wave, flux
 
     def __create_titles(self, titles, theta, theta_up, theta_lo):
-        new_titles = sp.empty(titles.shape[0], dtype=object)
+        new_titles = np.empty(titles.shape[0], dtype=object)
         for i, param in enumerate(titles):
             if param == 'teff':
                 new_titles[i] = r'Teff ='
@@ -1374,7 +1362,7 @@ class SEDPlotter:
                 new_titles[i] = r'R ='
             if param == 'norm':
                 new_titles[i] = r'    (R/D)$^2$ ='
-            if param == 'Av':
+            if param == 'av':
                 new_titles[i] = r'Av ='
             if param == 'inflation':
                 new_titles[i] = r'$\sigma$ ='
@@ -1395,7 +1383,7 @@ class SEDPlotter:
         return new_titles
 
     def __create_labels(self, labels):
-        new_labels = sp.empty(labels.shape[0], dtype=object)
+        new_labels = np.empty(labels.shape[0], dtype=object)
         for i, param in enumerate(labels):
             if param == 'teff':
                 new_labels[i] = r'Teff (K)'
@@ -1409,7 +1397,7 @@ class SEDPlotter:
                 new_labels[i] = r'R $($R$_\odot)$'
             if param == 'norm':
                 new_labels[i] = r'(R/D)'
-            if param == 'Av':
+            if param == 'av':
                 new_labels[i] = r'Av'
             if param == 'inflation':
                 new_labels[i] = r'$\sigma$'
