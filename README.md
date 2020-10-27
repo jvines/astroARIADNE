@@ -281,7 +281,7 @@ f.prior_setup = {
 	'z': ('default'),
 	'dist': ('default'),
 	'rad': ('default'),
-	'Av': ('default')
+	'av': ('default')
 }
 ```
 
@@ -309,7 +309,7 @@ f.prior_setup = {
 	'z': ('normal', 0.09, 0.05),
 	'dist': ('default'),
 	'rad': ('default'),
-	'Av': ('fixed', 0)
+	'av': ('fixed', 0)
 }
 ```
 
