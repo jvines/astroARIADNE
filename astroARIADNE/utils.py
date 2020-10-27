@@ -1,4 +1,3 @@
-# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """Various utilities used throughout the code.
 
 Here go various utilities that don't belong directly in any class,
@@ -151,10 +150,10 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     ]
     c = random.choice(colors)
     if use_norm:
-        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
     else:
         order = np.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
         )
     if engine == 'Bayesian Model Averaging':
         res_dir = out_folder + '/BMA_out.pkl'
@@ -397,8 +396,8 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
         logdat += '{:.4{f}}\t{:.4{f}}\n'.format(lo, up, f=fmt)
     else:
         out['best_fit'][param] = fixed
-        out['uncertainties'][param] = sp.nan
-        out['confidence_interval'][param] = sp.nan
+        out['uncertainties'][param] = np.nan
+        out['confidence_interval'][param] = np.nan
         logdat += '{}\t{:.4{f}}\t'.format(name, fixed, f=fmt)
         logdat += '(FIXED)\n'
     return logdat

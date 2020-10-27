@@ -1,16 +1,14 @@
 # @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """Main driver of the fitting routine."""
-import os
 import pickle
 import random
 import time
 import warnings
-from contextlib import closing
-from multiprocessing import Pool, Process, cpu_count
+from multiprocessing import Pool, Process
 
 import astropy.units as u
 import pandas as pd
-import scipy as sp
+import numpy as np
 import scipy.stats as st
 from astropy.constants import sigma_sb
 from isochrones.interp import DFInterpolator
@@ -21,7 +19,6 @@ from .error import *
 from .isochrone import estimate
 from .phot_utils import *
 from .sed_library import *
-from .star import Star
 from .utils import *
 
 try:
@@ -335,14 +332,14 @@ class Fitter:
 
         # Declare order of parameters.
         if not self.norm:
-            order = sp.array(
+            order = np.array(
                 [
                     'teff', 'logg', 'z',
-                    'dist', 'rad', 'Av'
+                    'dist', 'rad', 'av'
                 ]
             )
         else:
-            order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
+            order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
 
         # Create output directory
         if self.out_folder is None:
@@ -353,14 +350,14 @@ class Fitter:
 
         # Parameter coordination.
         # Order for the parameters are:
-        # teff, logg, z, dist, rad, Av, noise
+        # teff, logg, z, dist, rad, av, noise
         # or
-        # teff, logg, z, norm, Av, noise
+        # teff, logg, z, norm, av, noise
         npars = 6 if not self.norm else 5
         npars += self.star.used_filters.sum()
         npars = int(npars)
-        self.coordinator = sp.zeros(npars)  # 1 for fixed params
-        self.fixed = sp.zeros(npars)
+        self.coordinator = np.zeros(npars)  # 1 for fixed params
+        self.fixed = np.zeros(npars)
         coordinator = self.coordinator
         fixed = self.fixed
 
@@ -453,10 +450,10 @@ class Fitter:
             defaults['logg'] = st.norm(
                 loc=self.star.logg, scale=self.star.logg_e)
         else:
-            with closing(open(priorsdir + '/logg_ppf.pkl', 'rb')) as jar:
+            with open(priorsdir + '/logg_ppf.pkl', 'rb') as jar:
                 defaults['logg'] = pickle.load(jar)
         # Teff prior from RAVE
-        with closing(open(priorsdir + '/teff_ppf.pkl', 'rb')) as jar:
+        with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
             defaults['teff'] = pickle.load(jar)
         # [Fe/H] prior setup.
         defaults['z'] = st.norm(loc=-0.125, scale=0.234)
@@ -471,7 +468,7 @@ class Fitter:
             # Radius prior setup.
             # if self.star.rad > 0:
             #     a = - self.star.rad / self.star.rad_e
-            #     b = sp.inf
+            #     b = np.inf
             #     defaults['rad'] = st.truncnorm(
             #         loc=self.star.rad, scale=self.star.rad_e, a=a, b=b)
             # else:
@@ -486,9 +483,9 @@ class Fitter:
             av_idx = 4 if self._norm else 5
             self.coordinator[av_idx] = 1
             self.fixed[av_idx] = 0
-            defaults['Av'] = None
+            defaults['av'] = None
         else:
-            defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
+            defaults['av'] = st.uniform(loc=0, scale=self.star.Av)
         # Noise model prior setup.
         mask = self.star.filter_mask
         flxs = self.star.flux[mask]
@@ -500,7 +497,7 @@ class Fitter:
             b = (1 - flx) / flx_e
             defaults[p_] = st.truncnorm(loc=mu, scale=sigma, a=0, b=b)
             # defaults[p_] = st.uniform(loc=0, scale=5)
-            order = sp.append(order, p_)
+            order = np.append(order, p_)
         return defaults
 
     def create_priors(self, priorfile):
@@ -511,7 +508,7 @@ class Fitter:
         param_list = [
             'teff', 'logg', 'z',
             'dist', 'rad', 'norm',
-            'Av'
+            'av'
         ]
 
         noise = []
@@ -523,10 +520,10 @@ class Fitter:
             noise.append(p_)
 
         if priorfile:
-            param, prior, bounds = sp.loadtxt(
+            param, prior, bounds = np.loadtxt(
                 priorfile, usecols=[0, 1, 2], unpack=True, dtype=object)
-            copy = sp.vstack((param, prior, bounds)).T
-            sp.savetxt(self.out_folder + '/prior.dat', copy, fmt='%s')
+            copy = np.vstack((param, prior, bounds)).T
+            np.savetxt(self.out_folder + '/prior.dat', copy, fmt='%s')
             # Dict with priors.
             prior_dict = dict()
             for par, pri, bo in zip(param, prior, bounds):
@@ -555,7 +552,7 @@ class Fitter:
                 elif pri.lower() == 'default':
                     prior_dict[par] = self.default_priors[par]
                 elif pri.lower() == 'fixed':
-                    idx = sp.where(par == order)[0]
+                    idx = np.where(par == order)[0]
                     self.coordinator[idx] = 1
                     self.fixed[idx] = float(bo)
 
@@ -592,15 +589,14 @@ class Fitter:
                     # RAVE prior only available for teff and logg. It's already
                     # the default for [Fe/H]
                     if k == 'teff' or k == 'logg':
-                        with closing(open(priorsdir + '/teff_ppf.pkl', 'rb')) \
-                                as jar:
+                        with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
                             prior_dict[k] = pickle.load(jar)
                         prior_out += k + '\tRAVE\n'
             else:
                 prior = self.prior_setup[k][0]
                 if prior == 'fixed':
                     value = self.prior_setup[k][1]
-                    idx = sp.where(k == order)[0]
+                    idx = np.where(k == order)[0]
                     self.coordinator[idx] = 1
                     self.fixed[idx] = value
                     prior_out += k + '\tfixed\t{}\n'.format(value)
@@ -685,7 +681,7 @@ class Fitter:
         outs = []
         for g in self._grids:
             in_folder = self.out_folder + '/' + g + '_out.pkl'
-            with closing(open(in_folder, 'rb')) as out:
+            with open(in_folder, 'rb') as out:
                 outs.append(pickle.load(out))
 
         avgd = self.bayesian_model_average(outs, self._grids)
@@ -699,16 +695,16 @@ class Fitter:
     def bayesian_model_average(self, outputs, grids):
         """Perform Bayesian Model Averaging."""
         # CONSIDER MAKING STATIC
-        choice = sp.random.choice
+        choice = np.random.choice
         evidences = []
         post_samples = []
         for o in outputs:
             evidences.append(o['global_lnZ'])
             post_samples.append(o['posterior_samples'])
-        evidences = sp.array(evidences)
+        evidences = np.array(evidences)
         weights = evidences - evidences.min()
-        weights = [sp.exp(e) / sp.exp(weights).sum() for e in weights]
-        weights = sp.array(weights)
+        weights = [np.exp(e) / np.exp(weights).sum() for e in weights]
+        weights = np.array(weights)
         ban = ['loglike', 'priors', 'posteriors', 'mass']
         if self._norm:
             ban.append('rad')
@@ -724,12 +720,12 @@ class Fitter:
             lens = []
             for o in post_samples:
                 lens.append(len(o['teff']))
-            lens = sp.array(lens)
+            lens = np.array(lens)
             self.n_samples = lens.min()
         for k in post_samples[0].keys():
             if k in ban:
                 continue
-            out['averaged_samples'][k] = sp.zeros(self.n_samples)
+            out['averaged_samples'][k] = np.zeros(self.n_samples)
             for i, o in enumerate(post_samples):
                 # Skip fixed params
                 try:
@@ -751,7 +747,7 @@ class Fitter:
         # Parallel parallelized routine experiment
         if self.experimental:
             if self._dynamic:
-                with closing(Pool(self._threads)) as executor:
+                with Pool(self._threads) as executor:
                     sampler = dynesty.DynamicNestedSampler(
                         dynesty_loglike_bma, pt_dynesty, self.ndim,
                         bound=self._bound, sample=self._sample, pool=executor,
@@ -761,7 +757,7 @@ class Fitter:
                                        nlive_init=self._nlive,
                                        wt_kwargs={'pfrac': .95})
             else:
-                with closing(Pool(self._threads)) as executor:
+                with Pool(self._threads) as executor:
                     sampler = dynesty.NestedSampler(
                         dynesty_loglike_bma, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
@@ -837,7 +833,7 @@ class Fitter:
         wave = star.wave[mask]
         if self._dynamic:
             if self._threads > 1:
-                with closing(Pool(self._threads)) as executor:
+                with Pool(self._threads) as executor:
                     self.sampler = dynesty.DynamicNestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         bound=self._bound, sample=self._sample,
@@ -858,7 +854,7 @@ class Fitter:
                                         wt_kwargs={'pfrac': 1})
         else:
             if self._threads > 1:
-                with closing(Pool(self._threads)) as executor:
+                with Pool(self._threads) as executor:
                     self.sampler = dynesty.NestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
@@ -943,7 +939,7 @@ class Fitter:
 
         # Save loglike, priors and posteriors.
 
-        out['posterior_samples']['loglike'] = sp.zeros(
+        out['posterior_samples']['loglike'] = np.zeros(
             posterior_samples.shape[0]
         )
 
@@ -996,7 +992,7 @@ class Fitter:
             out['best_fit'] = dict()
             out['uncertainties'] = dict()
             out['confidence_interval'] = dict()
-            best_theta = sp.zeros(order.shape[0])
+            best_theta = np.zeros(order.shape[0])
 
             for i, param in enumerate(order):
                 if not self.coordinator[i]:
@@ -1059,13 +1055,13 @@ class Fitter:
             # Spectral type
 
             # Load Mamajek spt table
-            mamajek_spt = sp.loadtxt(
+            mamajek_spt = np.loadtxt(
                 filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
-            mamajek_temp = sp.loadtxt(
+            mamajek_temp = np.loadtxt(
                 filesdir + '/mamajek_spt.dat', usecols=[1])
 
             # Find spt
-            spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+            spt_idx = np.argmin(abs(mamajek_temp - out['best_fit']['teff']))
             spt = mamajek_spt[spt_idx]
             out['spectral_type'] = spt
 
@@ -1079,7 +1075,7 @@ class Fitter:
         out['model_grid'] = self.grid
         out['av_law'] = av_law
         if not self.bma:
-            with closing(open(log_out, 'w')) as logfile:
+            with open(log_out, 'w') as logfile:
                 logfile.write(logdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
@@ -1171,7 +1167,7 @@ class Fitter:
         out['best_fit'] = dict()
         out['uncertainties'] = dict()
         out['confidence_interval'] = dict()
-        best_theta = sp.zeros(order.shape[0])
+        best_theta = np.zeros(order.shape[0])
         for i, param in enumerate(order):
             if not self.coordinator[i]:
                 if 'noise' in param:
@@ -1244,18 +1240,18 @@ class Fitter:
         # Spectral type
 
         # Load Mamajek spt table
-        mamajek_spt = sp.loadtxt(
+        mamajek_spt = np.loadtxt(
             filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
-        mamajek_temp = sp.loadtxt(filesdir + '/mamajek_spt.dat', usecols=[1])
+        mamajek_temp = np.loadtxt(filesdir + '/mamajek_spt.dat', usecols=[1])
 
         # Find spt
-        spt_idx = sp.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+        spt_idx = np.argmin(abs(mamajek_temp - out['best_fit']['teff']))
         spt = mamajek_spt[spt_idx]
         out['spectral_type'] = spt
         out_file = self.out_folder + '/BMA_out.pkl'
-        with closing(open(log_out, 'w')) as logfile:
+        with open(log_out, 'w') as logfile:
             logfile.write(logdat)
-        with closing(open(prob_out, 'w')) as logfile:
+        with open(prob_out, 'w') as logfile:
             logfile.write(probdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
@@ -1272,7 +1268,7 @@ class Fitter:
 
     def dynesty_results(self, results):
         """Extract posterior samples, global evidence and its error."""
-        weights = sp.exp(results['logwt'] - results['logz'][-1])
+        weights = np.exp(results['logwt'] - results['logz'][-1])
         posterior_samples = resample_equal(results.samples, weights)
         lnz = results.logz[-1]
         lnzer = results.logzerr[-1]
@@ -1282,13 +1278,13 @@ class Fitter:
         """Calculate mass from logg and radius."""
         # Solar logg = 4.437
         # g = g_Sol * M / R**2
-        mass = logg + 2 * sp.log10(rad) - 4.437
+        mass = logg + 2 * np.log10(rad) - 4.437
         mass = 10**mass
         return mass
 
     def _get_lum(self, teff, rad):
         sb = sigma_sb.to(u.solLum / u.K**4 / u.solRad**2).value
-        L = 4 * sp.pi * rad ** 2 * sb * teff ** 4
+        L = 4 * np.pi * rad ** 2 * sb * teff ** 4
         return L
 
     def _get_rad(self, samples, dist, dist_e):
@@ -1297,7 +1293,7 @@ class Fitter:
         # Create a synthetic distribution for distance.
         # N = (R / D) ** 2
         d = st.norm(loc=dist, scale=dist_e).rvs(size=norm.shape[0])
-        n = sp.sqrt(norm)
+        n = np.sqrt(norm)
         r = n * d  # This is in pc
         r *= u.pc.to(u.solRad)  # Transform to Solar radii
         return r
@@ -1341,7 +1337,7 @@ class Fitter:
                 par = 'distance'
             if k == 'rad':
                 par = 'radius'
-            if k == 'Av':
+            if k == 'av':
                 par = 'AV'
             if not self.coordinator[i]:
                 if k != 'norm':
@@ -1356,9 +1352,9 @@ class Fitter:
 
         # params['mass'] = (bf['mass'], max(unc['mass']))
         if star.lum != 0 and star.lum_e != 0:
-            params['logL'] = (sp.log10(bf['lum']),
-                              abs(sp.log10(max(unc['lum']))))
-        mask = sp.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+            params['logL'] = (np.log10(bf['lum']),
+                              abs(np.log10(max(unc['lum']))))
+        mask = np.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
                          0, 1, 0])
         mags = self.star.mags[mask == 1]

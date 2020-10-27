@@ -1,15 +1,12 @@
-# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """sed_library contain the model, prior and likelihood to be used."""
 
 import pickle
 from contextlib import closing
 
 import astropy.units as u
-import scipy as sp
+import numpy as np
 from extinction import apply
-from scipy.special import ndtr
 
-from .config import priorsdir
 from .phot_utils import *
 from .utils import get_noise_name
 
@@ -17,17 +14,17 @@ from .utils import get_noise_name
 def build_params(theta, flux, flux_e, filts, coordinator, fixed, use_norm):
     """Build the parameter vector that goes into the model."""
     if use_norm:
-        params = sp.zeros(len(coordinator))
-        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
+        params = np.zeros(len(coordinator))
+        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
     else:
-        params = sp.zeros(len(coordinator))
-        order = sp.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+        params = np.zeros(len(coordinator))
+        order = np.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
         )
 
     for filt, flx, flx_e in zip(filts, flux, flux_e):
         p_ = get_noise_name(filt) + '_noise'
-        order = sp.append(order, p_)
+        order = np.append(order, p_)
     i = 0
     for j, k in enumerate(order):
         params[j] = theta[i] if not coordinator[j] else fixed[j]
@@ -117,7 +114,7 @@ def get_residuals(theta, flux, flux_er, wave, filts, interpolators, use_norm,
     start = 5 if use_norm else 6
     inflation = theta[start:]
     residuals = model - flux
-    errs = sp.sqrt(flux_er ** 2 + inflation**2)
+    errs = np.sqrt(flux_er ** 2 + inflation**2)
     return residuals, errs
 
 
@@ -127,10 +124,10 @@ def log_likelihood(theta, flux, flux_er, wave, filts, interpolators, use_norm,
     res, ers = get_residuals(theta, flux, flux_er, wave,
                              filts, interpolators, use_norm, av_law)
 
-    c = sp.log(2 * sp.pi * ers ** 2)
+    c = np.log(2 * np.pi * ers ** 2)
     lnl = (c + (res ** 2 / ers ** 2)).sum()
 
-    if not sp.isfinite(lnl):
+    if not np.isfinite(lnl):
         return -1e300
 
     return -.5 * lnl
@@ -139,17 +136,17 @@ def log_likelihood(theta, flux, flux_er, wave, filts, interpolators, use_norm,
 def prior_transform_dynesty(u, flux, flux_er, filts, prior_dict, coordinator,
                             use_norm):
     """Transform the prior from the unit cube to the parameter space."""
-    u2 = sp.array(u)
+    u2 = np.array(u)
     if use_norm:
-        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
     else:
-        order = sp.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+        order = np.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
         )
 
     for filt, flx, flx_e in zip(filts, flux, flux_er):
         p_ = get_noise_name(filt) + '_noise'
-        order = sp.append(order, p_)
+        order = np.append(order, p_)
 
     i = 0
     for fixed, par in zip(coordinator, order):
@@ -178,15 +175,15 @@ def prior_transform_multinest(u, flux, flux_er, filts, prior_dict, coordinator,
                               use_norm):
     """Transform the prior from the unit cube to the parameter space."""
     if use_norm:
-        order = sp.array(['teff', 'logg', 'z', 'norm', 'Av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
     else:
-        order = sp.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+        order = np.array(
+            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
         )
 
     for filt, flx, flx_e in zip(filts, flux, flux_er):
         p_ = get_noise_name(filt) + '_noise'
-        order = sp.append(order, p_)
+        order = np.append(order, p_)
 
     i = 0
     for fixed, par in zip(coordinator, order):
