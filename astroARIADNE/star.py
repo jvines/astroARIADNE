@@ -1,13 +1,11 @@
-# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """Star.py contains the Star class which contains the data regarding a star."""
 
 import pickle
 import random
-import time
 from contextlib import closing
 
 import astropy.units as u
-import scipy as sp
+import numpy as np
 from astropy.coordinates import SkyCoord
 from dustmaps.sfd import SFDQuery
 from scipy.interpolate import RegularGridInterpolator
@@ -27,7 +25,7 @@ class Star:
     ----------
     starname : str
         The name of the object. If ra and dec aren't provided nor is a
-        list of magnitudes with associated uncertainties prvided, the search
+        list of magnitudes with associated uncertainties provided, the search
         for stellar magnitudes will be done using the object's name instead.
 
     ra : float
@@ -90,7 +88,7 @@ class Star:
         Else it uses the object's name.
 
     verbose : bool, optional
-        Set to False to supress printed outputs.
+        Set to False to suppress printed outputs.
 
     ignore : list, optional
         A list with the catalogs to ignore for whatever reason.
@@ -175,7 +173,7 @@ class Star:
                  lum=None, lum_e=None,
                  logg=None, logg_e=None,
                  dist=None, dist_e=None,
-                 Av=None,
+                 av=None,
                  mag_dict=None, verbose=True, ignore=[]):
         """See class docstring."""
         # MISC
@@ -218,7 +216,8 @@ class Star:
 
         # Lookup archival magnitudes, radius, temperature, luminosity
         # and parallax
-        lookup = self.get_rad + self.get_temp + self.get_plx + self.get_mags
+        lookup = self.get_rad + self.get_temp + self.get_plx \
+            + self.get_mags + self.get_dist
         if lookup:
             if verbose:
                 print(
@@ -271,39 +270,39 @@ class Star:
 
         if not self.get_mags:
             filters = []
-            self.used_filters = sp.zeros(self.filter_names.shape[0])
-            self.mags = sp.zeros(self.filter_names.shape[0])
-            self.mag_errs = sp.zeros(self.filter_names.shape[0])
+            self.used_filters = np.zeros(self.filter_names.shape[0])
+            self.mags = np.zeros(self.filter_names.shape[0])
+            self.mag_errs = np.zeros(self.filter_names.shape[0])
             for k in mag_dict.keys():
-                filt_idx = sp.where(k == self.filter_names)[0]
+                filt_idx = np.where(k == self.filter_names)[0]
                 self.used_filters[filt_idx] = 1
                 self.mags[filt_idx] = mag_dict[k][0]
                 self.mag_errs[filt_idx] = mag_dict[k][1]
 
                 filters.append(k)
-        self.filter_mask = sp.where(self.used_filters == 1)[0]
+        self.filter_mask = np.where(self.used_filters == 1)[0]
 
-        # Get max Av
-        if Av is None:
+        # Get max av
+        if av is None:
             sfd = SFDQuery()
             coords = SkyCoord(self.ra, self.dec,
                               unit=(u.deg, u.deg), frame='icrs')
             ebv = sfd(coords)
             self.Av = ebv * 2.742
         else:
-            self.Av = Av
+            self.Av = av
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
             self.filter_names[self.filter_mask])
 
-        self.wave = sp.zeros(self.filter_names.shape[0])
-        self.flux = sp.zeros(self.filter_names.shape[0])
-        self.flux_er = sp.zeros(self.filter_names.shape[0])
-        self.bandpass = sp.zeros(self.filter_names.shape[0])
+        self.wave = np.zeros(self.filter_names.shape[0])
+        self.flux = np.zeros(self.filter_names.shape[0])
+        self.flux_er = np.zeros(self.filter_names.shape[0])
+        self.bandpass = np.zeros(self.filter_names.shape[0])
 
         for k in wave.keys():
-            filt_idx = sp.where(k == self.filter_names)[0]
+            filt_idx = np.where(k == self.filter_names)[0]
             self.wave[filt_idx] = wave[k]
             self.flux[filt_idx] = flux[k]
             self.flux_er[filt_idx] = flux_er[k]
@@ -327,7 +326,7 @@ class Star:
         return self.starname
 
     def ra_dec_to_deg(self, ra, dec):
-        """Transform ra, dec from selected uniot to degrees."""
+        """Transform ra, dec from selected unit to degrees."""
         if isinstance(ra, float) and isinstance(dec, float):
             self.ra = ra
             self.dec = dec
@@ -341,7 +340,6 @@ class Star:
     def load_grid(self, model):
         """Load the model grid for interpolation."""
         # Grid stuff
-        # self.full_grid = sp.loadtxt('../Datafiles/model_grid_fix.dat')
         if model.lower() == 'phoenix':
             gridname = gridsdir + '/model_grid_Phoenixv2.dat'
         if model.lower() == 'btsettl':
@@ -357,7 +355,7 @@ class Star:
         if model.lower() == 'coelho':
             gridname = gridsdir + '/model_grid_Coelho.dat'
 
-        self.full_grid = sp.loadtxt(gridname)
+        self.full_grid = np.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]
         self.logg = self.full_grid[:, 1]
         self.z = self.full_grid[:, 2]
@@ -369,12 +367,12 @@ class Star:
         raise DeprecationWarning()
         if self.verbose:
             print('Interpolating grids for filters:')
-        interpolators = sp.zeros(self.filter_names.shape[0], dtype=object)
-        ut = sp.unique(self.full_grid[:, 0])
-        ug = sp.unique(self.full_grid[:, 1])
-        uz = sp.unique(self.full_grid[:, 2])
+        interpolators = np.zeros(self.filter_names.shape[0], dtype=object)
+        ut = np.unique(self.full_grid[:, 0])
+        ug = np.unique(self.full_grid[:, 1])
+        uz = np.unique(self.full_grid[:, 2])
         for ii, f in enumerate(self.filter_names):
-            cube = sp.zeros((ut.shape[0], ug.shape[0], uz.shape[0]))
+            cube = np.zeros((ut.shape[0], ug.shape[0], uz.shape[0]))
             if self.verbose:
                 print(f)
             for i, t in enumerate(ut):
@@ -386,7 +384,7 @@ class Star:
                         flx = self.full_grid[:, 3 + ii][t_idx * g_idx * z_idx]
                         insert = flx[0] if len(flx) == 1 else 0
                         cube[i, j, k] = insert
-            filt_idx = sp.where(f == self.filter_names)[0]
+            filt_idx = np.where(f == self.filter_names)[0]
             interpolators[filt_idx] = RegularGridInterpolator(
                 (ut, ug, uz), cube, bounds_error=False)
         with closing(open(out_name + '.pkl', 'wb')) as jar:
@@ -455,7 +453,7 @@ class Star:
         """Save the used magnitudes in a file."""
         master, headers = self.__prepare_mags()
         fmt = '%s %2.4f %2.4f'
-        sp.savetxt(out + 'mags.dat', master, header=' '.join(headers),
+        np.savetxt(out + 'mags.dat', master, header=' '.join(headers),
                    delimiter=' ', fmt=fmt)
 
     def __prepare_mags(self):
@@ -463,7 +461,7 @@ class Star:
         mags = self.mags[self.filter_mask]
         ers = self.mag_errs[self.filter_mask]
         filt = self.filter_names[self.filter_mask]
-        master = sp.zeros(
+        master = np.zeros(
             mags.size,
             dtype=[
                 ('var1', 'U16'),
@@ -484,12 +482,12 @@ class Star:
         if self.temp is not None and self.temp_e != 0:
             params['Teff'] = (self.temp, self.temp_e)
         if self.lum is not None and self.lum != 0:
-            params['LogL'] = (sp.log10(self.lum),
-                              sp.log10(self.lum_e))
+            params['LogL'] = (np.log10(self.lum),
+                              np.log10(self.lum_e))
         # if self.get_rad and self.rad is not None and self.rad != 0:
         #     params['radius'] = (self.rad, self.rad_e)
         params['parallax'] = (self.plx, self.plx_e)
-        mask = sp.array([1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+        mask = np.array([1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
                          0, 1, 0])
         mags = self.mags[mask == 1]
@@ -523,7 +521,7 @@ class Star:
         self.mags[mask] = mag
         self.mag_errs[mask] = err
         self.used_filters[mask] = 1
-        self.filter_mask = sp.where(self.used_filters == 1)[0]
+        self.filter_mask = np.where(self.used_filters == 1)[0]
 
         self.__reload_fluxes()
         pass
@@ -534,13 +532,13 @@ class Star:
             self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
             self.filter_names[self.filter_mask])
 
-        self.wave = sp.zeros(self.filter_names.shape[0])
-        self.flux = sp.zeros(self.filter_names.shape[0])
-        self.flux_er = sp.zeros(self.filter_names.shape[0])
-        self.bandpass = sp.zeros(self.filter_names.shape[0])
+        self.wave = np.zeros(self.filter_names.shape[0])
+        self.flux = np.zeros(self.filter_names.shape[0])
+        self.flux_er = np.zeros(self.filter_names.shape[0])
+        self.bandpass = np.zeros(self.filter_names.shape[0])
 
         for k in wave.keys():
-            filt_idx = sp.where(k == self.filter_names)[0]
+            filt_idx = np.where(k == self.filter_names)[0]
             self.wave[filt_idx] = wave[k]
             self.flux[filt_idx] = flux[k]
             self.flux_er[filt_idx] = flux_er[k]
