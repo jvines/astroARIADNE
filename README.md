@@ -332,7 +332,9 @@ from astroARIADNE.plotter import SEDPlotter
 
 The setup for the plotter is already made for you, but instructions on how to change it can be found here **_insert link here_**
 
-We only need to specify the results file location and the output folder for the plots!
+Before we plot the SEDs we need to tell **ARIADNE** where to find our models. This step isn't necessary if you don't want or need SED plots and are happy with the HR diagram, histograms, cornerplot and RAW SED. This is done with an environmental variable called ARIADNE_MODELS, to set it up you just need to run `export ARIADNE_MODELS='/path/to/Models_Dir/'` in your terminal. You can also add that instruction to your `.bash_profile` or `.bashrc` and the run `source ~/.bash_profile` so you don't have to export everytime.
+
+Now that **ARIADNE** knows where to find the models we only need to specify the results file location and the output folder for the plots!
 
 ```python
 in_file = out_folder + 'BMA_out.pkl'
