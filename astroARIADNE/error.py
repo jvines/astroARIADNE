@@ -23,7 +23,7 @@ class Error(Exception):
 
     def warn(self):
         """Print error message."""
-        print('An exception was catched!', end=': ')
+        print('An exception was caught!', end=': ')
         print(self, end='\nError message: ')
         print(self.message)
 
