@@ -300,7 +300,7 @@ We offer customization on the priors as well, those are listed in the following 
 | RAVE (Teff only) | --- |
 | Default | --- | 
 
-So if you knew (from a spectroscopic analysis, for example) that the effective temperature is 5600 +/- 100 and the metallicity is [Fe/H] = 0.09 +/- 0.05 and you wanted to use them as priors, and the star is nearby (< 70 pc), so you wanted to fix Av to 0, your prior disctionary should look like this:
+So if you knew (from a spectroscopic analysis, for example) that the effective temperature is 5600 +/- 100 and the metallicity is [Fe/H] = 0.09 +/- 0.05 and you wanted to use them as priors, and the star is nearby (< 70 pc), so you wanted to fix Av to 0, your prior dictionary should look like this:
 
 ```python
 f.prior_setup = {
