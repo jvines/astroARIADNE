@@ -51,6 +51,8 @@ But note that plotting the SED model is optional. You can run the code withouth 
 | Castelli & Kurucz | <http://ssb.stsci.edu/cdbs/tarfiles/synphot3.tar.gz>      |
 | Kurucz 1993 | <http://ssb.stsci.edu/cdbs/tarfiles/synphot4.tar.gz>  |
 
+Additionaly, the wavelength file for the Phoenix model has to be downloaded from [here](ftp://phoenix.astro.physik.uni-goettingen.de/HiResFITS/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits) and placed in the root folder of the PHOENIXv2 models.
+
 For the code to find these models, you have to place them somewhere in your computer as follows:
 
 ```
@@ -202,7 +204,7 @@ This will print the filters used, magnitudes and uncertainties. For NGTS-6 this 
 		   GALEX_NUV    	 21.9520 	  0.4090
 		      TESS      	 13.1686 	  0.0062
 ```
-**Note:** This is no longer necessary as **ARIADNE** automatically prints and saves the used magnitudes and filters to a file.
+**Note:**  **ARIADNE** automatically prints and saves the used magnitudes and filters to a file.
 
 The way the photometry retrieval works is that Gaia DR2 crossmatch catalogs are queried for the Gaia ID, these crossmatch catalogs exist for ALL-WISE, APASS, Pan-STARRS1, SDSS, 2MASS and Tycho-2, so finding photometry relies on these crossmatches. In the case of NGTS-6, there are also Pan-STARRS1 photometry which **ARIADNE** couldn't find due to the Pan-STARRS1 source not being identified in the Gaia DR2 crossmatch, in this case if you wanted to add that photometry manually, you can do so by using the `add_mag` method from Star, for example, if we wanted to add the PS1_r mag to our Star object we would do:
 
@@ -264,6 +266,8 @@ f.bma = True
 f.models = models
 f.n_samples = 100000
 ```
+
+**Note:** While you can always select all 6 models, **ARIADNE** has an internal filter put in place in order to avoid having the user unintentionally bias the results. For stars with Teff > 4000 K BT-Settl, BT-NextGen and BT-Cond are identical and thus only BT-Settl is used, even if the three are selected. On the other hand, Kurucz and Castelli & Kurucz are known to work poorly on stars with Teff < 4000 K, thus they aren't used in that regime.
 
 We allow the use of four different extinction laws:
 
