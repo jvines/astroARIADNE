@@ -47,11 +47,12 @@ But note that plotting the SED model is optional. You can run the code withouth 
 | Model        | Link           |
 | ------------- |:-------------:|
 | Phoenix v2      | <ftp://phoenix.astro.physik.uni-goettingen.de/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/> |
+| Phoenix v2   wavelength file   | <ftp://phoenix.astro.physik.uni-goettingen.de/HiResFITS/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits> |
 | BT-Models      | <http://osubdd.ens-lyon.fr/phoenix/>  |
 | Castelli & Kurucz | <http://ssb.stsci.edu/cdbs/tarfiles/synphot3.tar.gz>      |
 | Kurucz 1993 | <http://ssb.stsci.edu/cdbs/tarfiles/synphot4.tar.gz>  |
 
-Additionaly, the wavelength file for the Phoenix model has to be downloaded from [here](ftp://phoenix.astro.physik.uni-goettingen.de/HiResFITS/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits) and placed in the root folder of the PHOENIXv2 models.
+The wavelength file for the Phoenix model has to be placed in the root folder of the PHOENIXv2 models.
 
 For the code to find these models, you have to place them somewhere in your computer as follows:
 
