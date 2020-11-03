@@ -17,7 +17,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
 from scipy.optimize import curve_fit
-from scipy.stats import norm
+from scipy.stats import gaussian_kde
 
 import corner
 from dynesty import plotting as dyplot
@@ -696,51 +696,37 @@ class SEDPlotter:
     def plot_bma_hist(self):
         """Plot histograms."""
         print('Plotting BMA histograms.')
+        colors = [
+            'tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+            'tab:brown'
+        ]
         models = [key for key in self.out['originals'].keys()]
         for i, param in enumerate(self.order):
             if 'noise' in param:
                 continue
             if not self.coordinator[i]:
                 f, ax = plt.subplots(figsize=(12, 6))
-                for m in models:
+                for j, m in enumerate(models):
                     # Get samples
                     samp = self.out['originals'][m][param]
                     # Plot sample histogram
                     label = m + ' prob: {:.3f}'.format(self.out['weights'][m])
                     n, bins, patches = ax.hist(samp, alpha=.3, bins=50,
-                                               label=label, density=True)
-                    # Fit gaussian distribution to data
-                    bc = bins[:-1] + np.diff(bins)
-                    # Get reasonable p0
-                    mu, sig = norm.fit(samp)
-                    try:
-                        popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-                                               p0=[mu, sig, n.max()],
-                                               maxfev=50000)
-                        fit = True
-                    except RuntimeError:
-                        fit = False
-                    if fit and param != 'norm':
-                        xx = np.linspace(bins[0], bins[-1], 100000)
-                        # Plot best fit
-                        ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
-                                alpha=.7)
+                                               label=label, density=True,
+                                               color=colors[j])
+                    # Fit a KDE to data
+                    kde = gaussian_kde(samp)
+                    xx = np.linspace(bins[0], bins[-1], 100000)
+                    # Plot best fit
+                    ax.plot(xx, kde(xx), lw=2, alpha=1, color=colors[j])
                 # The same but for the averaged samples
                 n, bins, patches = ax.hist(
                     self.out['posterior_samples'][param], alpha=.3,
-                    bins=50, label='Average', density=True
+                    bins=50, label='Average', density=True, color='tab:cyan'
                 )
-                bc = bins[:-1] + np.diff(bins)
-                mu, sig = norm.fit(self.out['posterior_samples'][param])
-                try:
-                    popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-                                           p0=[mu, sig, n.max()])
-                    fit = True
-                except RuntimeError:
-                    fit = False
-                if fit and param != 'norm':
-                    xx = np.linspace(bins[0], bins[-1], 100000)
-                    ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
+                kde = gaussian_kde(self.out['posterior_samples'][param])
+                xx = np.linspace(bins[0], bins[-1], 100000)
+                ax.plot(xx, kde(xx), color='tab:cyan', lw=2, alpha=1)
                 ax.set_ylabel('PDF',
                               fontsize=self.fontsize,
                               fontname=self.fontname
