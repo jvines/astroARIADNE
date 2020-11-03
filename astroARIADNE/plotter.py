@@ -96,7 +96,7 @@ class SEDPlotter:
     __wav_file = 'PHOENIXv2/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
     def __init__(self, input_files, out_folder, pdf=False, png=True,
-                 model=None):
+                 model=None, settings=None):
         """See class docstring."""
         print('\nInitializing plotter.\n')
         # General setup
@@ -113,6 +113,7 @@ class SEDPlotter:
         self.post_out = posteriors
         self.hist_out = histograms
         self.moddir = modelsdir
+        self.settings_dir = settings
 
         # Read output files.
         if input_files != 'raw':
@@ -362,7 +363,7 @@ class SEDPlotter:
                     marker=None)
 
         ax.scatter(self.wave, self.flux * self.wave,
-                   edgecolors=self.edgecolors,
+                   edgecolors='black',
                    marker=self.marker,
                    c=self.marker_colors,
                    s=self.scatter_size, zorder=1,
@@ -382,10 +383,9 @@ class SEDPlotter:
                       xerr=self.bandpass, yerr=self.flux_er,
                       fmt=',',
                       ecolor=self.error_color,
-                      # color='turquoise',
                       marker=None)
         ax_r.scatter(self.wave, np.zeros(self.wave.shape[0]),
-                     edgecolors=self.edgecolors,
+                     edgecolors='black',
                      marker=self.marker,
                      c=self.marker_colors,
                      s=self.scatter_size,
@@ -498,7 +498,7 @@ class SEDPlotter:
             brf = brf[lower_lim * upper_lim]
             brf = apply(ext, brf)
             flx = brf * norm * new_w
-            ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color='k', zorder=0)
+            ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'btsettl':
             wave, flux = self.fetch_btsettl()
@@ -519,7 +519,7 @@ class SEDPlotter:
             )
             flx = apply(ext, brf)
             flx *= wave * norm
-            ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
+            ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'btnextgen':
             wave, flux = self.fetch_btnextgen()
@@ -540,7 +540,7 @@ class SEDPlotter:
             )
             flx = apply(ext, brf)
             flx *= wave * norm
-            ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
+            ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'btcond':
             wave, flux = self.fetch_btcond()
@@ -561,7 +561,7 @@ class SEDPlotter:
             )
             flx = apply(ext, brf)
             flx *= wave * norm
-            ax.plot(wave, flx, lw=1.25, color='k', zorder=0)
+            ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'ck04':
             wave, flux = self.fetch_ck04()
@@ -574,7 +574,7 @@ class SEDPlotter:
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
             flux *= wave * norm
-            ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
+            ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'kurucz':
             wave, flux = self.fetch_kurucz()
@@ -587,7 +587,7 @@ class SEDPlotter:
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
             flux *= wave * norm
-            ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
+            ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'coelho':
             wave, flux = self.fetch_coelho()
@@ -600,7 +600,7 @@ class SEDPlotter:
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
             flux *= wave * norm
-            ax.plot(wave, flux, lw=1.25, color='k', zorder=0)
+            ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
         pass
 
     def plot_chains(self):
@@ -896,13 +896,14 @@ class SEDPlotter:
         loglum = iso_bf['logL'].values
         mass = iso_bf['mass'].values
 
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=self.hr_figsize)
 
         points = np.array([logteff, loglum]).T.reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
         norm = plt.Normalize(mass.min(), mass.max())
-        lc = LineCollection(segments, cmap='cool', norm=norm, linewidths=5)
+        lc = LineCollection(segments, cmap=self.hr_cmap, norm=norm,
+                            linewidths=5)
 
         lc.set_array(mass)
         line = ax.add_collection(lc)
@@ -926,12 +927,11 @@ class SEDPlotter:
             ax.plot(logt, logl, color='gray')
 
         ax.errorbar(teff, lum, xerr=[[teff_lo], [teff_hi]],
-                    yerr=[[lum_lo], [lum_hi]], color='greenyellow',
+                    yerr=[[lum_lo], [lum_hi]], color=self.hr_color,
                     zorder=1001)
-        ax.scatter(teff, lum, s=350, color='greenyellow', zorder=1002,
-                   edgecolors='k', marker='*')
-        # ax.set_xlim(logteff.max() + .05, logteff.min() - .05)
-        # ax.set_ylim(loglum.min() - .25, loglum.max() + .25)
+        ax.scatter(teff, lum, s=350, color=self.hr_color, zorder=1002,
+                   edgecolors='k', marker=self.hr_marker)
+
         ax.invert_xaxis()
         ax.set_xlabel('logTeff',
                       fontsize=self.fontsize,
@@ -1405,7 +1405,10 @@ class SEDPlotter:
 
     def __read_config(self):
         """Read plotter configuration file."""
-        settings = open(filesdir + '/plot_settings.dat', 'r')
+        if self.settings_dir is not None:
+            settings = open(filesdir + '/plot_settings.dat', 'r')
+        else:
+            settings = open(self.settings_dir, 'r')
         for line in settings.readlines():
             if line[0] == '#' or line[0] == '\n':
                 continue

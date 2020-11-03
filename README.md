@@ -1,6 +1,6 @@
 # ARIADNE (spectrAl eneRgy dIstribution bAyesian moDel averagiNg fittEr)
 ## Characterize stellar atmospheres easily!
-**ARIADNE** Is a code written in python 3 (sorry python 2 users!) designed to fit broadband photometry to different stellar atmosphere models automatically using Nested sampling algorithms.
+**ARIADNE** Is a code written in python 3 (sorry python 2 users!) designed to fit broadband photometry to different stellar atmosphere models automatically using Nested Sampling algorithms.
 
 # Installation
 To install **ARIADNE** you can clone this repository with
@@ -334,7 +334,7 @@ After the fitting has finished, we need to visualize our results. **ARIADNE** in
 from astroARIADNE.plotter import SEDPlotter
 ```
 
-The setup for the plotter is already made for you, but instructions on how to change it can be found here **_insert link here_**
+The setup for the plotter is already made for you, but if you really want to change them, instructions on how to change it can be found [here](https://github.com/jvines/astroARIADNE/blob/master/customization.md)
 
 Before we plot the SEDs we need to tell **ARIADNE** where to find our models. This step isn't necessary if you don't want or need SED plots and are happy with the HR diagram, histograms, cornerplot and RAW SED. This is done with an environmental variable called ARIADNE_MODELS, to set it up you just need to run `export ARIADNE_MODELS='/path/to/Models_Dir/'` in your terminal. You can also add that instruction to your `.bash_profile` or `.bashrc` and the run `source ~/.bash_profile` so you don't have to export everytime.
 
@@ -385,7 +385,3 @@ Examples of those figures:
 ![HR Diagram](https://github.com/jvines/astroARIADNE/blob/master/img/HR_diagram.png)
 ![Corner plot](https://github.com/jvines/astroARIADNE/blob/master/img/CORNER.png)
 ![Histogram example](https://github.com/jvines/astroARIADNE/blob/master/img/rad.png)
-
-## TODO
-
-- customizing plots

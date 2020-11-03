@@ -3,32 +3,35 @@
 
 ### GENERAL
 figsize 12,8
-
-### SCATTER PLOTS
-scatter_size 60
-edgecolors black
-marker o
-marker_model D
-marker_colors aqua
-marker_colors_model deeppink
-scatter_alpha 0.85
-scatter_linewidths 1
-
-### ERRORBARS
-error_color tab:blue
-error_alpha 1
-
-### TEXT FORMAT
 fontsize 26
 fontname serif
 tick_labelsize 22
 
+### SED
+scatter_size 60
+marker o
+marker_model D
+marker_colors aqua
+marker_colors_model magenta
+scatter_alpha 0.85
+model_color black
+
+### SED ERRORBARS
+error_color tab:blue
+error_alpha 1
+
 ### CORNER PLOT
 corner_med_c firebrick
+corner_med_style --
 corner_v_c lightcoral
 corner_v_style -.
-corner_med_style --
 corner_fontsize 20
 corner_tick_fontsize 15
 corner_labelpad 15
 corner_marker sr
+
+### HR DIAGRAM
+hr_figsize 12,8
+hr_marker *
+hr_color greenyellow
+hr_cmap cool
