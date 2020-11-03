@@ -293,7 +293,7 @@ f.prior_setup = {
 
 A quick explanation on the priors:
 
-The default priors for Teff, distance, and radius are the values found in Gaia DR2. the RAVE prior applies only to Teff and consists on the Teff distribution from the RAVE survey, the default prior for the metallicity `z` and log g are also their respective distributions from the RAVE survey, the default prior for Av is a flat prior that ranges from 0 to the maximum of line-of-sight as per the SFD map, finally the excess noise parameters all have gaussian priors centered around their respective uncertainties.
+The default prior for Teff is an empirical prior drawn from the RAVE survey temperatures distribution, the distance prior is drawn from the [Bailer-Jones](https://ui.adsabs.harvard.edu/abs/2018AJ....156...58B/abstract) distance estimate from Gaia DR2, and the radius has a flat prior ranging from 0.5 to 20 R$_\odot$. The default prior for the metallicity `z` and log g are also their respective distributions from the RAVE survey, the default prior for Av is a flat prior that ranges from 0 to the maximum of line-of-sight as per the SFD map, finally the excess noise parameters all have gaussian priors centered around their respective uncertainties.
 
 We offer customization on the priors as well, those are listed in the following table.
 
