@@ -43,12 +43,12 @@ def estimate(bands, params, logg=True):
         msg += 'Aborting age and mass calculation.'
         InputError(msg).warn()
         return sp.zeros(10), sp.zeros(10)
-    # if 'feh' in params.keys():
-    #     fe, fe_e = params['feh']
-    #     if fe + fe_e >= 0.5:
-    #         model._priors['feh'] = FlatPrior([fe - fe_e, 0.5])
-    #     else:
-    #         model._priors['feh'] = GaussianPrior(fe, fe_e)
+    if 'feh' in params.keys():
+        fe, fe_e = params['feh']
+        if fe + fe_e >= 0.5:
+            model._priors['feh'] = FlatPrior([0.45, 0.5])
+        else:
+            model._priors['feh'] = GaussianPrior(fe, fe_e)
     if 'mass' in params.keys():
         m, m_e = params['mass']
         model._priors['mass'] = GaussianPrior(m, m_e)

@@ -1391,7 +1391,7 @@ class SEDPlotter:
 
     def __read_config(self):
         """Read plotter configuration file."""
-        if self.settings_dir is not None:
+        if self.settings_dir is None:
             settings = open(filesdir + '/plot_settings.dat', 'r')
         else:
             settings = open(self.settings_dir, 'r')
@@ -1401,6 +1401,9 @@ class SEDPlotter:
             splt = line.split(' ')
             attr = splt[0]
             if attr == 'figsize':
+                vals = splt[1].split('\n')[0].split(',')
+                val = (int(vals[0]), int(vals[1]))
+            elif attr == 'hr_figsize':
                 vals = splt[1].split('\n')[0].split(',')
                 val = (int(vals[0]), int(vals[1]))
             elif 'alpha' in attr:
