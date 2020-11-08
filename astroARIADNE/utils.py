@@ -258,6 +258,15 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     print(colored('[{:.3f}, {:.3f}]'.format(lo, up), c))
 
     if engine == 'Bayesian Model Averaging':
+        miso = out['best_fit']['iso_mass']
+        unlo, unhi = out['uncertainties']['iso_mass']
+        lo, up = out['confidence_interval']['iso_mass']
+        print(colored('\t\t\tiso_mass : ', c), end='')
+        print(colored('{:.4f}'.format(miso), c), end=' ')
+        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
+        print(colored('{:.4f}'.format(unlo), c), end=' ')
+        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+
         age = out['best_fit']['age']
         unlo, unhi = out['uncertainties']['age']
         lo, up = out['confidence_interval']['age']
@@ -267,11 +276,11 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         print(colored('{:.4f}'.format(unlo), c), end=' ')
         print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
 
-        miso = out['best_fit']['iso_mass']
-        unlo, unhi = out['uncertainties']['iso_mass']
-        lo, up = out['confidence_interval']['iso_mass']
-        print(colored('\t\t\tiso_mass : ', c), end='')
-        print(colored('{:.4f}'.format(miso), c), end=' ')
+        eep = out['best_fit']['eep']
+        unlo, unhi = out['uncertainties']['eep']
+        lo, up = out['confidence_interval']['eep']
+        print(colored('\t\t\tEEP : ', c), end='')
+        print(colored('{:.4f}'.format(eep), c), end=' ')
         print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
         print(colored('{:.4f}'.format(unlo), c), end=' ')
         print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
