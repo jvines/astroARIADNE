@@ -173,7 +173,7 @@ class Star:
                  lum=None, lum_e=None,
                  logg=None, logg_e=None,
                  dist=None, dist_e=None,
-                 av=None,
+                 Av=None,
                  mag_dict=None, verbose=True, ignore=[]):
         """See class docstring."""
         # MISC
@@ -282,15 +282,15 @@ class Star:
                 filters.append(k)
         self.filter_mask = np.where(self.used_filters == 1)[0]
 
-        # Get max av
-        if av is None:
+        # Get max Av
+        if Av is None:
             sfd = SFDQuery()
             coords = SkyCoord(self.ra, self.dec,
                               unit=(u.deg, u.deg), frame='icrs')
             ebv = sfd(coords)
             self.Av = ebv * 2.742
         else:
-            self.Av = av
+            self.Av = Av
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags[self.filter_mask], self.mag_errs[self.filter_mask],

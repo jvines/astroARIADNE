@@ -150,10 +150,10 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     ]
     c = random.choice(colors)
     if use_norm:
-        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
         order = np.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
     if engine == 'Bayesian Model Averaging':
         res_dir = out_folder + '/BMA_out.pkl'

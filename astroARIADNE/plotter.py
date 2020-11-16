@@ -151,12 +151,12 @@ class SEDPlotter:
                 self.order = np.array(
                     [
                         'teff', 'logg', 'z',
-                        'dist', 'rad', 'av',
+                        'dist', 'rad', 'Av',
                     ]
                 )
             else:
                 self.order = np.array(
-                    ['teff', 'logg', 'z', 'norm', 'av'])
+                    ['teff', 'logg', 'z', 'norm', 'Av'])
 
             mask = self.star.filter_mask
             flxs = self.star.flux[mask]
@@ -1348,7 +1348,7 @@ class SEDPlotter:
                 new_titles[i] = r'R ='
             if param == 'norm':
                 new_titles[i] = r'    (R/D)$^2$ ='
-            if param == 'av':
+            if param == 'Av':
                 new_titles[i] = r'Av ='
             if param == 'inflation':
                 new_titles[i] = r'$\sigma$ ='
@@ -1383,7 +1383,7 @@ class SEDPlotter:
                 new_labels[i] = r'R $($R$_\odot)$'
             if param == 'norm':
                 new_labels[i] = r'(R/D)'
-            if param == 'av':
+            if param == 'Av':
                 new_labels[i] = r'Av'
             if param == 'inflation':
                 new_labels[i] = r'$\sigma$'

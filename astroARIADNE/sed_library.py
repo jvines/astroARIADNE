@@ -15,11 +15,11 @@ def build_params(theta, flux, flux_e, filts, coordinator, fixed, use_norm):
     """Build the parameter vector that goes into the model."""
     if use_norm:
         params = np.zeros(len(coordinator))
-        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
         params = np.zeros(len(coordinator))
         order = np.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
 
     for filt, flx, flx_e in zip(filts, flux, flux_e):
@@ -138,10 +138,10 @@ def prior_transform_dynesty(u, flux, flux_er, filts, prior_dict, coordinator,
     """Transform the prior from the unit cube to the parameter space."""
     u2 = np.array(u)
     if use_norm:
-        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
         order = np.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
 
     for filt, flx, flx_e in zip(filts, flux, flux_er):
@@ -175,10 +175,10 @@ def prior_transform_multinest(u, flux, flux_er, filts, prior_dict, coordinator,
                               use_norm):
     """Transform the prior from the unit cube to the parameter space."""
     if use_norm:
-        order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
         order = np.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'av']
+            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
 
     for filt, flx, flx_e in zip(filts, flux, flux_er):

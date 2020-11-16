@@ -335,11 +335,11 @@ class Fitter:
             order = np.array(
                 [
                     'teff', 'logg', 'z',
-                    'dist', 'rad', 'av'
+                    'dist', 'rad', 'Av'
                 ]
             )
         else:
-            order = np.array(['teff', 'logg', 'z', 'norm', 'av'])
+            order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
 
         # Create output directory
         if self.out_folder is None:
@@ -350,9 +350,9 @@ class Fitter:
 
         # Parameter coordination.
         # Order for the parameters are:
-        # teff, logg, z, dist, rad, av, noise
+        # teff, logg, z, dist, rad, Av, noise
         # or
-        # teff, logg, z, norm, av, noise
+        # teff, logg, z, norm, Av, noise
         npars = 6 if not self.norm else 5
         npars += self.star.used_filters.sum()
         npars = int(npars)
@@ -461,7 +461,7 @@ class Fitter:
         if not self._norm:
             if self.star.dist != -1:
                 defaults['dist'] = st.norm(
-                    loc=self.star.dist, scale=3 * self.star.dist_e)
+                    loc=self.star.dist, scale=5 * self.star.dist_e)
             else:
                 # PriorError('distance', 4).warn()
                 defaults['dist'] = st.uniform(loc=1, scale=1000)
@@ -483,9 +483,9 @@ class Fitter:
             av_idx = 4 if self._norm else 5
             self.coordinator[av_idx] = 1
             self.fixed[av_idx] = 0
-            defaults['av'] = None
+            defaults['Av'] = None
         else:
-            defaults['av'] = st.uniform(loc=0, scale=self.star.Av)
+            defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
         # Noise model prior setup.
         mask = self.star.filter_mask
         flxs = self.star.flux[mask]
@@ -508,7 +508,7 @@ class Fitter:
         param_list = [
             'teff', 'logg', 'z',
             'dist', 'rad', 'norm',
-            'av'
+            'Av'
         ]
 
         noise = []
@@ -754,7 +754,7 @@ class Fitter:
                         queue_size=self._threads, logl_args=([intp])
                     )
                     sampler.run_nested(dlogz_init=self._dlogz,
-                                       nlive_init=self._nlive,
+                                       nlive_batch=self._nlive,
                                        wt_kwargs={'pfrac': .95})
             else:
                 with Pool(self._threads) as executor:
@@ -1138,7 +1138,7 @@ class Fitter:
             )
             out['posterior_samples']['rad'] = rad
 
-        # Create a distribution of masses.
+        # Create a distribution of masses
 
         logg_samp = out['posterior_samples']['logg']
         rad_samp = out['posterior_samples']['rad']
@@ -1322,7 +1322,7 @@ class Fitter:
         c = random.choice(colors)
         print(
             colored(
-                '\t\t*** ESTIMATING AGE USING MIST ISOCHRONES ***', c
+                '\t\t*** ESTIMATING AGE AND MASS USING MIST ISOCHRONES ***', c
             )
         )
         params = dict()  # params for isochrones.
@@ -1337,7 +1337,7 @@ class Fitter:
                 par = 'distance'
             if k == 'rad':
                 par = 'radius'
-            if k == 'av':
+            if k == 'Av':
                 par = 'AV'
             if not self.coordinator[i]:
                 if k != 'norm':
@@ -1350,7 +1350,7 @@ class Fitter:
             else:
                 continue
 
-        # params['mass'] = (bf['mass'], max(unc['mass']))
+        params['mass'] = (bf['grav_mass'], max(unc['grav_mass']))
         if star.lum != 0 and star.lum_e != 0:
             params['logL'] = (np.log10(bf['lum']),
                               abs(np.log10(max(unc['lum']))))
