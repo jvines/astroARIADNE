@@ -526,6 +526,17 @@ class Star:
         self.__reload_fluxes()
         pass
 
+    def remove_mag(self, filter):
+        """Remove an individual photometry point."""
+        mask = self.filter_names == filter
+        self.mags[mask] = 0
+        self.mag_errs[mask] = 0
+        self.used_filters[mask] = 0
+        self.filter_mask = np.where(self.used_filters == 1)[0]
+
+        self.__reload_fluxes()
+        pass
+
     def __reload_fluxes(self):
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(

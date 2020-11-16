@@ -208,10 +208,16 @@ This will print the filters used, magnitudes and uncertainties. For NGTS-6 this 
 ```
 **Note:**  **ARIADNE** automatically prints and saves the used magnitudes and filters to a file.
 
-The way the photometry retrieval works is that Gaia DR2 crossmatch catalogs are queried for the Gaia ID, these crossmatch catalogs exist for ALL-WISE, APASS, Pan-STARRS1, SDSS, 2MASS and Tycho-2, so finding photometry relies on these crossmatches. In the case of NGTS-6, there are also Pan-STARRS1 photometry which **ARIADNE** couldn't find due to the Pan-STARRS1 source not being identified in the Gaia DR2 crossmatch, in this case if you wanted to add that photometry manually, you can do so by using the `add_mag` method from Star, for example, if we wanted to add the PS1_r mag to our Star object we would do:
+The way the photometry retrieval works is that Gaia DR2 crossmatch catalogs are queried for the Gaia ID, these crossmatch catalogs exist for ALL-WISE, APASS, Pan-STARRS1, SDSS, 2MASS and Tycho-2, so finding photometry relies on these crossmatches. In the case of NGTS-6, there are also Pan-STARRS1 photometry which **ARIADNE** couldn't find due to the Pan-STARRS1 source not being identified in the Gaia DR2 crossmatch, in this case if you wanted to add that photometry manually, you can do so by using the `add_mag` method from Star, for example, if you wanted to add the PS1_r mag to our `Star` object you would do:
 
 ```python
 s.add_mag(13.751, 0.032, 'PS1_r')
+```
+
+If for whatever reason **ARIADNE** found a bad photometry point and you needed to remove it, you can invoke the `remove_mag` method. For example you wanted to remove the TESS magnitude due to it being from a blended source, you can just run
+
+```python
+s.remove_mag('TESS')
 ```
 
 A list of allowed filters can be found [here](https://github.com/jvines/astroARIADNE/blob/master/filters.md)
