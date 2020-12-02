@@ -32,6 +32,7 @@ class Error(Exception):
         log_f = open(out, 'a')
         log_f.write(self.message)
         log_f.close()
+
     pass
 
 
@@ -173,3 +174,35 @@ class DynestyError(Error):
         self.message = 'ERROR OCCURRED DURING DYNESTY RUN.\n'
         self.message += 'WHILE FITTING MODEL {}\n'.format(mod)
         self.message += 'DUMPING `sampler.results` TO {}'.format(out)
+
+
+class StarWarning(Error):
+    """Warnings for the Star class.
+
+    Notes
+    -----
+    Type 0 means the warning is input detected
+    Type 1 means offline is true but no mag dict was given
+    """
+
+    def __init__(self, par, type):
+        self.errorname = 'StarWarning'
+        if type == 0:
+            self.message = f'{par} input detected.'
+            self.message += ' Overriding coordinate search.'
+        if type == 1:
+            self.message = 'You are running ARIADNE offline but no magnitudes '
+            self.message += 'were given. Make sure you are providing a valid '
+            self.message += 'mag_dict.'
+
+    def warn(self):
+        print('Star Warning ! ! !')
+        print(self.message)
+
+    def __raise__(self):
+        """Raise an exception and print the error message."""
+        try:
+            raise self
+        except Error:
+            print('Star Error ! ! !')
+            sys.exit()

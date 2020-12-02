@@ -14,8 +14,27 @@ from termcolor import colored
 from .config import gridsdir
 from .isochrone import estimate
 from .librarian import Librarian
+from .error import StarWarning
 from .phot_utils import *
 from .utils import display_star_fin, display_star_init
+
+
+def extract_from_lib(lib):
+    """Extract relevant parameters from lib.
+
+    Returns
+    -------
+    [plx, plx_e, dist, dist_e, rad, rad_e, temp, temp_e, lum, lum_e]
+    """
+    if lib is None:
+        return [-1] * 10
+    return [
+        lib.plx, lib.plx_e,
+        lib.dist, lib.dist_e,
+        lib.rad, lib.rad_e,
+        lib.temp, lib.temp_e,
+        lib.lum, lib.lum_e
+    ]
 
 
 class Star:
@@ -33,6 +52,9 @@ class Star:
 
     dec : float
         DEC coordinate of the object in degrees.
+
+    g_id : int, optional
+        The Gaia DR2 identifier.
 
     get_plx : bool, optional
         Set to True in order to query Gaia DR2 for the stellar parallax.
@@ -77,15 +99,20 @@ class Star:
     lum_e : float, optional
         The error on the stellar luminosity.
 
+    dist : float, optional
+        The distance in parsec.
+
+    dist_e : float, optional
+        The error on the distance.
+
     mag_dict : dictionary, optional
         A dictionary with the filter names as keys (names must correspond to
         those in the filter_names attribute) and with a tuple containing the
         magnitude and error for that filter as the value. Provide in case no
         internet connection is available.
 
-    coordinate_search : bool
-        If True uses coordinates to search for the object in the catalogs.
-        Else it uses the object's name.
+    offline : bool
+        If False it overrides the coordinate search entirely.
 
     verbose : bool, optional
         Set to False to suppress printed outputs.
@@ -171,9 +198,8 @@ class Star:
                  rad=None, rad_e=None,
                  temp=None, temp_e=None,
                  lum=None, lum_e=None,
-                 logg=None, logg_e=None,
                  dist=None, dist_e=None,
-                 Av=None,
+                 Av=None, offline=False,
                  mag_dict=None, verbose=True, ignore=[]):
         """See class docstring."""
         # MISC
@@ -189,28 +215,23 @@ class Star:
 
         if verbose:
             if plx is not None:
-                print('Parallax input detected.', end=' ')
-                print('Overriding coordinate search.')
+                StarWarning('Parallax', 0).warn()
             if rad is not None:
-                print('Radius input detected.', end=' ')
-                print('Overriding coordinate search.')
+                StarWarning('Radius', 0).warn()
             if temp is not None:
-                print('Temperature input detected.', end=' ')
-                print('Overriding coordinate search.')
+                StarWarning('Temperature', 0).warn()
             if lum is not None:
-                print('Luminosity input detected.', end=' ')
-                print('Overriding coordinate search.')
+                StarWarning('Luminosity', 0).warn()
             if mag_dict is not None:
-                print('Input magnitudes detected.', end=' ')
-                print('Overriding coordinate search.')
+                StarWarning('Magnitudes', 0).warn()
 
-        self.get_rad = True if rad is None else False
-        self.get_dist = True if dist is None else False
         self.get_plx = True if plx is None else False
+        self.get_dist = True if dist is None and plx is None else False
+        self.get_rad = True if rad is None else False
         self.get_temp = True if temp is None else False
         self.get_lum = True if lum is None else False
         self.get_mags = True if mag_dict is None else False
-        self.get_logg = False
+        self.get_logg = False  # This is set to True after self.estimate_logg
 
         self.g_id = g_id
 
@@ -218,57 +239,74 @@ class Star:
         # and parallax
         lookup = self.get_rad + self.get_temp + self.get_plx \
             + self.get_mags + self.get_dist
+
         if lookup:
-            if verbose:
+            if not offline:
+                if verbose:
+                    print(
+                        colored('\t\t*** LOOKING UP ARCHIVAL INFORMATION ***',
+                                c)
+                    )
+                lib = Librarian(starname, self.ra, self.dec, g_id=self.g_id,
+                                mags=self.get_mags, ignore=ignore)
+                self.g_id = lib.g_id
+                self.tic = lib.tic
+                self.kic = lib.kic
+            else:
                 print(
-                    colored('\t\t*** LOOKING UP ARCHIVAL INFORMATION ***', c)
+                    colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)
                 )
-            lib = Librarian(starname, self.ra, self.dec, g_id=self.g_id,
-                            mags=self.get_mags, ignore=ignore)
-            self.g_id = lib.g_id
-            self.tic = lib.tic
-            self.kic = lib.kic
+                if self.get_mags:
+                    StarWarning('', 1).__raise__()
+                lib = None
+                self.tic = False
+                self.kic = False
+            
+            # [plx, plx_e, dist, dist_e, rad, rad_e, temp, temp_e, lum, lum_e]
+            libouts = extract_from_lib(lib)
+
             if self.get_plx:
-                self.plx = lib.plx
-                self.plx_e = lib.plx_e
+                self.plx = libouts[0]
+                self.plx_e = libouts[1]
             else:
                 self.plx = plx
                 self.plx_e = plx_e
 
             if self.get_dist:
-                self.dist = lib.dist
-                self.dist_e = lib.dist_e
-            else:
+                self.dist = libouts[2]
+                self.dist_e = libouts[3]
+            elif dist is not None:
                 self.dist = dist
                 self.dist_e = dist_e
+            else:
+                self.calculate_distance()
 
             if self.get_rad:
-                self.rad = lib.rad
-                self.rad_e = lib.rad_e
+                self.rad = libouts[4]
+                self.rad_e = libouts[5]
             else:
                 self.rad = rad
                 self.rad_e = rad_e
 
             if self.get_temp:
-                self.temp = lib.temp
-                self.temp_e = lib.temp_e
+                self.temp = libouts[6]
+                self.temp_e = libouts[7]
             else:
                 self.temp = temp
                 self.temp_e = temp_e
 
             if self.get_lum:
-                self.lum = lib.lum
-                self.lum_e = lib.lum_e
+                self.lum = libouts[8]
+                self.lum_e = libouts[9]
             else:
                 self.lum = lum
                 self.lum_e = lum_e
 
-            if self.get_mags:
-                self.used_filters = lib.used_filters
-                self.mags = lib.mags
-                self.mag_errs = lib.mag_errs
-
-        if not self.get_mags:
+        if self.get_mags:
+            self.used_filters = lib.used_filters
+            self.mags = lib.mags
+            self.mag_errs = lib.mag_errs
+        else:
             filters = []
             self.used_filters = np.zeros(self.filter_names.shape[0])
             self.mags = np.zeros(self.filter_names.shape[0])
@@ -339,6 +377,7 @@ class Star:
 
     def load_grid(self, model):
         """Load the model grid for interpolation."""
+        raise DeprecationWarning()
         # Grid stuff
         if model.lower() == 'phoenix':
             gridname = gridsdir + '/model_grid_Phoenixv2.dat'
@@ -405,12 +444,12 @@ class Star:
             The metallicity.
 
         filt : str
-            The desired filter.
+            The desired filt.
 
         Returns
         -------
         flux : float
-            The interpolated flux at temp, logg, z for filter filt.
+            The interpolated flux at temp, logg, z for filt filt.
 
         """
         values = (temp, logg, z) if not self.fixed_z else (temp, logg)
@@ -484,8 +523,8 @@ class Star:
         if self.lum is not None and self.lum != 0:
             params['LogL'] = (np.log10(self.lum),
                               np.log10(self.lum_e))
-        # if self.get_rad and self.rad is not None and self.rad != 0:
-        #     params['radius'] = (self.rad, self.rad_e)
+        if self.get_rad and self.rad is not None and self.rad != 0:
+            params['radius'] = (self.rad, self.rad_e)
         params['parallax'] = (self.plx, self.plx_e)
         mask = np.array([1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
@@ -515,9 +554,9 @@ class Star:
                     '{:.3f} +/- {:.3f}'.format(self.logg, self.logg_e), c)
             )
 
-    def add_mag(self, mag, err, filter):
+    def add_mag(self, mag, err, filt):
         """Add an individual photometry point to the SED."""
-        mask = self.filter_names == filter
+        mask = self.filter_names == filt
         self.mags[mask] = mag
         self.mag_errs[mask] = err
         self.used_filters[mask] = 1
@@ -526,9 +565,9 @@ class Star:
         self.__reload_fluxes()
         pass
 
-    def remove_mag(self, filter):
+    def remove_mag(self, filt):
         """Remove an individual photometry point."""
-        mask = self.filter_names == filter
+        mask = self.filter_names == filt
         self.mags[mask] = 0
         self.mag_errs[mask] = 0
         self.used_filters[mask] = 0
@@ -554,3 +593,4 @@ class Star:
             self.flux[filt_idx] = flux[k]
             self.flux_er[filt_idx] = flux_er[k]
             self.bandpass[filt_idx] = bandpass[k]
+

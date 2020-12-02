@@ -307,8 +307,6 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
     print(colored(spt, c))
     if engine != 'Bayesian Model Averaging':
-        # print(colored('\t\t\tLog Likelihood of best fit : ', c), end='')
-        # print(colored('{:.3f}'.format(lglk), c))
         print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
         print(colored('{:.3f} +/-'.format(z), c), end=' ')
         print(colored('{:.3f}'.format(z_err), c))
@@ -328,10 +326,12 @@ def create_dir(path):
     try:
         os.mkdir(path)
     except OSError:
-        print("Creation of the directory {:s} failed".format(path))
+        err_msg = f"Creation of the directory {path:s} failed."
+        err_msg += "It might already exist"
+        print(err_msg)
         pass
     else:
-        print("Created the directory {:s} ".format(path))
+        print(f"Created the directory {path:s} ")
         pass
     pass
 
