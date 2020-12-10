@@ -377,7 +377,6 @@ class Star:
 
     def load_grid(self, model):
         """Load the model grid for interpolation."""
-        raise DeprecationWarning()
         # Grid stuff
         if model.lower() == 'phoenix':
             gridname = gridsdir + '/model_grid_Phoenixv2.dat'
