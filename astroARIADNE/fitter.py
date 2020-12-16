@@ -83,6 +83,8 @@ class Fitter:
     def __init__(self):
 
         # Default values for attributes
+        self._interpolators = []
+        self._grids = []
         self.out_folder = None
         self.verbose = True
         self.star = None
@@ -314,8 +316,7 @@ class Fitter:
         creation, creates output directory, initializes coordinators and sets
         up global variables.
         """
-        global prior_dict, coordinator, fixed, order, star
-        global use_norm, av_law
+        global prior_dict, coordinator, fixed, order, star, use_norm, av_law
         self.start = time.time()
         err_msg = 'No star is detected. Please create an instance of Star.'
         if self.star is None:
@@ -381,11 +382,18 @@ class Fitter:
         if self._bma:
             if self.n_samples is None:
                 self.n_samples = 'max'
-            self._grids = []
-            self._interpolators = []
+
+            if self.star.offline:
+                self.star.temp = 4001
+                off_msg = 'Offline mode assumes that the stellar'
+                off_msg += ' temperature is greater than 4000 K'
+                off_msg += '. If you believe this is not the case then please '
+                off_msg += 'add a temperature to the Star constructor'
+                print(off_msg)
+
             for mod in self._bma_models:
-                # directory = '../Datafiles/model_grids/'
-                directory = './'
+                # We'll assume that if ARIADNE is running in offline mode
+                # Then the star will have > 4000 K
                 if mod.lower() == 'phoenix':
                     with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
                         df = DFInterpolator(pd.read_pickle(intp))
@@ -418,13 +426,13 @@ class Fitter:
                     else:
                         # Warning temp too low for model.
                         continue
-                if mod.lower() == 'coelho':
-                    if self.star.temp > 3500:
-                        with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                            df = DFInterpolator(pd.read_pickle(intp))
-                    else:
-                        # Warning
-                        continue
+                # if mod.lower() == 'coelho':
+                #     if self.star.temp > 3500:
+                #         with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
+                #             df = DFInterpolator(pd.read_pickle(intp))
+                #     else:
+                #         # Warning
+                #         continue
                 self._interpolators.append(df)
                 self._grids.append(mod)
             thr = self._threads if self._sequential else len(

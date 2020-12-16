@@ -204,6 +204,7 @@ class Star:
         """See class docstring."""
         # MISC
         self.verbose = verbose
+        self.offline = offline
 
         # Star stuff
         self.starname = starname
