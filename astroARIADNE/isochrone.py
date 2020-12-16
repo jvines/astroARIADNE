@@ -11,6 +11,7 @@ from isochrones.priors import FlatPrior, GaussianPrior
 from numba.core.errors import (NumbaDeprecationWarning,
                                NumbaPendingDeprecationWarning)
 
+from .error import InputError
 import dynesty
 from dynesty.utils import resample_equal
 
@@ -46,7 +47,7 @@ def estimate(bands, params, logg=True):
     if 'feh' in params.keys():
         fe, fe_e = params['feh']
         if fe + fe_e >= 0.5:
-            model._priors['feh'] = FlatPrior([0.45, 0.5])
+            model._priors['feh'] = FlatPrior([-0.5, 0.5])
         else:
             model._priors['feh'] = GaussianPrior(fe, fe_e)
     if 'mass' in params.keys():
@@ -56,13 +57,13 @@ def estimate(bands, params, logg=True):
         av, av_e = params['AV']
         model._priors['AV'] = GaussianPrior(av, av_e)
     model._priors['distance'] = GaussianPrior(dist, dist_e)
-    sampler = dynesty.NestedSampler(
+    sampler = dynesty.DynamicNestedSampler(
         loglike, prior_transform, model.n_params + len(bands),
         nlive=100, bound='multi', sample='rwalk',
         logl_args=([model, params, bands]),
         ptform_args=([model])
     )
-    sampler.run_nested(dlogz=0.5)
+    sampler.run_nested(nlive_batch=500)
     results = sampler.results
     samples = resample_equal(
         results.samples, sp.exp(results.logwt - results.logz[-1])
