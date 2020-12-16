@@ -326,7 +326,7 @@ def create_dir(path):
     try:
         os.mkdir(path)
     except OSError:
-        err_msg = f"Creation of the directory {path:s} failed."
+        err_msg = f"Creation of the directory {path:s} failed. "
         err_msg += "It might already exist"
         print(err_msg)
         pass
