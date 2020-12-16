@@ -95,14 +95,16 @@ class SEDPlotter:
 
     __wav_file = 'PHOENIXv2/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
-    def __init__(self, input_files, out_folder, pdf=False, png=True,
+    def __init__(self, input_files, out_folder, pdf=False,
                  model=None, settings=None):
         """See class docstring."""
         print('\nInitializing plotter.\n')
         # General setup
         self.pdf = pdf
+        png = True if not pdf else False
         self.png = png
         self.out_folder = out_folder
+        self.bma = False
 
         chains = out_folder + '/chains'
         likelihoods = out_folder + '/likelihoods'
@@ -128,6 +130,7 @@ class SEDPlotter:
                 if self.engine != 'Bayesian Model Averaging':
                     self.grid = out['model_grid']
                 else:
+                    self.bma = True
                     zs = np.array([out['lnZ'][key]
                                    for key in out['lnZ'].keys()])
                     keys = np.array([key for key in out['lnZ'].keys()])
@@ -269,7 +272,6 @@ class SEDPlotter:
                 colors[self.star.filter_mask],
                 self.wave, self.flux, self.flux_er,
                 self.bandpass, used_f):
-
             ax.errorbar(w, fl * w,
                         xerr=bp, yerr=fe,
                         fmt='',
@@ -498,7 +500,8 @@ class SEDPlotter:
             brf = brf[lower_lim * upper_lim]
             brf = apply(ext, brf)
             flx = brf * norm * new_w
-            ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color=self.model_color, zorder=0)
+            ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color=self.model_color,
+                    zorder=0)
 
         elif self.grid == 'btsettl':
             wave, flux = self.fetch_btsettl()
@@ -705,156 +708,188 @@ class SEDPlotter:
             if 'noise' in param:
                 continue
             if not self.coordinator[i]:
-                f, ax = plt.subplots(figsize=(12, 6))
+                f1, ax1 = plt.subplots(figsize=(12, 6))
+                f2, ax2 = plt.subplots(figsize=(12, 6))
                 for j, m in enumerate(models):
                     # Get samples
                     samp = self.out['originals'][m][param]
                     # Plot sample histogram
                     label = m + ' prob: {:.3f}'.format(self.out['weights'][m])
-                    n, bins, patches = ax.hist(samp, alpha=.3, bins=50,
-                                               label=label, density=True,
-                                               color=colors[j])
-                    # Fit a KDE to data
-                    kde = gaussian_kde(samp)
-                    xx = np.linspace(bins[0], bins[-1], 100000)
-                    # Plot best fit
-                    ax.plot(xx, kde(xx), lw=2, alpha=1, color=colors[j])
-                # The same but for the averaged samples
-                n, bins, patches = ax.hist(
-                    self.out['posterior_samples'][param], alpha=.3,
-                    bins=50, label='Average', density=True, color='tab:cyan'
-                )
-                kde = gaussian_kde(self.out['posterior_samples'][param])
-                xx = np.linspace(bins[0], bins[-1], 100000)
-                ax.plot(xx, kde(xx), color='tab:cyan', lw=2, alpha=1)
-                ax.set_ylabel('PDF',
-                              fontsize=self.fontsize,
-                              fontname=self.fontname
-                              )
-                if param == 'z':
-                    param = '[Fe/H]'
-                ax.set_xlabel(param,
-                              fontsize=self.fontsize,
-                              fontname=self.fontname
-                              )
-
-                for tick in ax.get_yticklabels():
-                    tick.set_fontname(self.fontname)
-                for tick in ax.get_xticklabels():
-                    tick.set_fontname(self.fontname)
-
-                ax.tick_params(
-                    axis='both', which='major',
-                    labelsize=self.tick_labelsize
-                )
-
-                plt.legend(loc=0, prop={'size': 16})
-                if param == '[Fe/H]':
-                    param = 'Fe_H'
-                if self.png:
-                    plt.savefig(self.hist_out + '/' + param + '.png',
-                                bbox_inches='tight')
-                if self.pdf:
-                    plt.savefig(self.hist_out + '/' + param + '.pdf',
-                                bbox_inches='tight')
-
-        # Repeat the above with weighed histograms.
-        for i, param in enumerate(self.order):
-            if 'noise' in param:
-                continue
-            if not self.coordinator[i]:
-                f, ax = plt.subplots(figsize=(12, 6))
-                for m in models:
-                    samp = self.out['originals'][m][param]
-                    label = m + ' prob: {:.3f}'.format(self.out['weights'][m])
-                    n, bins, patches = ax.hist(
-                        samp, alpha=.3, bins=50, label=label,
+                    # Normal
+                    n, bins1, patches = ax1.hist(samp, alpha=.3, bins=20,
+                                                 label=label, density=True,
+                                                 color=colors[j])
+                    # Weighted
+                    n, bins2, patches = ax2.hist(
+                        samp, alpha=.3, bins=20, label=label,
                         weights=[self.out['weights'][m]] * len(samp)
                     )
-                    bc = bins[:-1] + np.diff(bins)
+                    # Fit a KDE to data
+                    kde = gaussian_kde(samp)
+                    # Estimate amplitude of the weighted distributions
                     mu, sig = norm.fit(samp)
                     try:
+                        bc = bins2[:-1] + np.diff(bins2)
                         popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
                                                p0=[mu, sig, n.max()],
                                                maxfev=50000)
                     except RuntimeError:
                         popt = (mu, sig, n.max())
-                    xx = np.linspace(bins[0], bins[-1], 100000)
-                    ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2,
-                            alpha=.7)
-                ax.set_ylabel('N',
-                              fontsize=self.fontsize,
-                              fontname=self.fontname
-                              )
+                    xx1 = np.linspace(bins1[0], bins1[-1], 10000)
+                    xx2 = np.linspace(bins2[0], bins2[-1], 10000)
+                    # Plot best fit
+                    ax1.plot(xx1, kde(xx2), lw=2, alpha=1, color=colors[j])
+                    ax2.plot(xx1, kde(xx2) * popt[2], lw=2, alpha=1,
+                             color=colors[j])
+                # The same but for the averaged samples
+                n, bins, patches = ax1.hist(
+                    self.out['posterior_samples'][param], alpha=.3,
+                    bins=20, label='Average', density=True, color='tab:cyan'
+                )
+                kde = gaussian_kde(self.out['posterior_samples'][param])
+                xx = np.linspace(bins[0], bins[-1], 1000)
+                ax1.plot(xx, kde(xx), color='tab:cyan', lw=2, alpha=1)
                 if param == 'z':
                     param = '[Fe/H]'
-                ax.set_xlabel(param,
-                              fontsize=self.fontsize,
-                              fontname=self.fontname
-                              )
+                # Normal
+                ax1.set_ylabel('PDF',
+                               fontsize=self.fontsize,
+                               fontname=self.fontname
+                               )
+                # Weighted
+                ax2.set_ylabel('N',
+                               fontsize=self.fontsize,
+                               fontname=self.fontname
+                               )
+                axes = [ax1, ax2]
+                for ax in axes:
+                    ax.set_xlabel(param,
+                                  fontsize=self.fontsize,
+                                  fontname=self.fontname
+                                  )
+                    for tick in ax.get_yticklabels():
+                        tick.set_fontname(self.fontname)
+                    for tick in ax.get_xticklabels():
+                        tick.set_fontname(self.fontname)
 
-                for tick in ax.get_yticklabels():
-                    tick.set_fontname(self.fontname)
-                for tick in ax.get_xticklabels():
-                    tick.set_fontname(self.fontname)
+                    ax.tick_params(
+                        axis='both', which='major',
+                        labelsize=self.tick_labelsize
+                    )
+                    ax.legend(loc=0, prop={'size': 16})
 
-                ax.tick_params(
-                    axis='both', which='major',
-                    labelsize=self.tick_labelsize
-                )
-                plt.legend(loc=0)
                 if param == '[Fe/H]':
                     param = 'Fe_H'
                 if self.png:
-                    plt.savefig(self.hist_out + '/weighted_' + param + '.png',
-                                bbox_inches='tight')
+                    f1.savefig(self.hist_out + '/' + param + '.png',
+                               bbox_inches='tight')
+                    f2.savefig(self.hist_out + '/weighted_' + param + '.png',
+                               bbox_inches='tight')
                 if self.pdf:
-                    plt.savefig(self.hist_out + '/weighted_' + param + '.pdf',
-                                bbox_inches='tight')
+                    f1.savefig(self.hist_out + '/' + param + '.pdf',
+                               bbox_inches='tight')
+                    f2.savefig(self.hist_out + '/weighted_' + param + '.pdf',
+                               bbox_inches='tight')
 
-        # f, ax = plt.subplots(figsize=(12, 4))
-        # samp = self.out['posterior_samples']['age']
-        # # The same but for the averaged samples
-        # n, bins, patches = ax.hist(
-        #     samp, alpha=.3, bins=50, label='MIST', density=True
-        # )
-        # bc = bins[:-1] + np.diff(bins)
-        # mu, sig = norm.fit(samp)
-        # popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-        #                        p0=[mu, sig, n.max()], maxfev=50000)
-        # xx = np.linspace(bins[0], bins[-1], 100000)
-        # ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
-        # ax.set_ylabel('PDF')
-        # ax.set_xlabel('Age')
-        # plt.legend(loc=0)
-        # if self.png:
-        #     plt.savefig(self.hist_out + '/age.png',
-        #                 bbox_inches='tight')
-        # if self.pdf:
-        #     plt.savefig(self.hist_out + '/age.pdf',
-        #                 bbox_inches='tight')
+        if self.bma:
+            # Age hist
+            f, ax = plt.subplots(figsize=(12, 4))
+            samp = self.out['posterior_samples']['age']
+            n, bins, patches = ax.hist(
+                samp, alpha=.3, bins=20, label='MIST', density=True
+            )
+            kde = gaussian_kde(samp)
+            xx = np.linspace(bins[0], bins[-1], 10000)
+            ax.plot(xx, kde(xx), color='k', lw=2, alpha=.7)
+            ax.set_ylabel('PDF',
+                          fontsize=self.fontsize,
+                          fontname=self.fontname)
+            ax.set_xlabel('Age',
+                          fontsize=self.fontsize,
+                          fontname=self.fontname)
 
-        # f, ax = plt.subplots(figsize=(12, 4))
-        # samp = self.out['posterior_samples']['mass']
-        # # The same but for the averaged samples
-        # n, bins, patches = ax.hist(
-        #     samp, alpha=.3, bins=50, label='MIST', density=True
-        # )
-        # bc = bins[:-1] + np.diff(bins)
-        # mu, sig = norm.fit(samp)
-        # popt, pcov = curve_fit(norm_fit, xdata=bc, ydata=n,
-        #                        p0=[mu, sig, n.max()])
-        # xx = np.linspace(bins[0], bins[-1], 100000)
-        # ax.plot(xx, norm_fit(xx, *popt), color='k', lw=2, alpha=.7)
-        # ax.set_ylabel('PDF')
-        # ax.set_xlabel('Mass')
-        # plt.legend(loc=0)
-        # if self.png:
-        #     plt.savefig(self.hist_out + '/mass.png',
-        #                 bbox_inches='tight')
-        # if self.pdf:
-        #     plt.savefig(self.hist_out + '/mass.pdf',
-        #                 bbox_inches='tight')
+            for tick in ax.get_yticklabels():
+                tick.set_fontname(self.fontname)
+            for tick in ax.get_xticklabels():
+                tick.set_fontname(self.fontname)
+
+            ax.tick_params(
+                axis='both', which='major',
+                labelsize=self.tick_labelsize
+            )
+            plt.legend(loc=0)
+            if self.png:
+                plt.savefig(self.hist_out + '/age.png',
+                            bbox_inches='tight')
+            if self.pdf:
+                plt.savefig(self.hist_out + '/age.pdf',
+                            bbox_inches='tight')
+
+            # Mass hist
+            f, ax = plt.subplots(figsize=(12, 4))
+            samp = self.out['posterior_samples']['iso_mass']
+            n, bins, patches = ax.hist(
+                samp, alpha=.3, bins=20, label='MIST', density=True
+            )
+            kde = gaussian_kde(samp)
+            xx = np.linspace(bins[0], bins[-1], 10000)
+            ax.plot(xx, kde(xx), color='k', lw=2, alpha=.7)
+            ax.set_ylabel('PDF',
+                          fontsize=self.fontsize,
+                          fontname=self.fontname)
+            ax.set_xlabel('Mass',
+                          fontsize=self.fontsize,
+                          fontname=self.fontname)
+
+            for tick in ax.get_yticklabels():
+                tick.set_fontname(self.fontname)
+            for tick in ax.get_xticklabels():
+                tick.set_fontname(self.fontname)
+
+            ax.tick_params(
+                axis='both', which='major',
+                labelsize=self.tick_labelsize
+            )
+            plt.legend(loc=0)
+            if self.png:
+                plt.savefig(self.hist_out + '/iso_mass.png',
+                            bbox_inches='tight')
+            if self.pdf:
+                plt.savefig(self.hist_out + '/iso_mass.pdf',
+                            bbox_inches='tight')
+
+            # EEP hist
+            f, ax = plt.subplots(figsize=(12, 4))
+            samp = self.out['posterior_samples']['eep']
+            n, bins, patches = ax.hist(
+                samp, alpha=.3, bins=20, label='MIST', density=True
+            )
+            kde = gaussian_kde(samp)
+            xx = np.linspace(bins[0], bins[-1], 10000)
+            ax.plot(xx, kde(xx), color='k', lw=2, alpha=.7)
+            ax.set_ylabel('PDF',
+                          fontsize=self.fontsize,
+                          fontname=self.fontname)
+            ax.set_xlabel('EEP',
+                          fontsize=self.fontsize,
+                          fontname=self.fontname)
+
+            for tick in ax.get_yticklabels():
+                tick.set_fontname(self.fontname)
+            for tick in ax.get_xticklabels():
+                tick.set_fontname(self.fontname)
+
+            ax.tick_params(
+                axis='both', which='major',
+                labelsize=self.tick_labelsize
+            )
+            plt.legend(loc=0)
+            if self.png:
+                plt.savefig(self.hist_out + '/EEP.png',
+                            bbox_inches='tight')
+            if self.pdf:
+                plt.savefig(self.hist_out + '/EEP.pdf',
+                            bbox_inches='tight')
 
     def plot_bma_HR(self, nsamp):
         """Plot HR diagram for the star."""
@@ -866,10 +901,10 @@ class SEDPlotter:
         lum = np.log10(self.out['best_fit']['lum'])
         teff_lo, teff_hi = self.out['uncertainties']['teff']
         lum_lo, lum_hi = self.out['uncertainties']['lum']
-        teff_lo = teff_lo / (10**teff * np.log(10))
-        teff_hi = teff_hi / (10**teff * np.log(10))
-        lum_lo = lum_lo / (10**lum * np.log(10))
-        lum_hi = lum_hi / (10**lum * np.log(10))
+        teff_lo = teff_lo / (10 ** teff * np.log(10))
+        teff_hi = teff_hi / (10 ** teff * np.log(10))
+        lum_lo = lum_lo / (10 ** lum * np.log(10))
+        lum_hi = lum_hi / (10 ** lum * np.log(10))
         ages = self.out['posterior_samples']['age']
         fehs = self.out['posterior_samples']['z']
 
@@ -1081,7 +1116,8 @@ class SEDPlotter:
         selected_SED += metal_add
         selected_SED += '.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits'
         flux = fits.open(selected_SED)[0].data
-        flux *= (u.erg / u.s / u.cm**2 / u.cm).to(u.erg / u.s / u.cm**2 / u.um)
+        flux *= (u.erg / u.s / u.cm ** 2 / u.cm).to(
+            u.erg / u.s / u.cm ** 2 / u.um)
         return flux
 
     def fetch_btsettl(self):
@@ -1098,8 +1134,8 @@ class SEDPlotter:
         number over 10000, else it's the first 2 digit prepended by a 0.
         G.G is the log g and Z.Z the metallicity.
         """
-        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
-        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        conversion = (u.erg / u.s / u.cm ** 2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm ** 2 / u.um)
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
@@ -1141,8 +1177,8 @@ class SEDPlotter:
         number over 10000, else it's the first 2 digit prepended by a 0.
         G.G is the log g and Z.Z the metallicity.
         """
-        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
-        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        conversion = (u.erg / u.s / u.cm ** 2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm ** 2 / u.um)
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
@@ -1184,8 +1220,8 @@ class SEDPlotter:
         number over 10000, else it's the first 2 digit prepended by a 0.
         G.G is the log g and Z.Z the metallicity.
         """
-        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
-        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        conversion = (u.erg / u.s / u.cm ** 2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm ** 2 / u.um)
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
@@ -1226,8 +1262,8 @@ class SEDPlotter:
         where ZZ is metalicity as previous and TTTT is the effective
         temperature.
         """
-        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
-        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        conversion = (u.erg / u.s / u.cm ** 2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm ** 2 / u.um)
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
@@ -1266,8 +1302,8 @@ class SEDPlotter:
         where ZZ is metalicity as previous and TTTT is the effective
         temperature.
         """
-        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
-        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        conversion = (u.erg / u.s / u.cm ** 2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm ** 2 / u.um)
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
@@ -1301,8 +1337,8 @@ class SEDPlotter:
         files called t[0X]XXXX_g[+-]Y.Y_[mp]ZZp0[14]_sed.fits
         where X is the temperature, Y is the logg and Z the metallicity.
         """
-        conversion = (u.erg / u.s / u.cm**2 / u.angstrom)
-        conversion = conversion.to(u.erg / u.s / u.cm**2 / u.um)
+        conversion = (u.erg / u.s / u.cm ** 2 / u.angstrom)
+        conversion = conversion.to(u.erg / u.s / u.cm ** 2 / u.um)
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
@@ -1329,7 +1365,8 @@ class SEDPlotter:
         flux = data * conversion
         CRVAL1 = head['CRVAL1']
         CDEL1 = head['CDELT1']
-        wave = 10**np.array([CRVAL1 + CDEL1 * i for i in range(data.shape[0])])
+        wave = 10 ** np.array(
+            [CRVAL1 + CDEL1 * i for i in range(data.shape[0])])
         wave *= u.angstrom.to(u.um)
         return wave, flux
 
@@ -1355,16 +1392,16 @@ class SEDPlotter:
             if param == 'rad' or param == 'dist':
                 new_titles[i] += '{:.3f}'.format(theta[i])
                 new_titles[i] += r'$^{+' + \
-                    '{:.3f}'.format(theta_up[i] - theta[i])
+                                 '{:.3f}'.format(theta_up[i] - theta[i])
                 new_titles[i] += r'}_{-' + \
-                    '{:.3f}'.format(theta[i] - theta_lo[i])
+                                 '{:.3f}'.format(theta[i] - theta_lo[i])
                 new_titles[i] += r'}$'
             else:
                 new_titles[i] += '{:.2f}'.format(theta[i])
                 new_titles[i] += r'$^{+' + \
-                    '{:.2f}'.format(theta_up[i] - theta[i])
+                                 '{:.2f}'.format(theta_up[i] - theta[i])
                 new_titles[i] += r'}_{-' + \
-                    '{:.2f}'.format(theta[i] - theta_lo[i])
+                                 '{:.2f}'.format(theta[i] - theta_lo[i])
                 new_titles[i] += r'}$'
         return new_titles
 
