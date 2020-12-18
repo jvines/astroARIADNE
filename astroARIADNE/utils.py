@@ -15,6 +15,34 @@ from scipy.stats import gaussian_kde, norm
 from termcolor import colored
 
 
+def estimate_pdf(distribution):
+    """Estimates the PDF of a distribution using a gaussian KDE.
+
+    Parameters
+    ----------
+    distribution: array_like
+        The distribution.
+    Returns
+    -------
+    xx: array_like
+        The x values of the PDF.
+    pdf: array_like
+        The estimated PDF.
+    """
+    kde = gaussian_kde(distribution)
+    xmin, xmax = distribution.min(), distribution.max()
+    xx = np.linspace(xmin, xmax, 1000)
+    pdf = kde(xx)
+    return xx, pdf
+
+
+def estimate_cdf(distribution):
+    """Estimate the CDF of a distribution."""
+    h, hx = np.histogram(distribution, density=True, bins=1000)
+    cdf = np.cumsum(h) * (hx[1] - hx[0])
+    return cdf
+
+
 def norm_fit(x, mu, sigma, A):
     """Gaussian function."""
     return A * norm.pdf(x, loc=mu, scale=sigma)
@@ -48,6 +76,42 @@ def credibility_interval(post, alpha=1.):
         post, [lower_percentile, 50, upper_percentile]
     )
     return med, low, up
+
+
+def credibility_interval_hdr(dist, sigma=1.):
+    """Calculate the highest density region for an empirical distribution.
+
+    Reference: Hyndman, Rob J. 1996
+
+    Parameters
+    ----------
+    post: Array_like
+        The posterior distribution for which the HDR is needed.
+    sigma: float
+        The confidence level in sigma notation. (e.g. 1 sigma = 68%)
+
+    Returns
+    -------
+    best: float
+        The value corresponding to the peak of the posterior distribution.
+    low: float
+        The minimum value of the HDR.
+    high: float
+        The maximum value of the HDR.
+
+    Note: The HDR is capable of calculating more robust credible regions
+    for multimodal distributions. It is identical to the usual probability
+    regions of symmetric about the mean distributions. Using this then should
+    lead to more realistic errorbars and 3-sigma intervals for multimodal
+    outputs.
+
+    """
+    z = erf(sigma / np.sqrt(2))
+    # First we estimate the PDF from the posterior distribution
+    kde = gaussian_kde(post)
+    xmin, xmax = post.min(), post.max()
+    xx = np.linspace()
+    pass
 
 
 def display_star_fin(star, c):
@@ -417,7 +481,7 @@ def get_max_from_kde(samp):
     kde = gaussian_kde(samp)
     xmin = samp.min()
     xmax = samp.max()
-    xx = np.linspace(xmin, xmax, 5000)
+    xx = np.linspace(xmin, xmax, 1000)
     kde = kde(xx)
     best = xx[kde.argmax()]
     return best
