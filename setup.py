@@ -16,7 +16,7 @@ setup(
     author_email="jose.vines@ug.uchile.cl",
     maintainer="Jose Vines",
     maintainer_email="jose.vines@ug.uchile.cl",
-    description="Bayesian Model Avergaing SED fitter",
+    description="Bayesian Model Averaging SED fitter",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="MIT",
