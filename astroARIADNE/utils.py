@@ -68,6 +68,7 @@ def credibility_interval(post, alpha=1.):
         Upper part of the credibility interval.
 
     """
+    raise DeprecationWarning()
     z = erf(alpha / np.sqrt(2))
 
     lower_percentile = 100 * (1 - z) / 2
@@ -78,15 +79,19 @@ def credibility_interval(post, alpha=1.):
     return med, low, up
 
 
-def credibility_interval_hdr(dist, sigma=1.):
+def credibility_interval_hdr(xx, pdf, cdf, sigma=1.):
     """Calculate the highest density region for an empirical distribution.
 
     Reference: Hyndman, Rob J. 1996
 
     Parameters
     ----------
-    post: Array_like
-        The posterior distribution for which the HDR is needed.
+    xx: array_like
+        The x values of the PDF (and the y values of the CDF).
+    pdf: array_like
+        The PDF of the distribution.
+    cdf: array_like
+        The CDF of the distribution.
     sigma: float
         The confidence level in sigma notation. (e.g. 1 sigma = 68%)
 
@@ -106,12 +111,21 @@ def credibility_interval_hdr(dist, sigma=1.):
     outputs.
 
     """
+    # Get best fit value
+    best = np.argmax(pdf)
     z = erf(sigma / np.sqrt(2))
-    # First we estimate the PDF from the posterior distribution
-    kde = gaussian_kde(post)
-    xmin, xmax = post.min(), post.max()
-    xx = np.linspace()
-    pass
+    # Sort the pdf in reverse order
+    idx = np.argsort(pdf)[::-1]
+    # Find where the CDF reaches 100*z%
+    idx_hdr = np.where(cdf >= z)[0][0]
+    # Isolate the HDR
+    hdr = pdf[idx][0:idx_hdr]
+    # Get the minimum density
+    hdr_min = hdr.min()
+    # Get CI
+    low = xx[pdf > hdr_min].min()
+    high = xx[pdf > hdr_min].max()
+    return best, low, high
 
 
 def display_star_fin(star, c):
