@@ -997,8 +997,7 @@ class SEDPlotter:
             if not self.coordinator[i]:
                 if 'noise' in param:
                     continue
-                _, lo, up = credibility_interval(
-                    samples[param])
+                _, lo, up = credibility_interval(samples[param])
                 theta_lo.append(lo)
                 theta_up.append(up)
                 all_samps.append(samples[param])

@@ -39,7 +39,7 @@ def estimate_pdf(distribution):
 def estimate_cdf(distribution):
     """Estimate the CDF of a distribution."""
     h, hx = np.histogram(distribution, density=True, bins=1000)
-    cdf = np.cumsum(h) * (hx[1] - hx[0])
+    cdf = np.cumsum(h) * np.diff(hx)
     return cdf
 
 
@@ -68,7 +68,6 @@ def credibility_interval(post, alpha=1.):
         Upper part of the credibility interval.
 
     """
-    raise DeprecationWarning()
     z = erf(alpha / np.sqrt(2))
 
     lower_percentile = 100 * (1 - z) / 2
@@ -112,14 +111,14 @@ def credibility_interval_hdr(xx, pdf, cdf, sigma=1.):
 
     """
     # Get best fit value
-    best = np.argmax(pdf)
+    best = xx[np.argmax(pdf)]
     z = erf(sigma / np.sqrt(2))
     # Sort the pdf in reverse order
     idx = np.argsort(pdf)[::-1]
     # Find where the CDF reaches 100*z%
     idx_hdr = np.where(cdf >= z)[0][0]
     # Isolate the HDR
-    hdr = pdf[idx][0:idx_hdr]
+    hdr = pdf[idx][:idx_hdr]
     # Get the minimum density
     hdr_min = hdr.min()
     # Get CI
@@ -228,7 +227,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     ]
     c = random.choice(colors)
     if use_norm:
-        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
+        order = np.array(['teff', 'logg', 'z', 'norm', 'rad', 'Av'])
     else:
         order = np.array(
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
@@ -255,117 +254,77 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             for m, fi in enumerate(star.filter_names[mask]):
                 _p = get_noise_name(fi) + '_noise'
                 theta[i + m] = out['best_fit'][_p]
-    uncert = []
+
     if engine != 'Bayesian Model Averaging':
-        lglk = out['best_fit']['loglike']
         z, z_err = out['global_lnZ'], out['global_lnZerr']
-    for i, param in enumerate(order):
-        if not coordinator[i]:
-            _, lo, up = credibility_interval(
-                out['posterior_samples'][param])
-            uncert.append([abs(theta[i] - lo), abs(up - theta[i])])
-        else:
-            uncert.append('fixed')
+
     print('')
     print(colored('\t\t\tFitting finished.', c))
     print(colored('\t\t\tBest fit parameters are:', c))
+    fmt_str = ''
     for i, p in enumerate(order):
         p2 = p
         if 'noise' in p:
             continue
+        unlo, unhi = out['uncertainties'][p]
+        lo, up = out['confidence_interval'][p]
+        fmt_str += '\t\t\t'
+        fmt = 'f'
         if p == 'norm':
             p2 = '(R/D)^2'
-            print(colored('\t\t\t' + p2 + ' : ', c), end='')
-            print(colored('{:.4e}'.format(theta[i]), c), end=' ')
-            if not coordinator[i]:
-                print(colored('+ {:.4e} -'.format(uncert[i][1]), c), end=' ')
-                print(colored('{:.4e}'.format(uncert[i][0]), c), end=' ')
-                samp = out['posterior_samples']['norm']
-                _, lo, up = credibility_interval(samp, 3)
-                print(colored('[{:.4e}, {:.4e}]'.format(lo, up), c))
-            else:
-                print(colored('fixed', c))
-            rad = out['best_fit']['rad']
-            unlo, unhi = out['uncertainties']['rad']
-            lo, up = out['confidence_interval']['rad']
-            print(colored('\t\t\trad : ', c), end='')
-            print(colored('{:.4f}'.format(rad), c), end=' ')
-            print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
-            print(colored('{:.4f}'.format(unlo), c), end=' ')
-            print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
-            continue
+            fmt = 'e'
         if p == 'z':
             p2 = '[Fe/H]'
-        print(colored('\t\t\t' + p2 + ' : ', c), end='')
-        print(colored('{:.4f}'.format(theta[i]), c), end=' ')
+        fmt_str += f'{p2} : {theta[i]:.4{fmt}} '
         if not coordinator[i]:
-            print(colored('+ {:.4f} -'.format(uncert[i][1]), c), end=' ')
-            print(colored('{:.4f}'.format(uncert[i][0]), c), end=' ')
-            samp = out['posterior_samples'][p]
-            _, lo, up = credibility_interval(samp, 3)
-            print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+            fmt_str += f'+ {unhi:.4{fmt}} - {unlo:.4{fmt}} '
+            fmt_str += f'[{lo:.4{fmt}}, {up:.4{fmt}}]\n'
         else:
-            print(colored('fixed', c))
+            fmt_str += 'fixed\n'
 
     if not use_norm:
         ad = out['best_fit']['AD']
         unlo, unhi = out['uncertainties']['AD']
         lo, up = out['confidence_interval']['AD']
-        print(colored('\t\t\tAngular diameter : ', c), end='')
-        print(colored('{:.4f}'.format(ad), c), end=' ')
-        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
-        print(colored('{:.4f}'.format(unlo), c), end=' ')
-        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+        fmt_str += f'\t\t\tAngular Diameter : {ad:.4f} '
+        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     mass = out['best_fit']['grav_mass']
     unlo, unhi = out['uncertainties']['grav_mass']
     lo, up = out['confidence_interval']['grav_mass']
-    print(colored('\t\t\tgrav_mass : ', c), end='')
-    print(colored('{:.2f}'.format(mass), c), end=' ')
-    print(colored('+ {:.2f} -'.format(unhi), c), end=' ')
-    print(colored('{:.2f}'.format(unlo), c), end=' ')
-    print(colored('[{:.2f}, {:.2f}]'.format(lo, up), c))
+    fmt_str += f'\t\t\tGrav mass : {mass:.4f} '
+    fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     lum = out['best_fit']['lum']
     unlo, unhi = out['uncertainties']['lum']
     lo, up = out['confidence_interval']['lum']
-    print(colored('\t\t\tluminosity : ', c), end='')
-    print(colored('{:.3f}'.format(lum), c), end=' ')
-    print(colored('+ {:.3f} -'.format(unhi), c), end=' ')
-    print(colored('{:.3f}'.format(unlo), c), end=' ')
-    print(colored('[{:.3f}, {:.3f}]'.format(lo, up), c))
+    fmt_str += f'\t\t\tLuminosity : {lum:.4f} '
+    fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     if engine == 'Bayesian Model Averaging':
         miso = out['best_fit']['iso_mass']
         unlo, unhi = out['uncertainties']['iso_mass']
         lo, up = out['confidence_interval']['iso_mass']
-        print(colored('\t\t\tiso_mass : ', c), end='')
-        print(colored('{:.4f}'.format(miso), c), end=' ')
-        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
-        print(colored('{:.4f}'.format(unlo), c), end=' ')
-        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+        fmt_str += f'\t\t\tIso mass : {miso:.4f} '
+        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
         age = out['best_fit']['age']
         unlo, unhi = out['uncertainties']['age']
         lo, up = out['confidence_interval']['age']
-        print(colored('\t\t\tage : ', c), end='')
-        print(colored('{:.4f}'.format(age), c), end=' ')
-        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
-        print(colored('{:.4f}'.format(unlo), c), end=' ')
-        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+        fmt_str += f'\t\t\tAge (Gyr) : {age:.4f} '
+        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
         eep = out['best_fit']['eep']
         unlo, unhi = out['uncertainties']['eep']
         lo, up = out['confidence_interval']['eep']
-        print(colored('\t\t\tEEP : ', c), end='')
-        print(colored('{:.4f}'.format(eep), c), end=' ')
-        print(colored('+ {:.4f} -'.format(unhi), c), end=' ')
-        print(colored('{:.4f}'.format(unlo), c), end=' ')
-        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+        fmt_str += f'\t\t\tEEP : {eep:.4f} '
+        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     for i, p in enumerate(order):
         if 'noise' not in p:
             continue
+        unlo, unhi = out['uncertainties'][p]
+        lo, up = out['confidence_interval'][p]
         p_ = 'Excess '
         if 'SDSS' not in p and 'PS1' not in p:
             p1, p2 = p.split('_')
@@ -373,13 +332,9 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             p1, p2, p3 = p.split('_')
             p1 += '_' + p2
             p2 = p3
-        print(colored('\t\t\t' + p_ + p1 + ' ' + p2 + ' : ', c), end='')
-        print(colored('{:.4f}'.format(theta[i]), c), end=' ')
-        print(colored('+ {:.4f}'.format(uncert[i][1]), c), end=' ')
-        print(colored('- {:.4f}'.format(uncert[i][0]), c), end=' ')
-        samp = out['posterior_samples'][p]
-        _, lo, up = credibility_interval(samp, 3)
-        print(colored('[{:.4f}, {:.4f}]'.format(lo, up), c))
+        fmt_str += f'\t\t\t{p_ + p1} {p2} : {theta[i]:.4f} '
+        fmt_str += f'{unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
+    print(colored(fmt_str, c), end='')
 
     spt = out['spectral_type']
     print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
@@ -472,13 +427,16 @@ def get_noise_name(filt):
 def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
     """Fill up the output file."""
     if fixed is False:
-        best = get_max_from_kde(samp)
+        xx, pdf = estimate_pdf(samp)
+        cdf = estimate_cdf(samp)
+        best, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=1)
+        # best = get_max_from_kde(samp)
         out['best_fit'][param] = best
         logdat += '{}\t{:.4{f}}\t'.format(name, best, f=fmt)
-        _, lo, up = credibility_interval(samp)
+        # _, lo, up = credibility_interval(samp)
         out['uncertainties'][param] = (best - lo, up - best)
         logdat += '{:.4{f}}\t{:.4{f}}\t'.format(up - best, best - lo, f=fmt)
-        _, lo, up = credibility_interval(samp, 3)
+        _, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=3)
         out['confidence_interval'][param] = (lo, up)
         logdat += '{:.4{f}}\t{:.4{f}}\n'.format(lo, up, f=fmt)
     else:
@@ -492,6 +450,7 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
 
 def get_max_from_kde(samp):
     """Get maximum of the given distribution."""
+    raise DeprecationWarning()
     kde = gaussian_kde(samp)
     xmin = samp.min()
     xmax = samp.max()
