@@ -1,4 +1,3 @@
-# @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """Main driver of the fitting routine."""
 import pickle
 import random
@@ -1362,12 +1361,28 @@ class Fitter:
         if star.lum != 0 and star.lum_e != 0:
             params['logL'] = (np.log10(bf['lum']),
                               abs(np.log10(max(unc['lum']))))
-        mask = np.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
-                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
+        # import pdb; pdb.set_trace()
+        mask = np.array([1, 1, 1,
+                         0, 0,
+                         1, 1, 1,
+                         0, 0,
+                         0, 0, 0, 0,
+                         1, 1, 1,
+                         0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0,
+                         1, 1,
+                         0, 0,
+                         0, 0,
                          0, 1, 0])
         mags = self.star.mags[mask == 1]
         mags_e = self.star.mag_errs[mask == 1]
-        bands = ['H', 'J', 'K', 'V', 'B', 'G', 'RP', 'BP', 'W1', 'W2', 'TESS']
+        bands = [
+            'H', 'J', 'K',
+            'U', 'V', 'B',
+            'G', 'RP', 'BP',
+            'W1', 'W2',
+            'TESS'
+        ]
         used_bands = []
         for m, e, b in zip(mags, mags_e, bands):
             if m != 0:
