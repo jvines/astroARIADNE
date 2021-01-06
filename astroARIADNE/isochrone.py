@@ -1,6 +1,5 @@
 """Estimate logg using MIST isochrones."""
 
-import os
 import warnings
 
 import pandas as pd
@@ -10,11 +9,10 @@ from isochrones.mist import MIST_Isochrone
 from isochrones.priors import FlatPrior, GaussianPrior
 from numba.core.errors import (NumbaDeprecationWarning,
                                NumbaPendingDeprecationWarning)
-
-from .error import InputError
 import dynesty
 from dynesty.utils import resample_equal
 
+from .error import InputError
 from .utils import credibility_interval
 
 warnings.filterwarnings(
