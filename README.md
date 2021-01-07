@@ -41,6 +41,8 @@ But for the code to work, first you must install the necessary dependencies.
 
 Most can be easily installed with pip or conda but some might have special instructions (like PyMultinest!!)
 
+**ARIADNE** has been tested on OS X up to Catalina and Linux. It does **NOT** run on Windows because healpy, a dependency of dustmaps isn't available for Windows (see [https://github.com/healpy/healpy/issues/25#issue-2987102](https://github.com/healpy/healpy/issues/25#issue-2987102))
+
 ## In order to plot the models, you have to download them first:
 But note that plotting the SED model is optional. You can run the code withouth them!
 
