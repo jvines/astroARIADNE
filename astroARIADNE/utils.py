@@ -39,7 +39,8 @@ def estimate_pdf(distribution):
 def estimate_cdf(distribution):
     """Estimate the CDF of a distribution."""
     h, hx = np.histogram(distribution, density=True, bins=1000)
-    cdf = np.cumsum(h) * np.diff(hx)
+    idx = np.argsort(h)[::-1]
+    cdf = np.cumsum(h[idx]) * np.diff(hx)
     return cdf
 
 
