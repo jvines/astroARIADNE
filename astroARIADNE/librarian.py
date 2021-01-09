@@ -667,10 +667,10 @@ class Librarian:
             CatalogWarning(name, 5).warn()
             return
         if name == '2MASS':
-            mask = cat['_2MASS'] == self.ids['2MASS'].decode('ascii')
+            mask = cat['_2MASS'] == self.ids['2MASS']
             self._retrieve_from_2mass(cat[mask], '2MASS')
         else:
-            mask = cat['_2MASS'] == self.ids['2MASS'].decode('ascii')
+            mask = cat['_2MASS'] == self.ids['2MASS']
             self._retrieve_from_cat(cat[mask], 'GLIMPSE')
 
     def _get_sdss(self, cat):
