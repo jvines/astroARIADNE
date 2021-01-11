@@ -1361,7 +1361,6 @@ class Fitter:
         if star.lum != 0 and star.lum_e != 0:
             params['logL'] = (np.log10(bf['lum']),
                               abs(np.log10(max(unc['lum']))))
-        # import pdb; pdb.set_trace()
         mask = np.array([1, 1, 1,
                          0, 0,
                          1, 1, 1,

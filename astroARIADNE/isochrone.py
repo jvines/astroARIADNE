@@ -55,13 +55,13 @@ def estimate(bands, params, logg=True):
         av, av_e = params['AV']
         model._priors['AV'] = GaussianPrior(av, av_e)
     model._priors['distance'] = GaussianPrior(dist, dist_e)
-    sampler = dynesty.DynamicNestedSampler(
+    sampler = dynesty.NestedSampler(
         loglike, prior_transform, model.n_params + len(bands),
-        nlive=100, bound='multi', sample='rwalk',
+        nlive=500, bound='multi', sample='rwalk',
         logl_args=([model, params, bands]),
         ptform_args=([model])
     )
-    sampler.run_nested(nlive_batch=500)
+    sampler.run_nested(dlogz=0.01)
     results = sampler.results
     samples = resample_equal(
         results.samples, sp.exp(results.logwt - results.logz[-1])
