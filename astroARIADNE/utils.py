@@ -267,8 +267,6 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
         p2 = p
         if 'noise' in p:
             continue
-        unlo, unhi = out['uncertainties'][p]
-        lo, up = out['confidence_interval'][p]
         fmt_str += '\t\t\t'
         fmt = 'f'
         if p == 'norm':
@@ -278,6 +276,8 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             p2 = '[Fe/H]'
         fmt_str += f'{p2} : {theta[i]:.4{fmt}} '
         if not coordinator[i]:
+            unlo, unhi = out['uncertainties'][p]
+            lo, up = out['confidence_interval'][p]
             fmt_str += f'+ {unhi:.4{fmt}} - {unlo:.4{fmt}} '
             fmt_str += f'[{lo:.4{fmt}}, {up:.4{fmt}}]\n'
         else:
