@@ -3,7 +3,7 @@
 import warnings
 
 import pandas as pd
-import scipy as sp
+import numpy as np
 from isochrones import SingleStarModel, get_ichrone
 from isochrones.mist import MIST_Isochrone
 from isochrones.priors import FlatPrior, GaussianPrior
@@ -41,7 +41,7 @@ def estimate(bands, params, logg=True):
         msg = 'No parallax or distance found.'
         msg += 'Aborting age and mass calculation.'
         InputError(msg).warn()
-        return sp.zeros(10), sp.zeros(10)
+        return np.zeros(10), np.zeros(10)
     if 'feh' in params.keys():
         fe, fe_e = params['feh']
         if fe + fe_e >= 0.5:
@@ -64,7 +64,7 @@ def estimate(bands, params, logg=True):
     sampler.run_nested(dlogz=0.01)
     results = sampler.results
     samples = resample_equal(
-        results.samples, sp.exp(results.logwt - results.logz[-1])
+        results.samples, np.exp(results.logwt - results.logz[-1])
     )
     ###########################################################################
     # Written by Dan Foreman-mackey
@@ -100,7 +100,7 @@ def estimate(bands, params, logg=True):
 
 # These functions wrap isochrones so that they can be used with dynesty:
 def prior_transform(u, mod):
-    cube = sp.copy(u)
+    cube = np.copy(u)
     mod.mnest_prior(cube[: mod.n_params], None, None)
     cube[mod.n_params:] = -10 + 20 * cube[mod.n_params:]
     return cube
@@ -110,10 +110,10 @@ def loglike(theta, mod, params, jitter_vars):
     ind0 = mod.n_params
     lp0 = 0.0
     for i, k in enumerate(jitter_vars):
-        err = sp.sqrt(params[k][1] ** 2 + sp.exp(theta[ind0 + i]))
-        lp0 -= 2 * sp.log(err)  # This is to fix a bug in isochrones
+        err = np.sqrt(params[k][1] ** 2 + np.exp(theta[ind0 + i]))
+        lp0 -= 2 * np.log(err)  # This is to fix a bug in isochrones
         mod.kwargs[k] = (params[k][0], err)
     lp = lp0 + mod.lnpost(theta[: mod.n_params])
-    if sp.isfinite(lp):
-        return sp.clip(lp, -1e10, sp.inf)
+    if np.isfinite(lp):
+        return np.clip(lp, -1e10, np.inf)
     return -1e10
