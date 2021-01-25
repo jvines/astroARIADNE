@@ -2,7 +2,6 @@
 
 import pickle
 import random
-from contextlib import closing
 
 import astropy.units as u
 import numpy as np
@@ -200,7 +199,7 @@ class Star:
                  lum=None, lum_e=None,
                  dist=None, dist_e=None,
                  Av=None, offline=False,
-                 mag_dict=None, verbose=True, ignore=[]):
+                 mag_dict=None, verbose=True, ignore=None):
         """See class docstring."""
         # MISC
         self.verbose = verbose
@@ -262,7 +261,7 @@ class Star:
                 lib = None
                 self.tic = False
                 self.kic = False
-            
+
             # [plx, plx_e, dist, dist_e, rad, rad_e, temp, temp_e, lum, lum_e]
             libouts = extract_from_lib(lib)
 
@@ -426,7 +425,7 @@ class Star:
             filt_idx = np.where(f == self.filter_names)[0]
             interpolators[filt_idx] = RegularGridInterpolator(
                 (ut, ug, uz), cube, bounds_error=False)
-        with closing(open(out_name + '.pkl', 'wb')) as jar:
+        with open(out_name + '.pkl', 'wb') as jar:
             pickle.dump(interpolators, jar)
 
     def get_interpolated_flux(self, temp, logg, z, filt):
