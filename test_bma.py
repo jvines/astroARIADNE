@@ -21,12 +21,12 @@ if __name__ == '__main__':
 
     # Setup parameters
     engine = 'dynesty'  # Only dynesty is available for BMA
-    nlive = 500  # number of live points to use
+    nlive = 100  # number of live points to use
     dlogz = 0.5  # evidence tolerance
     bound = 'multi'  # Unit cube bounds. Options are multi, single
     sample = 'rwalk'  # Sampling method. Options are rwalk, unif
     threads = 4  # Number of threads to use.
-    dynamic = True  # Use dynamic nested sampling?
+    dynamic = False  # Use dynamic nested sampling?
     setup = [engine, nlive, dlogz, bound, sample, threads, dynamic]
     models = [
         'phoenix',
@@ -46,10 +46,8 @@ if __name__ == '__main__':
     f.verbose = True
     f.out_folder = out_folder
     f.bma = True
-    f.sequential = True  # Fit models sequentially instead of in parallel.
     f.models = models
     f.n_samples = 100000  # If set as None it will choose automatically.
-    f.experimental = False  # If set to True, let threads be smallish.
     f.prior_setup = {
         'teff': ('rave'),
         'logg': ('default'),
@@ -63,6 +61,8 @@ if __name__ == '__main__':
     f.fit_bma()  # Begin fit!
 
     # Setting up plotter, which is independent to the main fitting routine
+    # Bear in mind this will only work if you have downloaded the models
+    # And have set up the ARIADNE_MODELS environment variable!
     artist = SEDPlotter(in_file, plots_out_folder, pdf=True)
     artist.plot_SED_no_model()  # Plots the stellar SED without the model
     artist.plot_SED()  # Plots stellar SED with model included
