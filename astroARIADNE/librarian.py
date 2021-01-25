@@ -27,10 +27,9 @@ Catalogs.columns = ['all']
 
 
 class Librarian:
-    """Docstring."""
+    """Class that handles querying for photometry and astrometry data."""
 
     # pyphot filter names
-
     filter_names = np.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
         'GROUND_COUSINS_I', 'GROUND_COUSINS_R',
@@ -38,7 +37,7 @@ class Librarian:
         'TYCHO_B_MvB', 'TYCHO_V_MvB',
         'STROMGREN_b', 'STROMGREN_u', 'STROMGREN_v', 'STROMGREN_y',
         'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
-        'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y',  'PS1_z',
+        'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y', 'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
         'WISE_RSR_W1', 'WISE_RSR_W2',
         'GALEX_FUV', 'GALEX_NUV',
@@ -66,7 +65,7 @@ class Librarian:
     __tmass_filters = ['2MASS_J', '2MASS_H', '2MASS_Ks']
     __gaia_mags = ['Gmag', 'BPmag', 'RPmag']
     __gaia_errs = ['e_Gmag', 'e_BPmag', 'e_RPmag']
-    __gaia_filters = ['GaiaDR2v2_G',  'GaiaDR2v2_BP', 'GaiaDR2v2_RP']
+    __gaia_filters = ['GaiaDR2v2_G', 'GaiaDR2v2_BP', 'GaiaDR2v2_RP']
     __sdss_mags = ['gmag', 'rmag', 'imag']
     # __sdss_mags = ['umag', 'gmag', 'rmag', 'imag', 'zmag']
     __sdss_errs = ['e_gmag', 'e_rmag', 'e_imag']
@@ -96,13 +95,12 @@ class Librarian:
             'II/328/allwise', list(zip(__wise_mags,
                                        __wise_errs, __wise_filters))
         ],
-        'Pan-STARRS':
-        [
+        'Pan-STARRS': [
             'II/349/ps1', list(zip(__ps1_mags, __ps1_errs, __ps1_filters))
         ],
-        'Gaia':
-        [
-            'I/345/gaia2', list(zip(__gaia_mags, __gaia_errs, __gaia_filters))
+        'Gaia': [
+            'I/345/gaia2',
+            list(zip(__gaia_mags, __gaia_errs, __gaia_filters))
         ],
         '2MASS': [
             'II/246/out', list(zip(__tmass_mags,
@@ -141,13 +139,14 @@ class Librarian:
     }
 
     def __init__(self, starname, ra, dec, radius=None, g_id=None,
-                 mags=True, ignore=[]):
+                 mags=True, ignore=None):
         self.starname = starname
         self.ra = ra
         self.dec = dec
-        self.ignore = ignore
+        self.ignore = ignore if ignore is not None else []
         self.tic = None
         self.kic = None
+        self.ids = []
 
         self.used_filters = np.zeros(self.filter_names.shape[0])
         self.mags = np.zeros(self.filter_names.shape[0])
@@ -161,7 +160,7 @@ class Librarian:
             self.radius = radius
         if g_id is None:
             print('No Gaia ID provided. Searching for nearest source.')
-            self.g_id = self._get_gaia_id()
+            self.g_id = self._get_gaia_id(self.ra, self.dec, self.radius)
             print('Gaia ID found: {0}'.format(self.g_id))
         else:
             self.g_id = g_id
@@ -198,70 +197,9 @@ class Librarian:
         self.temp, self.temp_e = self._get_teff(res)
         self.rad, self.rad_e = self._get_radius(res)
         self.lum, self.lum_e = self._get_lum(res)
-        self.dist, self.dist_e = self._get_distance()
+        self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
+                                                    self.radius, self.g_id)
         pass
-
-    def _get_distance(self):
-        """Retrieve Bailer-Jones DR2 distance."""
-        cat = Vizier.query_region(
-            SkyCoord(
-                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=self.radius, catalog='I/347/gaia2dis'
-        )['I/347/gaia2dis']
-        cat.sort('_r')
-        idx = np.where(cat['Source'] == self.g_id)[0]
-        if len(idx) == 0:
-            # Raise exception, for now do nothing
-            return -1, -1
-        dist = cat[idx]['rest'][0]
-        lo = dist - cat[idx]['b_rest'][0]
-        hi = cat[idx]['B_rest'][0] - dist
-        return dist, max(lo, hi)
-
-    def _get_parallax(self, res):
-        plx = res['parallax'][0]
-        if plx <= 0:
-            CatalogWarning(0, 0).warn()
-            return -1, -1
-        plx_e = res['parallax_error'][0]
-        # Parallax correction −52.8 ± 2.4 µas from Zinn+19
-        return plx + 0.0528, np.sqrt(plx_e ** 2 + 0.0024**2)
-
-    def _get_radius(self, res):
-        rad = res['radius_val'][0]
-        if np.ma.is_masked(rad):
-            CatalogWarning('radius', 1).warn()
-            return 0, 0
-        lo = res['radius_percentile_lower'][0]
-        up = res['radius_percentile_upper'][0]
-        rad_e = max([rad - lo, up - rad])
-        return rad, 5 * rad_e
-
-    def _get_teff(self, res):
-        teff = res['teff_val'][0]
-        if np.ma.is_masked(teff):
-            CatalogWarning('teff', 1).warn()
-            return 0, 0
-        lo = res['teff_percentile_lower'][0]
-        up = res['teff_percentile_upper'][0]
-        teff_e = max([teff - lo, up - teff])
-        return teff, teff_e
-
-    def _get_lum(self, res):
-        lum = res['lum_val'][0]
-        if np.ma.is_masked(lum):
-            CatalogWarning('lum', 1).warn()
-            return 0, 0
-        lo = res['lum_percentile_lower'][0]
-        up = res['lum_percentile_upper'][0]
-        lum_e = max([lum - lo, up - lum])
-        return lum, lum_e
-
-    def _get_gaia_id(self):
-        c = SkyCoord(self.ra, self.dec, unit=(u.deg, u.deg), frame='icrs')
-        j = Gaia.cone_search_async(c, self.radius)
-        res = j.get_results()
-        return res['source_id'][0]
 
     def gaia_query(self):
         """Query Gaia to get different catalog IDs."""
@@ -316,26 +254,6 @@ class Librarian:
         IDS['STROMGREN_HAUCK'] = ''
         self.ids = IDS
 
-    def get_catalogs(self):
-        """Retrieve available catalogs for a star from Vizier."""
-        cats = Vizier.query_region(
-            SkyCoord(
-                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=self.radius
-        )
-
-        return cats
-
-    def get_TIC(self):
-        """Retrieve TIC from MAST."""
-        cat = Catalogs.query_region(
-            SkyCoord(
-                ra=self.ra, dec=self.dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=self.radius, catalog='TIC'
-        )
-
-        return cat
-
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
 
@@ -343,11 +261,10 @@ class Librarian:
         looking for different magnitudes for the star, along with the
         associated uncertainties.
         """
-        coord = SkyCoord(self.ra, self.dec, unit=(u.deg, u.deg), frame='icrs')
         print('Looking online for archival magnitudes for star', end=' ')
         print(self.starname)
 
-        cats = self.get_catalogs()
+        cats = self.get_catalogs(self.ra, self.dec, self.radius)
         skips = ['ASCC', 'GLIMPSE']
 
         for c in self.catalogs.keys():
@@ -393,28 +310,33 @@ class Librarian:
                 self._get_2mass_glimpse(cats, False, 'GLIMPSE')
                 continue
             elif c == 'GALEX':
-                current_cat = self._gaia_galex_xmatch(cats)
+                current_cat = self._gaia_galex_xmatch(cats, self.ra, self.dec,
+                                                      self.radius)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
                     continue
                 self._retrieve_from_galex(current_cat, c)
                 continue
             elif c == 'MERMILLIOD':
-                current_cat = self._gaia_mermilliod_xmatch(cats)
+                current_cat = self._gaia_mermilliod_xmatch(cats, self.ra,
+                                                           self.dec,
+                                                           self.radius)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
                     continue
                 self._retrieve_from_mermilliod(current_cat)
                 continue
             elif c == 'STROMGREN_PAUNZ':
-                current_cat = self._gaia_paunzen_xmatch(cats)
+                current_cat = self._gaia_paunzen_xmatch(cats, self.ra, self.dec,
+                                                        self.radius)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
                     continue
                 self._retrieve_from_stromgren(current_cat, 'STROMGREN_PAUNZEN')
                 continue
             elif c == 'STROMGREN_HAUCK':
-                current_cat = self._gaia_hauck_xmatch(cats)
+                current_cat = self._gaia_hauck_xmatch(cats, self.ra, self.dec,
+                                                      self.radius)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
                     continue
@@ -424,7 +346,7 @@ class Librarian:
 
     def _retrieve_from_tess(self):
         print('Checking catalog TICv8')
-        tic = self.get_TIC()
+        tic = self.get_TIC(self.ra, self.dec, self.radius)
         tic.sort('dstArcSec')
         mask = tic['GAIA'] == str(self.g_id)
         cat = tic[mask]
@@ -484,13 +406,13 @@ class Librarian:
         err = [v_e]
         if self._qc_mags(bv, bv_e, 'B-V'):
             b = bv + v
-            b_e = np.sqrt(v_e**2 + bv_e**2)
+            b_e = np.sqrt(v_e ** 2 + bv_e ** 2)
             filts.append('GROUND_JOHNSON_B')
             mags.append(b)
             err.append(b_e)
         if self._qc_mags(ub, ub_e, 'U-B'):
             u = ub + b
-            u_e = np.sqrt(b_e**2 + ub_e**2)
+            u_e = np.sqrt(b_e ** 2 + ub_e ** 2)
             filts.append('GROUND_JOHNSON_U')
             mags.append(u)
             err.append(u_e)
@@ -521,9 +443,9 @@ class Librarian:
         b = by + y
         v = m1 + 2 * by + y
         u = c1 + 2 * m1 + 3 * by + y
-        b_e = np.sqrt(by_e**2 + y_e**2)
-        v_e = np.sqrt(m1_e**2 + 4 * by_e**2 + y_e**2)
-        u_e = np.sqrt(c1_e**2 + 4 * m1_e**2 + 9 * by_e**2 + y_e**2)
+        b_e = np.sqrt(by_e ** 2 + y_e ** 2)
+        v_e = np.sqrt(m1_e ** 2 + 4 * by_e ** 2 + y_e ** 2)
+        u_e = np.sqrt(c1_e ** 2 + 4 * m1_e ** 2 + 9 * by_e ** 2 + y_e ** 2)
         mags = [u, v, b, y]
         err = [u_e, v_e, b_e, y_e]
         filts = ['STROMGREN_u', 'STROMGREN_v', 'STROMGREN_b', 'STROMGREN_y']
@@ -633,7 +555,7 @@ class Librarian:
             CatalogWarning(name, 5).warn()
             return
         if not near:
-            tyc1, tyc2, tyc3 = self.ids['TYCHO2'].split(b'-')
+            tyc1, tyc2, tyc3 = self.ids['TYCHO2'].split('-')
             mask = cat['TYC1'] == int(tyc1)
             mask *= cat['TYC2'] == int(tyc2)
             mask *= cat['TYC3'] == int(tyc3)
@@ -699,7 +621,98 @@ class Librarian:
         mask = cat['DR2Name'] == 'Gaia DR2 {0}'.format(self.ids['Gaia'])
         self._retrieve_from_cat(cat[mask], 'Gaia')
 
-    def _qc_mags(self, mag, err, m):
+    @staticmethod
+    def _get_distance(ra, dec, radius, g_id):
+        """Retrieve Bailer-Jones DR2 distance."""
+        cat = Vizier.query_region(
+            SkyCoord(
+                ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
+            ), radius=radius, catalog='I/347/gaia2dis'
+        )['I/347/gaia2dis']
+        cat.sort('_r')
+        idx = np.where(cat['Source'] == g_id)[0]
+        if len(idx) == 0:
+            # Raise exception, for now do nothing
+            return -1, -1
+        dist = cat[idx]['rest'][0]
+        lo = dist - cat[idx]['b_rest'][0]
+        hi = cat[idx]['B_rest'][0] - dist
+        return dist, max(lo, hi)
+
+    @staticmethod
+    def _get_parallax(res):
+        plx = res['parallax'][0]
+        if plx <= 0:
+            CatalogWarning(0, 0).warn()
+            return -1, -1
+        plx_e = res['parallax_error'][0]
+        # Parallax correction −52.8 ± 2.4 µas from Zinn+19
+        return plx + 0.0528, np.sqrt(plx_e ** 2 + 0.0024 ** 2)
+
+    @staticmethod
+    def _get_radius(res):
+        rad = res['radius_val'][0]
+        if np.ma.is_masked(rad):
+            CatalogWarning('radius', 1).warn()
+            return 0, 0
+        lo = res['radius_percentile_lower'][0]
+        up = res['radius_percentile_upper'][0]
+        rad_e = max([rad - lo, up - rad])
+        return rad, 5 * rad_e
+
+    @staticmethod
+    def _get_teff(res):
+        teff = res['teff_val'][0]
+        if np.ma.is_masked(teff):
+            CatalogWarning('teff', 1).warn()
+            return 0, 0
+        lo = res['teff_percentile_lower'][0]
+        up = res['teff_percentile_upper'][0]
+        teff_e = max([teff - lo, up - teff])
+        return teff, teff_e
+
+    @staticmethod
+    def _get_lum(res):
+        lum = res['lum_val'][0]
+        if np.ma.is_masked(lum):
+            CatalogWarning('lum', 1).warn()
+            return 0, 0
+        lo = res['lum_percentile_lower'][0]
+        up = res['lum_percentile_upper'][0]
+        lum_e = max([lum - lo, up - lum])
+        return lum, lum_e
+
+    @staticmethod
+    def _get_gaia_id(ra, dec, radius):
+        c = SkyCoord(ra, dec, unit=(u.deg, u.deg), frame='icrs')
+        j = Gaia.cone_search_async(c, radius)
+        res = j.get_results()
+        return res['source_id'][0]
+
+    @staticmethod
+    def get_catalogs(ra, dec, radius):
+        """Retrieve available catalogs for a star from Vizier."""
+        cats = Vizier.query_region(
+            SkyCoord(
+                ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
+            ), radius=radius
+        )
+
+        return cats
+
+    @staticmethod
+    def get_TIC(ra, dec, radius):
+        """Retrieve TIC from MAST."""
+        cat = Catalogs.query_region(
+            SkyCoord(
+                ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
+            ), radius=radius, catalog='TIC'
+        )
+
+        return cat
+
+    @staticmethod
+    def _qc_mags(mag, err, m):
         if np.ma.is_masked(mag):
             CatalogWarning(m, 2).warn()
             return False
@@ -713,47 +726,51 @@ class Librarian:
             return False
         return True
 
-    def _gaia_galex_xmatch(self, cats):
+    @staticmethod
+    def _gaia_galex_xmatch(cats, ra, dec, radius):
         galex = cats['II/312/ais']
-        coord = SkyCoord(ra=self.ra * u.deg,
-                         dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=self.radius)
+        coord = SkyCoord(ra=ra * u.deg,
+                         dec=dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=galex,
                           colRA2='RAJ2000', colDec2='DEJ2000',
-                          area=region, max_distance=self.radius)
+                          area=region, max_distance=radius)
         xm.sort('angDist')
         return xm
 
-    def _gaia_mermilliod_xmatch(self, cats):
+    @staticmethod
+    def _gaia_mermilliod_xmatch(cats, ra, dec, radius):
         mermilliod = cats['II/168/ubvmeans']
-        coord = SkyCoord(ra=self.ra * u.deg,
-                         dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=self.radius)
+        coord = SkyCoord(ra=ra * u.deg,
+                         dec=dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='_RA', colDec2='_DE',
-                          area=region, max_distance=self.radius)
+                          area=region, max_distance=radius)
         xm.sort('angDist')
         return xm
 
-    def _gaia_paunzen_xmatch(self, cats):
+    @staticmethod
+    def _gaia_paunzen_xmatch(cats, ra, dec, radius):
         mermilliod = cats['J/A+A/580/A23/catalog']
-        coord = SkyCoord(ra=self.ra * u.deg,
-                         dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=self.radius)
+        coord = SkyCoord(ra=ra * u.deg,
+                         dec=dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='RAJ2000', colDec2='DEJ2000',
-                          area=region, max_distance=self.radius)
+                          area=region, max_distance=radius)
         xm.sort('angDist')
         return xm
 
-    def _gaia_hauck_xmatch(self, cats):
+    @staticmethod
+    def _gaia_hauck_xmatch(cats, ra, dec, radius):
         mermilliod = cats['J/A+A/580/A23/catalog']
-        coord = SkyCoord(ra=self.ra * u.deg,
-                         dec=self.dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=self.radius)
+        coord = SkyCoord(ra=ra * u.deg,
+                         dec=dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=radius)
         xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
                           colRA2='_RA.icrs', colDec2='_DE.icrs',
-                          area=region, max_distance=self.radius)
+                          area=region, max_distance=radius)
         xm.sort('angDist')
         return xm
 
