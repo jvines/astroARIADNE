@@ -7,6 +7,7 @@ To install **ARIADNE** you can clone this repository with
 
 ```
 git clone https://github.com/jvines/astroARIADNE.git
+cd astroARIADNE
 ```
 
 And then run
@@ -270,7 +271,7 @@ models = [
 f = Fitter()
 f.star = s
 f.setup = setup
-f.av_law = 'fitzpatrick
+f.av_law = 'fitzpatrick'
 f.out_folder = out_folder
 f.bma = True
 f.models = models
