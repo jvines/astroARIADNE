@@ -23,6 +23,7 @@ from .utils import *
 try:
     import dynesty
     from dynesty.utils import resample_equal
+
     bma_flag = True
 except ModuleNotFoundError:
     wrn = 'Dynesty package not found. BMA and log g estimation unavailable.'
@@ -45,7 +46,7 @@ class Fitter:
     Fitter object, then you set up the configurations and finally you
     initialize the object by running the initialize method.
     >>> f = Fitter()
-    >>> # f.star = s  # s must be a valid Star object.
+    >>> f.star = s  # s must be a valid Star object.
     >>> f.initialize()
 
     Attributes
@@ -468,19 +469,11 @@ class Fitter:
         if not self._norm:
             if self.star.dist != -1:
                 defaults['dist'] = st.norm(
-                    loc=self.star.dist, scale=5 * self.star.dist_e)
+                    loc=self.star.dist, scale=3 * self.star.dist_e)
             else:
-                # PriorError('distance', 4).warn()
-                defaults['dist'] = st.uniform(loc=1, scale=1000)
+                defaults['dist'] = st.uniform(loc=1, scale=3000)
             # Radius prior setup.
-            # if self.star.rad > 0:
-            #     a = - self.star.rad / self.star.rad_e
-            #     b = np.inf
-            #     defaults['rad'] = st.truncnorm(
-            #         loc=self.star.rad, scale=self.star.rad_e, a=a, b=b)
-            # else:
-                # PriorError('rad', 3).warn()
-            defaults['rad'] = st.uniform(loc=0.05, scale=20)
+            defaults['rad'] = st.uniform(loc=0.05, scale=100)
         # Normalization prior setup.
         else:
             up = 1 / 1e-20
@@ -500,7 +493,7 @@ class Fitter:
         for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
             p_ = get_noise_name(filt) + '_noise'
             mu = 0
-            sigma = flx_e * 3
+            sigma = flx_e * 10
             b = (1 - flx) / flx_e
             defaults[p_] = st.truncnorm(loc=mu, scale=sigma, a=0, b=b)
             # defaults[p_] = st.uniform(loc=0, scale=5)
@@ -1286,11 +1279,11 @@ class Fitter:
         # Solar logg = 4.437
         # g = g_Sol * M / R**2
         mass = logg + 2 * np.log10(rad) - 4.437
-        mass = 10**mass
+        mass = 10 ** mass
         return mass
 
     def _get_lum(self, teff, rad):
-        sb = sigma_sb.to(u.solLum / u.K**4 / u.solRad**2).value
+        sb = sigma_sb.to(u.solLum / u.K ** 4 / u.solRad ** 2).value
         L = 4 * np.pi * rad ** 2 * sb * teff ** 4
         return L
 
@@ -1353,7 +1346,7 @@ class Fitter:
                     params['distance'] = (star.dist, star.dist_e)
                 if par == 'distance':
                     err = max(unc[k])
-                    params['parallax'] = (1000 / bf[k], 1000 * err / bf[k]**2)
+                    params['parallax'] = (1000 / bf[k], 1000 * err / bf[k] ** 2)
             else:
                 continue
 
@@ -1389,6 +1382,7 @@ class Fitter:
                 used_bands.append(b)
         age_samp, mass_samp, eep_samp = estimate(used_bands, params, logg=False)
         return age_samp, mass_samp, eep_samp
+
 
 #####################
 # Dynesty and multinest wrappers
