@@ -1,5 +1,6 @@
 """Error handling module."""
 import sys
+import traceback
 
 
 class Error(Exception):
@@ -15,11 +16,8 @@ class Error(Exception):
 
     def __raise__(self):
         """Raise an exception and print the error message."""
-        try:
-            raise self
-        except Error:
-            self.warn()
-            sys.exit()
+        self.warn()
+        sys.exit()
 
     def warn(self):
         """Print error message."""
@@ -169,11 +167,12 @@ class CatalogWarning(Error):
 class DynestyError(Error):
     """Exception raised when dynesty crashes."""
 
-    def __init__(self, out, mod):
+    def __init__(self, out, mod, e):
         self.errorname = 'DynestyError'
         self.message = 'ERROR OCCURRED DURING DYNESTY RUN.\n'
-        self.message += 'WHILE FITTING MODEL {}\n'.format(mod)
-        self.message += 'DUMPING `sampler.results` TO {}'.format(out)
+        self.message += f'WHILE FITTING MODEL {mod}\n'
+        self.message += f'DUMPING `sampler.results` TO {out}\n'
+        self.message += f'ERROR READS:\n{traceback.format_exc()}'
 
 
 class StarWarning(Error):

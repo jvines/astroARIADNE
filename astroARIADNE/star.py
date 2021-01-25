@@ -512,7 +512,7 @@ class Star:
         headers = ['Filter', 'Magnitude', 'Uncertainty']
         return master, headers
 
-    def estimate_logg(self):
+    def estimate_logg(self, out='.'):
         """Estimate logg values from MIST isochrones."""
         self.get_logg = True
         c = random.choice(self.colors)
@@ -525,12 +525,27 @@ class Star:
         if self.get_rad and self.rad is not None and self.rad != 0:
             params['radius'] = (self.rad, self.rad_e)
         params['parallax'] = (self.plx, self.plx_e)
-        mask = np.array([1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
-                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
+        mask = np.array([1, 1, 1,
+                         0, 0,
+                         1, 1, 1,
+                         0, 0,
+                         0, 0, 0, 0,
+                         1, 1, 1,
+                         0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0,
+                         1, 1,
+                         0, 0,
+                         0, 0,
                          0, 1, 0])
         mags = self.mags[mask == 1]
         mags_e = self.mag_errs[mask == 1]
-        bands = ['H', 'J', 'K', 'V', 'B', 'G', 'RP', 'BP', 'W1', 'W2', 'TESS']
+        bands = [
+            'H', 'J', 'K',
+            'U', 'V', 'B',
+            'G', 'RP', 'BP',
+            'W1', 'W2',
+            'TESS'
+        ]
         used_bands = []
         for m, e, b in zip(mags, mags_e, bands):
             if m != 0:
@@ -543,7 +558,7 @@ class Star:
                     '\t\t*** ESTIMATING LOGG USING MIST ISOCHRONES ***', c
                 )
             )
-        logg_est = estimate(used_bands, params, logg=True)
+        logg_est = estimate(used_bands, params, logg=True, out_folder=out)
         if logg_est is not None:
             self.logg = logg_est[0]
             self.logg_e = logg_est[1]

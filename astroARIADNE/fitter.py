@@ -670,10 +670,10 @@ class Fitter:
                 print('\t\t\tFITTING MODEL : ' + gr)
                 try:
                     self.fit_dynesty(out_file=out_file)
-                except ValueError:
+                except ValueError as e:
                     dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
                     pickle.dump(self.sampler.results, open(dump_out, 'wb'))
-                    DynestyError(dump_out, gr).warn()
+                    DynestyError(dump_out, gr, e).__raise__()
                     continue
 
         # Now that the fitting finished, read the outputs and average
@@ -1380,7 +1380,9 @@ class Fitter:
             if m != 0:
                 params[b] = (m, e)
                 used_bands.append(b)
+
         age_samp, mass_samp, eep_samp = estimate(used_bands, params, logg=False)
+
         return age_samp, mass_samp, eep_samp
 
 

@@ -1,6 +1,7 @@
 """Estimate logg using MIST isochrones."""
 
 import warnings
+import pickle
 
 import pandas as pd
 import numpy as np
@@ -12,7 +13,7 @@ from numba.core.errors import (NumbaDeprecationWarning,
 import dynesty
 from dynesty.utils import resample_equal
 
-from .error import InputError
+from .error import DynestyError, InputError
 from .utils import credibility_interval
 
 warnings.filterwarnings(
@@ -28,7 +29,7 @@ def get_isochrone(logage, feh):
     return iso
 
 
-def estimate(bands, params, logg=True):
+def estimate(bands, params, logg=True, out_folder='.'):
     """Estimate logg using MIST isochrones."""
     mist = get_ichrone('mist', bands=bands)
     model = SingleStarModel(mist, **params)
@@ -57,11 +58,16 @@ def estimate(bands, params, logg=True):
     model._priors['distance'] = GaussianPrior(dist, dist_e)
     sampler = dynesty.NestedSampler(
         loglike, prior_transform, model.n_params + len(bands),
-        nlive=500, bound='multi', sample='rwalk',
+        nlive=100, bound='multi', sample='rwalk',
         logl_args=([model, params, bands]),
         ptform_args=([model])
     )
-    sampler.run_nested(dlogz=0.01)
+    try:
+        sampler.run_nested(dlogz=0.01)
+    except ValueError as e:
+        dump_out = f'{out_folder}/isochrone_DUMP.pkl'
+        pickle.dump(sampler.results, open(dump_out, 'wb'))
+        DynestyError(dump_out, 'isochrone', e).__raise__()
     results = sampler.results
     samples = resample_equal(
         results.samples, np.exp(results.logwt - results.logz[-1])
