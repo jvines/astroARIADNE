@@ -1200,7 +1200,8 @@ class Fitter:
         lnzer = output.get_stats()['global evidence error']
         return lnz, lnzer, posterior_samples
 
-    def dynesty_results(self, results):
+    @staticmethod
+    def dynesty_results(results):
         """Extract posterior samples, global evidence and its error."""
         weights = np.exp(results['logwt'] - results['logz'][-1])
         posterior_samples = resample_equal(results.samples, weights)
@@ -1208,7 +1209,8 @@ class Fitter:
         lnzer = results.logzerr[-1]
         return lnz, lnzer, posterior_samples
 
-    def _get_mass(self, logg, rad):
+    @staticmethod
+    def _get_mass(logg, rad):
         """Calculate mass from logg and radius."""
         # Solar logg = 4.437
         # g = g_Sol * M / R**2
@@ -1216,12 +1218,14 @@ class Fitter:
         mass = 10 ** mass
         return mass
 
-    def _get_lum(self, teff, rad):
+    @staticmethod
+    def _get_lum(teff, rad):
         sb = sigma_sb.to(u.solLum / u.K ** 4 / u.solRad ** 2).value
         L = 4 * np.pi * rad ** 2 * sb * teff ** 4
         return L
 
-    def _get_rad(self, samples, dist, dist_e):
+    @staticmethod
+    def _get_rad(samples, dist, dist_e):
         """Calculate radius from the normalization constant and distance."""
         norm = samples
         # Create a synthetic distribution for distance.
@@ -1232,7 +1236,8 @@ class Fitter:
         r *= u.pc.to(u.solRad)  # Transform to Solar radii
         return r
 
-    def _get_angular_diameter(self, rad, dist):
+    @staticmethod
+    def _get_angular_diameter(rad, dist):
         diameter = 2 * rad
         ad = (diameter / (dist * u.pc.to(u.solRad))) * u.rad.to(u.marcsec)
         return ad
