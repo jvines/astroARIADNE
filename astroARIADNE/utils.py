@@ -12,7 +12,31 @@ from contextlib import closing
 import numpy as np
 from scipy.special import erf
 from scipy.stats import gaussian_kde, norm
+from scipy.interpolate import interp1d
 from termcolor import colored
+
+
+def sample_from_distribution(distribution, size=100):
+    """Take random samples from an empirical distribution.
+
+    Parameters
+    ----------
+    distribution: array_like
+        The empirical distribution from which we want to sample.
+    size: int, optional
+        The number of samples we wish to extract.
+
+    Returns
+    -------
+    samples: array_like
+        The array with the random samples.
+    """
+    # First we calculate the CDF of the distribution
+    cdf = estimate_cdf(distribution)
+    # Now we interpolate the inverted cdf
+    icdf = interp1d(distribution, cdf)
+    points = np.random.random_sample(size=size)
+    return icdf(points)
 
 
 def estimate_pdf(distribution):
@@ -38,9 +62,10 @@ def estimate_pdf(distribution):
 
 def estimate_cdf(distribution):
     """Estimate the CDF of a distribution."""
-    h, hx = np.histogram(distribution, density=True, bins=1000)
+    h, hx = np.histogram(distribution, density=True, bins=999)
+    cdf = np.zeros(1000)  # ensure the first value of the CDF is 0
     idx = np.argsort(h)[::-1]
-    cdf = np.cumsum(h[idx]) * np.diff(hx)
+    cdf[1:] = np.cumsum(h[idx]) * np.diff(hx)
     return cdf
 
 
