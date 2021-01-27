@@ -320,7 +320,7 @@ class Fitter:
         self.start = time.time()
         err_msg = 'No star is detected. Please create an instance of Star.'
         if self.star is None:
-            er = InputError(self.star, err_msg)
+            er = InputError(err_msg)
             er.log(self.out + '/output.log')
             er.__raise__()
         star = self.star
