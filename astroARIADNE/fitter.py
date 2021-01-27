@@ -119,9 +119,9 @@ class Fitter:
     @setup.setter
     def setup(self, setup):
         err_msg = 'The setup has to contain at least the fitting engine'
-        err_msg += ', multinest or dynesty.'
+        err_msg += f', multinest or dynesty.\nThe setup was {setup}'
         if len(setup) < 1:
-            InputError(setup, err_msg).__raise__()
+            InputError(err_msg).__raise__()
         self._setup = setup
         self._engine = setup[0]
         defaults = False
