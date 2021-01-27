@@ -97,7 +97,8 @@ class Fitter:
         self.n_samples = None
         self.bma = False
         self.prior_setup = None
-        self.sequential = False
+        self.sequential = True
+        self.experimental = False
 
     @property
     def star(self):
