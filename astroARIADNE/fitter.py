@@ -4,11 +4,13 @@ import random
 import time
 import warnings
 from multiprocessing import Pool, Process
+from tqdm import tqdm
 
 import astropy.units as u
 import pandas as pd
 import numpy as np
 import scipy.stats as st
+from numpy.random import choice
 from astropy.constants import sigma_sb
 from isochrones.interp import DFInterpolator
 from termcolor import colored
@@ -26,7 +28,8 @@ try:
 
     bma_flag = True
 except ModuleNotFoundError:
-    wrn = 'Dynesty package not found. BMA and log g estimation unavailable.'
+    wrn = 'Dynesty package not found.\n'
+    wrn += 'Install dynesty with `pip install dynesty`'
     warnings.warn(wrn)
     bma_flag = False
 try:
@@ -79,6 +82,11 @@ class Fitter:
         Description of attribute `sequential`.
 
     """
+
+    colors = [
+        'red', 'green', 'blue', 'yellow',
+        'grey', 'magenta', 'cyan', 'white'
+    ]
 
     def __init__(self):
 
