@@ -365,10 +365,7 @@ class Fitter:
 
         # Setup priors.
         self.default_priors = self._default_priors()
-        if self.prior_setup is None:
-            self.create_priors(self.priorfile)
-        else:
-            self.create_priors_from_setup()
+        self.create_priors_from_setup()
         prior_dict = self.priors
 
         # Get dimensions.
@@ -500,70 +497,6 @@ class Fitter:
             # defaults[p_] = st.uniform(loc=0, scale=5)
             order = np.append(order, p_)
         return defaults
-
-    def create_priors(self, priorfile):
-        """Read the prior file.
-
-        Returns a dictionary with each parameter's prior
-        """
-        param_list = [
-            'teff', 'logg', 'z',
-            'dist', 'rad', 'norm',
-            'Av'
-        ]
-
-        noise = []
-        mask = self.star.filter_mask
-        flxs = self.star.flux[mask]
-        errs = self.star.flux_er[mask]
-        for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
-            p_ = get_noise_name(filt) + '_noise'
-            noise.append(p_)
-
-        if priorfile:
-            param, prior, bounds = np.loadtxt(
-                priorfile, usecols=[0, 1, 2], unpack=True, dtype=object)
-            copy = np.vstack((param, prior, bounds)).T
-            np.savetxt(self.out_folder + '/prior.dat', copy, fmt='%s')
-            # Dict with priors.
-            prior_dict = dict()
-            for par, pri, bo in zip(param, prior, bounds):
-                if par not in param_list:
-                    er = PriorError(par, 0)
-                    er.log(self.out_folder + '/output.log')
-                    er.__raise__()
-                if self.norm and (par == 'dist' or par == 'rad'):
-                    er = PriorError(par, 1)
-                    er.log(self.out_folder + '/output.log')
-                    er.__raise__()
-                if pri.lower() == 'uniform':
-                    a, b = bo.split(',')
-                    a, b = float(a), float(b)
-                    prior_dict[par] = st.uniform(loc=a, scale=b - a)
-                elif pri.lower() == 'normal':
-                    mu, sig = bo.split(',')
-                    mu, sig = float(mu), float(sig)
-                    prior_dict[par] = st.norm(loc=mu, scale=sig)
-                elif pri.lower() == 'truncatednormal':
-                    mu, sig, up, low = bo.split(',')
-                    mu, sig, up, low = float(mu), float(
-                        sig), float(up), float(low)
-                    b, a = (up - mu) / sig, (low - mu) / sig
-                    priot_dict[par] = st.truncnorm(a=a, b=b, loc=mu, scale=sig)
-                elif pri.lower() == 'default':
-                    prior_dict[par] = self.default_priors[par]
-                elif pri.lower() == 'fixed':
-                    idx = np.where(par == order)[0]
-                    self.coordinator[idx] = 1
-                    self.fixed[idx] = float(bo)
-
-                for par in noise:
-                    prior_dict[par] = self.default_priors[par]
-            self.priors = prior_dict
-        else:
-            warnings.warn('No priorfile detected. Using default priors.')
-            self.priors = self.default_priors
-        pass
 
     def create_priors_from_setup(self):
         """Create priors from the manual setup."""
