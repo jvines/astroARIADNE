@@ -458,7 +458,7 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
     """Fill up the output file."""
     if fixed is False:
         xx, pdf = estimate_pdf(samp)
-        cdf = estimate_cdf(samp)
+        cdf = estimate_cdf(samp, hdr=True)
         best, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=1)
         # best = get_max_from_kde(samp)
         out['best_fit'][param] = best
