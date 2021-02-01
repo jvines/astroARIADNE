@@ -475,7 +475,7 @@ class Fitter:
         if not self._norm:
             if self.star.dist != -1:
                 defaults['dist'] = st.norm(
-                    loc=self.star.dist, scale=3 * self.star.dist_e)
+                    loc=self.star.dist, scale=5 * self.star.dist_e)
             else:
                 defaults['dist'] = st.uniform(loc=1, scale=3000)
             # Radius prior setup.
@@ -1153,7 +1153,8 @@ class Fitter:
         # Add estimated age to best fit dictionary.
 
         age_samp, mass_samp, eep_samp = self.estimate_age(out['best_fit'],
-                                                          out['uncertainties'])
+                                                          out['uncertainties'],
+                                                          c=choice(self.colors))
         out['posterior_samples']['age'] = age_samp
         out['posterior_samples']['iso_mass'] = mass_samp
         out['posterior_samples']['eep'] = eep_samp
@@ -1250,7 +1251,7 @@ class Fitter:
         ad = (diameter / (dist * u.pc.to(u.solRad))) * u.rad.to(u.marcsec)
         return ad
 
-    def estimate_age(self, bf, unc):
+    def estimate_age(self, bf, unc, c='white'):
         """Estimate age using MIST isochrones.
 
         Parameters
@@ -1262,11 +1263,6 @@ class Fitter:
             A dictionary with the uncertainties.
 
         """
-        colors = [
-            'red', 'green', 'blue', 'yellow',
-            'grey', 'magenta', 'cyan', 'white'
-        ]
-        c = random.choice(colors)
         print(
             colored(
                 '\t\t*** ESTIMATING AGE AND MASS USING MIST ISOCHRONES ***', c
