@@ -1288,8 +1288,6 @@ class Fitter:
     def estimate_age(self, bf, unc, c='white'):
         """Estimate age using MIST isochrones.
 
-        TODO: Make static
-
         Parameters
         ----------
         bf : dict
@@ -1321,8 +1319,8 @@ class Fitter:
             if not self.coordinator[i]:
                 if k != 'norm':
                     params[par] = (bf[k], max(unc[k]))
-                if k == 'norm' and star.dist != -1:
-                    params['distance'] = (star.dist, star.dist_e)
+                if k == 'norm' and self.star.dist != -1:
+                    params['distance'] = (self.star.dist, self.star.dist_e)
                 if par == 'distance':
                     err = max(unc[k])
                     params['parallax'] = (1000 / bf[k], 1000 * err / bf[k] ** 2)
@@ -1330,7 +1328,7 @@ class Fitter:
                 continue
 
         params['mass'] = (bf['grav_mass'], max(unc['grav_mass']))
-        if star.lum != 0 and star.lum_e != 0:
+        if self.star.lum != 0 and self.star.lum_e != 0:
             params['logL'] = (np.log10(bf['lum']),
                               abs(np.log10(max(unc['lum']))))
         mask = np.array([1, 1, 1,
