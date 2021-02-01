@@ -100,8 +100,8 @@ class Fitter:
         self.norm = False
         self.grid = 'phoenix'
         self.estimate_logg = False
-        self.priorfile = None
         self.av_law = 'fitzpatrick'
+        self.method = 'average'
         self.n_samples = None
         self.bma = False
         self.prior_setup = None
@@ -171,7 +171,7 @@ class Fitter:
     @norm.setter
     def norm(self, norm):
         if type(norm) is not bool:
-            InputError(norm, 'norm must be True or False.').__raise__()
+            InputError('norm must be True or False.').__raise__()
         self._norm = norm
 
     @property
@@ -183,8 +183,6 @@ class Fitter:
     def grid(self, grid):
         assert type(grid) == str
         self._grid = grid
-        directory = '../Datafiles/model_grids/'
-        # directory = './'
         if grid.lower() == 'phoenix':
             with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pd.read_pickle(intp))
@@ -255,20 +253,8 @@ class Fitter:
     @verbose.setter
     def verbose(self, verbose):
         if type(verbose) is not bool:
-            InputError(verbose, 'verbose must be True or False.').__raise__()
+            InputError('Verbose must be True or False.').__raise__()
         self._verbose = verbose
-
-    @property
-    def priorfile(self):
-        """Priorfile location."""
-        return self._priorfile
-
-    @priorfile.setter
-    def priorfile(self, priorfile):
-        if type(priorfile) is not str and priorfile is not None:
-            err_msg = 'Priorfile must be an address or None.'
-            InputError(priorfile, err_msg).__raise__()
-        self._priorfile = priorfile
 
     @property
     def out_folder(self):
@@ -282,7 +268,7 @@ class Fitter:
     def out_folder(self, out_folder):
         if type(out_folder) is not str and out_folder is not None:
             err_msg = 'Output folder must be an address or None.'
-            InputError(out_folder, err_msg).__raise__()
+            InputError(err_msg).__raise__()
         self._out_folder = out_folder
 
     @property
@@ -316,6 +302,14 @@ class Fitter:
         if law == laws[3]:
             law_f = extinction.fitzpatrick99
         self._av_law = law_f
+
+    @property
+    def method(self):
+        return self.method
+
+    @method.setter
+    def method(self, met):
+        self.method = met
 
     def initialize(self):
         """Initialize the fitter.
@@ -530,10 +524,13 @@ class Fitter:
                 if self.prior_setup[k].lower() == 'rave':
                     # RAVE prior only available for teff and logg. It's already
                     # the default for [Fe/H]
-                    if k == 'teff' or k == 'logg':
+                    if k == 'logg' or k == 'teff':
+                        if k == 'teff':
+                            PriorError('teff', 2).warn()
                         with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
                             prior_dict[k] = pickle.load(jar)
                         prior_out += k + '\tRAVE\n'
+
             else:
                 prior = self.prior_setup[k][0]
                 if prior == 'fixed':
@@ -579,7 +576,7 @@ class Fitter:
             self.fit_dynesty()
         elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time,
-            self.out_folder, self._engine, self.norm)
+            self.out_folder, self._engine, self.norm, )
         pass
 
     def fit_bma(self):
@@ -622,60 +619,100 @@ class Fitter:
         # the posteriors
         outs = []
         for g in self._grids:
-            in_folder = self.out_folder + '/' + g + '_out.pkl'
-            with open(in_folder, 'rb') as out:
-                outs.append(pickle.load(out))
-
-        avgd = self.bayesian_model_average(outs, self._grids)
+            in_folder = f'{self.out_folder}/{g}_out.pkl'
+            outs.append(in_folder)
+            # with open(in_folder, 'rb') as out:
+            #     outs.append(pickle.load(out))
+        c = np.random.choice
+        avgd = self.bayesian_model_average(outs, self._grids, self._norm,
+                                           self.n_samples, self.method, c)
         self.save_bma(avgd)
 
         elapsed_time = execution_time(self.start)
-        end(self.coordinator, elapsed_time,
-            self.out_folder, 'Bayesian Model Averaging', self.norm)
+        end(self.coordinator, elapsed_time, self.out_folder,
+            'Bayesian Model Averaging', self.norm, self.method)
         pass
 
-    def bayesian_model_average(self, outputs, grids):
+    @staticmethod
+    def bayesian_model_average(outputs, grids, norm, nsamples,
+                               method='average', c='white'):
         """Perform Bayesian Model Averaging."""
-        # CONSIDER MAKING STATIC
-        choice = np.random.choice
         evidences = []
         post_samples = []
+        model_posteriors = []
+        # Read and extract model posterior information.
         for o in outputs:
+            with open(o, 'rb') as f:
+                model_posteriors.append(pickle.load(f))
+        # Extract the evidences of each model.
+        for o in model_posteriors:
             evidences.append(o['global_lnZ'])
             post_samples.append(o['posterior_samples'])
+        # Convert evidences to weights/probabilities.
         evidences = np.array(evidences)
         weights = evidences - evidences.min()
         weights = [np.exp(e) / np.exp(weights).sum() for e in weights]
         weights = np.array(weights)
+        # We're not averaging these
         ban = ['loglike', 'priors', 'posteriors', 'mass']
-        if self._norm:
+        if norm:  # if normalization was used, we won't average the radius
             ban.append('rad')
+        # Create an output dictionary for the averaged samples.
         out = dict()
         out['originals'] = dict()
         out['weights'] = dict()
-        for i, o in enumerate(outputs):
+        # Populate the dict with the probabilities and individual model
+        # posteriors
+        for i, o in enumerate(model_posteriors):
             out['weights'][o['model_grid']] = weights[i]
-        for o in outputs:
             out['originals'][o['model_grid']] = o['posterior_samples']
         out['averaged_samples'] = dict()
-        if self.n_samples == 'max':
+        if method == 'sample':
+            # Get the shortest samples
+            # ( This snippet is adapted from pymc3.sampling )
             lens = []
             for o in post_samples:
                 lens.append(len(o['teff']))
             lens = np.array(lens)
-            self.n_samples = lens.min()
-        for k in post_samples[0].keys():
+            n_min = lens.min()
+            # n is the number of samples we'll retrieve from each model
+            # The idea is that the number of samples will be proportional
+            # To the model's probability (or weight)
+            n = (n_min * weights).astype('int')
+            # normalize n to n_min
+            idx = np.argmax(n)
+            n[idx] += n_min - n.sum()
+            # First extract the correct number of samples per model
+            traces = dict()
+            for k in post_samples[0].keys():
+                if k in ban:
+                    continue
+                traces[k] = []
+        # Begin averaging
+        if method == 'average':
+            print(colored('\t\t*** AVERAGING POSTERIOR SAMPLES ***', c))
+        elif method == 'sample':
+            print(colored('\t\t*** SAMPLING AVERAGED POSTERIOR ***', c))
+        for k in tqdm(post_samples[0].keys()):
             if k in ban:
                 continue
-            out['averaged_samples'][k] = np.zeros(self.n_samples)
+            out['averaged_samples'][k] = np.zeros(nsamples)
             for i, o in enumerate(post_samples):
                 # Skip fixed params
                 try:
                     len(o[k])
                 except TypeError:
                     continue
-                weighted_samples = choice(o[k], self.n_samples) * weights[i]
-                out['averaged_samples'][k] += weighted_samples
+                if method == 'average':  # Do weighted averaging
+                    weighted_samples = choice(o[k], nsamples) * weights[i]
+                    out['averaged_samples'][k] += weighted_samples
+                elif method == 'sample':  # Do weighted sampling
+                    traces[k].extend(choice(o[k], n[i]))
+
+            if method == 'sample':
+                resampled = sample_from_distribution(traces[k], size=nsamples)
+                out['averaged_samples'][k] = resampled
+
         out['evidences'] = dict()
         for e, g in zip(evidences, grids):
             out['evidences'][g] = e
@@ -1047,11 +1084,8 @@ class Fitter:
         """
         out = dict()
         logdat = '#Parameter\tmedian\tupper\tlower\t3sig_low\t3sig_up\n'
-        log_out = self.out_folder + '/best_fit.dat'
-        prob_out = self.out_folder + '/model_probabilities.dat'
-
-        n = int(self.star.used_filters.sum())
-        mask = self.star.filter_mask
+        log_out = f'{self.out_folder}/best_fit.dat'
+        prob_out = f'{self.out_folder}/model_probabilities.dat'
 
         # Save global evidence of each model.
         out['lnZ'] = avgd['evidences']
@@ -1253,6 +1287,8 @@ class Fitter:
 
     def estimate_age(self, bf, unc, c='white'):
         """Estimate age using MIST isochrones.
+
+        TODO: Make static
 
         Parameters
         ----------
