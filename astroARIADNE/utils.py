@@ -34,7 +34,8 @@ def sample_from_distribution(distribution, size=100):
     # First we calculate the CDF of the distribution
     cdf = estimate_cdf(distribution)
     # Now we interpolate the inverted cdf
-    icdf = interp1d(distribution, cdf)
+    xx = np.linspace(np.min(distribution), np.max(distribution), 500)
+    icdf = interp1d(cdf, xx)
     points = np.random.random_sample(size=size)
     return icdf(points)
 
