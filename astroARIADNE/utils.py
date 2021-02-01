@@ -56,17 +56,20 @@ def estimate_pdf(distribution):
     """
     kde = gaussian_kde(distribution)
     xmin, xmax = distribution.min(), distribution.max()
-    xx = np.linspace(xmin, xmax, 1000)
+    xx = np.linspace(xmin, xmax, 500)
     pdf = kde(xx)
     return xx, pdf
 
 
-def estimate_cdf(distribution):
+def estimate_cdf(distribution, hdr=False):
     """Estimate the CDF of a distribution."""
-    h, hx = np.histogram(distribution, density=True, bins=999)
-    cdf = np.zeros(1000)  # ensure the first value of the CDF is 0
-    idx = np.argsort(h)[::-1]
-    cdf[1:] = np.cumsum(h[idx]) * np.diff(hx)
+    h, hx = np.histogram(distribution, density=True, bins=499)
+    cdf = np.zeros(500)  # ensure the first value of the CDF is 0
+    if hdr:
+        idx = np.argsort(h)[::-1]
+        cdf[1:] = np.cumsum(h[idx]) * np.diff(hx)
+    else:
+        cdf[1:] = np.cumsum(h) * np.diff(hx)
     return cdf
 
 
