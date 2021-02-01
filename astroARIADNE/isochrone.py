@@ -58,7 +58,7 @@ def estimate(bands, params, logg=True, out_folder='.'):
     model._priors['distance'] = GaussianPrior(dist, dist_e)
     sampler = dynesty.NestedSampler(
         loglike, prior_transform, model.n_params + len(bands),
-        nlive=100, bound='multi', sample='rwalk',
+        nlive=500, bound='multi', sample='rwalk',
         logl_args=([model, params, bands]),
         ptform_args=([model])
     )
