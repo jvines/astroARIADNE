@@ -164,25 +164,25 @@ def display_star_fin(star, c):
     plx, plx_e = star.plx, star.plx_e
     lum, lum_e = star.lum, star.lum_e
     dist, dist_e = star.dist, star.dist_e
-    print(colored('\t\t\tGaia DR2 ID : {}'.format(star.g_id), c))
+    print(colored(f'\t\t\tGaia DR2 ID : {star.g_id}', c))
     if star.tic:
-        print(colored('\t\t\tTIC : {}'.format(star.tic), c))
+        print(colored(f'\t\t\tTIC : {star.tic}', c))
     if star.kic:
-        print(colored('\t\t\tKIC : {}'.format(star.kic), c))
+        print(colored(f'\t\t\tKIC : {star.kic}', c))
     print(colored('\t\t\tGaia Effective temperature : ', c), end='')
-    print(colored('{:.3f} +/- {:.3f}'.format(temp, temp_e), c))
+    print(colored(f'{temp:.3f} +/- {temp_e:.3f}', c))
     if rad is not None:
         print(colored('\t\t\tGaia Stellar radius : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(rad, rad_e), c))
+        print(colored(f'{rad:.3f} +/- {rad_e:.3f}', c))
     if lum is not None:
         print(colored('\t\t\tGaia Stellar Luminosity : ', c), end='')
-        print(colored('{:.3f} +/- {:.3f}'.format(lum, lum_e), c))
+        print(colored(f'{lum:.3f} +/- {lum_e:.3f}', c))
     print(colored('\t\t\tGaia Parallax : ', c), end='')
-    print(colored('{:.3f} +/- {:.3f}'.format(plx, plx_e), c))
+    print(colored(f'{plx:.3f} +/- {plx_e:.3f}', c))
     print(colored('\t\t\tBailer-Jones distance : ', c), end='')
-    print(colored('{:.3f} +/- {:.3f}'.format(dist, dist_e), c))
+    print(colored(f'{dist:.3f} +/- {dist_e:.3f}', c))
     print(colored('\t\t\tMaximum Av : ', c), end='')
-    print(colored('{:.3f}'.format(star.Av), c))
+    print(colored(f'{star.Av:.3f}', c))
     print('')
     pass
 
@@ -243,7 +243,8 @@ def display_routine(engine, live_points, dlogz, ndim, bound=None, sample=None,
     pass
 
 
-def end(coordinator, elapsed_time, out_folder, engine, use_norm):
+def end(coordinator, elapsed_time, out_folder, engine, use_norm,
+        method='average'):
     """Display end of run information.
 
     What is displayed is:
@@ -263,9 +264,9 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
     if engine == 'Bayesian Model Averaging':
-        res_dir = out_folder + '/BMA_out.pkl'
+        res_dir = f'{out_folder}/BMA_out_{method}.pkl'
     else:
-        res_dir = out_folder + '/' + engine + '_out.pkl'
+        res_dir = f'{out_folder}/{engine}_out.pkl'
     with closing(open(res_dir, 'rb')) as jar:
         out = pickle.load(jar)
 
@@ -371,14 +372,14 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     print(colored(spt, c))
     if engine != 'Bayesian Model Averaging':
         print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
-        print(colored('{:.3f} +/-'.format(z), c), end=' ')
-        print(colored('{:.3f}'.format(z_err), c))
+        print(colored(f'{z:.3f} +/-', c), end=' ')
+        print(colored(f'{z_err:.3f}', c))
     else:
         probs = out['weights']
         for k in probs.keys():
-            text = '\t\t\t{} probability : '.format(k)
+            text = f'\t\t\t{k} probability : '
             print(colored(text, c), end='')
-            print(colored('{:.4f}'.format(probs[k]), c))
+            print(colored(f'{probs[k]:.4f}', c))
     print(colored('\t\t\tElapsed time : ', c), end='')
     print(colored(elapsed_time, c))
     pass
@@ -411,25 +412,25 @@ def execution_time(start):
         if days == 0:
             if hours == 0:
                 if minutes == 0:
-                    elapsed = '{:.2f} seconds'.format(seconds)
+                    elapsed = f'{seconds:.2f} seconds'
                 else:
-                    elapsed = '{:.0f} minutes'.format(minutes)
-                    elapsed += ' and {:.2f} seconds'.format(seconds)
+                    elapsed = f'{minutes:.0f} minutes'
+                    elapsed += f' and {seconds:.2f} seconds'
             else:
-                elapsed = '{:.0f} hours'.format(hours)
-                elapsed += ', {:.0f} minutes'.format(minutes)
-                elapsed += ' and {:.2f} seconds'.format(seconds)
+                elapsed = f'{hours:.0f} hours'
+                elapsed += f', {minutes:.0f} minutes'
+                elapsed += f' and {seconds:.2f} seconds'
         else:
-            elapsed = '{:.0f} days'.format(days)
-            elapsed += ', {:.0f} hours'.format(hours)
-            elapsed += ', {:.0f} minutes'.format(minutes)
-            elapsed += ' and {:.2f} seconds'.format(seconds)
+            elapsed = f'{days:.0f} days'
+            elapsed += f', {hours:.0f} hours'
+            elapsed += f', {minutes:.0f} minutes'
+            elapsed += f' and {seconds:.2f} seconds'
     else:
-        elapsed = '{:.0f} weeks'.format(weeks)
-        elapsed += ', {:.0f} days'.format(days)
-        elapsed += ', {:.0f} hours'.format(hours)
-        elapsed += ', {:.0f} minutes'.format(minutes)
-        elapsed += ' and {:.2f} seconds'.format(seconds)
+        elapsed = f'{weeks:.0f} weeks'
+        elapsed += f', {days:.0f} days'
+        elapsed += f', {hours:.0f} hours'
+        elapsed += f', {minutes:.0f} minutes'
+        elapsed += f' and {seconds:.2f} seconds'
     return elapsed
 
 
@@ -462,18 +463,18 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
         best, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=1)
         # best = get_max_from_kde(samp)
         out['best_fit'][param] = best
-        logdat += '{}\t{:.4{f}}\t'.format(name, best, f=fmt)
+        logdat += f'{name}\t{best:.4{fmt}}\t'
         # _, lo, up = credibility_interval(samp)
         out['uncertainties'][param] = (best - lo, up - best)
-        logdat += '{:.4{f}}\t{:.4{f}}\t'.format(up - best, best - lo, f=fmt)
+        logdat += f'{up - best:.4{fmt}}\t{best - lo:.4{fmt}}\t'
         _, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=3)
         out['confidence_interval'][param] = (lo, up)
-        logdat += '{:.4{f}}\t{:.4{f}}\n'.format(lo, up, f=fmt)
+        logdat += f'{lo:.4{fmt}}\t{up:.4{fmt}}\n'
     else:
         out['best_fit'][param] = fixed
         out['uncertainties'][param] = np.nan
         out['confidence_interval'][param] = np.nan
-        logdat += '{}\t{:.4{f}}\t'.format(name, fixed, f=fmt)
+        logdat += f'{name}\t{fixed:.4{fmt}}\t'
         logdat += '(FIXED)\n'
     return logdat
 
