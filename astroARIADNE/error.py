@@ -99,7 +99,9 @@ class PriorError(Error):
             self.message += ' has been found alongside norm. Parameters rad '
             self.message += 'and dist are incompatible with norm.'
         if type == 2:
-            pass
+            self.message = f'The default prior for {par} is not permitted.'
+            self.message += ' Allowed priors are normal, truncnorm, uniform and'
+            self.message += ' default.'
         if type == 3:
             self.message = 'No radius found in Gaia, using default'
             self.message += ' radius prior.'
