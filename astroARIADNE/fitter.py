@@ -688,7 +688,7 @@ class Fitter:
         self.save(out_file, results=results)
         pass
 
-    def fit_multinest(self):
+    def fit_multinest(self, out_file=None):
         """Run MultiNest."""
         # Set up some globals
         global mask, flux, flux_er, filts, wave
@@ -710,7 +710,8 @@ class Fitter:
             verbose=self.verbose,
             resume=False
         )
-        out_file = self.out_folder + '/' + self._engine + '_out.pkl'
+        if out_file is None:
+            out_file = f'{self.out_folder}/{self._grid}_out.pkl'
         self.save(out_file=out_file)
         pass
 
@@ -764,7 +765,7 @@ class Fitter:
                 self.sampler.run_nested(dlogz=self._dlogz)
         results = self.sampler.results
         if out_file is None:
-            out_file = self.out_folder + '/' + self._engine + '_out.pkl'
+            out_file = f'{self.out_folder}/{self._grid}_out.pkl'
         self.save(out_file, results=results)
         pass
 
