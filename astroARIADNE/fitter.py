@@ -101,7 +101,7 @@ class Fitter:
         self.grid = 'phoenix'
         self.estimate_logg = False
         self.av_law = 'fitzpatrick'
-        self.method = 'average'
+        self._method = 'average'
         self.n_samples = None
         self.bma = False
         self.prior_setup = None
@@ -305,11 +305,11 @@ class Fitter:
 
     @property
     def method(self):
-        return self.method
+        return self._method
 
     @method.setter
     def method(self, met):
-        self.method = met
+        self._method = met
 
     def initialize(self):
         """Initialize the fitter.
@@ -623,103 +623,17 @@ class Fitter:
             outs.append(in_folder)
             # with open(in_folder, 'rb') as out:
             #     outs.append(pickle.load(out))
-        c = np.random.choice
+        c = np.random.choice(self.colors)
         avgd = self.bayesian_model_average(outs, self._grids, self._norm,
-                                           self.n_samples, self.method, c)
+                                           self.n_samples, self._method, c)
         self.save_bma(avgd)
 
         elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time, self.out_folder,
-            'Bayesian Model Averaging', self.norm, self.method)
+            'Bayesian Model Averaging', self.norm, self._method)
         pass
 
-    @staticmethod
-    def bayesian_model_average(outputs, grids, norm, nsamples,
-                               method='average', c='white'):
-        """Perform Bayesian Model Averaging."""
-        evidences = []
-        post_samples = []
-        model_posteriors = []
-        # Read and extract model posterior information.
-        for o in outputs:
-            with open(o, 'rb') as f:
-                model_posteriors.append(pickle.load(f))
-        # Extract the evidences of each model.
-        for o in model_posteriors:
-            evidences.append(o['global_lnZ'])
-            post_samples.append(o['posterior_samples'])
-        # Convert evidences to weights/probabilities.
-        evidences = np.array(evidences)
-        weights = evidences - evidences.min()
-        weights = [np.exp(e) / np.exp(weights).sum() for e in weights]
-        weights = np.array(weights)
-        # We're not averaging these
-        ban = ['loglike', 'priors', 'posteriors', 'mass']
-        if norm:  # if normalization was used, we won't average the radius
-            ban.append('rad')
-        # Create an output dictionary for the averaged samples.
-        out = dict()
-        out['originals'] = dict()
-        out['weights'] = dict()
-        # Populate the dict with the probabilities and individual model
-        # posteriors
-        for i, o in enumerate(model_posteriors):
-            out['weights'][o['model_grid']] = weights[i]
-            out['originals'][o['model_grid']] = o['posterior_samples']
-        out['averaged_samples'] = dict()
-        if method == 'sample':
-            # Get the shortest samples
-            # ( This snippet is adapted from pymc3.sampling )
-            lens = []
-            for o in post_samples:
-                lens.append(len(o['teff']))
-            lens = np.array(lens)
-            n_min = lens.min()
-            # n is the number of samples we'll retrieve from each model
-            # The idea is that the number of samples will be proportional
-            # To the model's probability (or weight)
-            n = (n_min * weights).astype('int')
-            # normalize n to n_min
-            idx = np.argmax(n)
-            n[idx] += n_min - n.sum()
-            # First extract the correct number of samples per model
-            traces = dict()
-            for k in post_samples[0].keys():
-                if k in ban:
-                    continue
-                traces[k] = []
-        # Begin averaging
-        if method == 'average':
-            print(colored('\t\t*** AVERAGING POSTERIOR SAMPLES ***', c))
-        elif method == 'sample':
-            print(colored('\t\t*** SAMPLING AVERAGED POSTERIOR ***', c))
-        for k in tqdm(post_samples[0].keys()):
-            if k in ban:
-                continue
-            out['averaged_samples'][k] = np.zeros(nsamples)
-            for i, o in enumerate(post_samples):
-                # Skip fixed params
-                try:
-                    len(o[k])
-                except TypeError:
-                    continue
-                if method == 'average':  # Do weighted averaging
-                    weighted_samples = choice(o[k], nsamples) * weights[i]
-                    out['averaged_samples'][k] += weighted_samples
-                elif method == 'sample':  # Do weighted sampling
-                    traces[k].extend(choice(o[k], n[i]))
-
-            if method == 'sample':
-                resampled = sample_from_distribution(traces[k], size=nsamples)
-                out['averaged_samples'][k] = resampled
-
-        out['evidences'] = dict()
-        for e, g in zip(evidences, grids):
-            out['evidences'][g] = e
-        return out
-
     def _bma_dynesty(self, intp, grid):
-        # interpolator, grid = args
         global interpolator
         interpolator = intp
 
@@ -776,7 +690,7 @@ class Fitter:
         pass
 
     def fit_multinest(self):
-        """Run MuiltiNest."""
+        """Run MultiNest."""
         # Set up some globals
         global mask, flux, flux_er, filts, wave
         mask = star.filter_mask
@@ -884,7 +798,10 @@ class Fitter:
         logdat = '#Parameter\tmedian\tupper\tlower\t3sig_CI\n'
         log_out = self.out_folder + '/' + 'best_fit.dat'
         if self._engine == 'multinest':
-            lnz, lnzer, posterior_samples = self.multinest_results()
+            lnz, lnzer, posterior_samples = self.multinest_results(
+                self.out_folder,
+                self.ndim
+            )
         else:
             lnz, lnzer, posterior_samples = self.dynesty_results(results)
 
@@ -1029,10 +946,8 @@ class Fitter:
                 best_theta, flux, flux_er, wave,
                 filts, interpolator, self.norm, av_law
             )
-            lnlike = out['best_fit']['loglike']
 
             # Spectral type
-
             # Load Mamajek spt table
             mamajek_spt = np.loadtxt(
                 filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
@@ -1078,8 +993,8 @@ class Fitter:
         star : The Star object containing the information of the star (name,
                magnitudes, fluxes, coordinates, etc)
 
-        Also creates a log file with the best fit parameters and 1 sigma
-        error bars.
+        Also creates a log file with the best fit parameters, 1 sigma
+        error bars and 3 sigma CIs.
 
         """
         out = dict()
@@ -1217,15 +1132,15 @@ class Fitter:
         # Spectral type
 
         # Load Mamajek spt table
-        mamajek_spt = np.loadtxt(
-            filesdir + '/mamajek_spt.dat', dtype=str, usecols=[0])
-        mamajek_temp = np.loadtxt(filesdir + '/mamajek_spt.dat', usecols=[1])
+        mamajek_spt, mamajek_temp = np.loadtxt(f'{filesdir}/mamajek_spt.dat',
+                                               dtype=str, usecols=[0, 1],
+                                               unpack=True)
 
         # Find spt
         spt_idx = np.argmin(abs(mamajek_temp - out['best_fit']['teff']))
         spt = mamajek_spt[spt_idx]
         out['spectral_type'] = spt
-        out_file = self.out_folder + '/BMA_out.pkl'
+        out_file = f'{self.out_folder}/BMA_out_{self._method}.pkl'
         with open(log_out, 'w') as logfile:
             logfile.write(logdat)
         with open(prob_out, 'w') as logfile:
@@ -1233,11 +1148,96 @@ class Fitter:
         pickle.dump(out, open(out_file, 'wb'))
         pass
 
-    def multinest_results(self):
+    @staticmethod
+    def bayesian_model_average(outputs, grids, norm, nsamples,
+                               method='average', c='white'):
+        """Perform Bayesian Model Averaging."""
+        evidences = []
+        post_samples = []
+        model_posteriors = []
+        # Read and extract model posterior information.
+        for o in outputs:
+            with open(o, 'rb') as f:
+                model_posteriors.append(pickle.load(f))
+        # Extract the evidences of each model.
+        for o in model_posteriors:
+            evidences.append(o['global_lnZ'])
+            post_samples.append(o['posterior_samples'])
+        # Convert evidences to weights/probabilities.
+        evidences = np.array(evidences)
+        weights = evidences - evidences.min()
+        weights = [np.exp(e) / np.exp(weights).sum() for e in weights]
+        weights = np.array(weights)
+        # We're not averaging these
+        ban = ['loglike', 'priors', 'posteriors', 'mass']
+        if norm:  # if normalization was used, we won't average the radius
+            ban.append('rad')
+        # Create an output dictionary for the averaged samples.
+        out = dict()
+        out['originals'] = dict()
+        out['weights'] = dict()
+        # Populate the dict with the probabilities and individual model
+        # posteriors
+        for i, o in enumerate(model_posteriors):
+            out['weights'][o['model_grid']] = weights[i]
+            out['originals'][o['model_grid']] = o['posterior_samples']
+        out['averaged_samples'] = dict()
+        if method == 'sample':
+            # Get the shortest samples
+            # ( This snippet is adapted from pymc3.sampling )
+            lens = []
+            for o in post_samples:
+                lens.append(len(o['teff']))
+            lens = np.array(lens)
+            n_min = lens.min()
+            # n is the number of samples we'll retrieve from each model
+            # The idea is that the number of samples will be proportional
+            # To the model's probability (or weight)
+            n = (n_min * weights).astype('int')
+            # normalize n to n_min
+            idx = np.argmax(n)
+            n[idx] += n_min - n.sum()
+            # First extract the correct number of samples per model
+            traces = dict()
+            for k in post_samples[0].keys():
+                if k in ban:
+                    continue
+                traces[k] = []
+        # Begin averaging
+        if method == 'average':
+            print(colored('\t\t*** AVERAGING POSTERIOR SAMPLES ***', c))
+        elif method == 'sample':
+            print(colored('\t\t*** SAMPLING AVERAGED POSTERIOR ***', c))
+        for k in tqdm(post_samples[0].keys()):
+            if k in ban:
+                continue
+            out['averaged_samples'][k] = np.zeros(nsamples)
+            for i, o in enumerate(post_samples):
+                # Skip fixed params
+                try:
+                    len(o[k])
+                except TypeError:
+                    continue
+                if method == 'average':  # Do weighted averaging
+                    weighted_samples = choice(o[k], nsamples) * weights[i]
+                    out['averaged_samples'][k] += weighted_samples
+                elif method == 'sample':  # Do weighted sampling
+                    traces[k].extend(choice(o[k], n[i]))
+
+            if method == 'sample':
+                resampled = sample_from_distribution(traces[k], size=nsamples)
+                out['averaged_samples'][k] = resampled
+
+        out['evidences'] = dict()
+        for e, g in zip(evidences, grids):
+            out['evidences'][g] = e
+        return out
+
+    @staticmethod
+    def multinest_results(out_folder, ndim):
         """Extract posterior samples, global evidence and its error."""
-        path = self.out_folder + '/mnest/'
-        output = pymultinest.Analyzer(outputfiles_basename=path + 'chains',
-                                      n_params=self.ndim)
+        path = f'{out_folder}/mnest/chains'
+        output = pymultinest.Analyzer(outputfiles_basename=path, n_params=ndim)
         posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
         lnz = output.get_stats()['global evidence']
         lnzer = output.get_stats()['global evidence error']
