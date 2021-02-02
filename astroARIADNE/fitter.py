@@ -6,6 +6,7 @@ import warnings
 from multiprocessing import Pool, Process
 from tqdm import tqdm
 
+import extinction
 import astropy.units as u
 import pandas as pd
 import numpy as np
@@ -286,12 +287,10 @@ class Fitter:
         ]
         law = law.lower()
         if law not in laws:
-            err_msg = 'Extinction law {} not recognized. Available extinction'
+            err_msg = f'Extinction law {law} not recognized. Available extinction'
             err_msg += ' laws are: `cardelli`, `odonnell`'
             err_msg += ', `calzetti`, and `fitzpatrick`'
-            err_msg.format(law)
-            InputError(law, err_msg).__raise__()
-        import extinction
+            InputError(err_msg).__raise__()
         law_f = None
         if law == laws[0]:
             law_f = extinction.ccm89
@@ -1113,7 +1112,7 @@ class Fitter:
         probdat = ''
 
         for k in avgd['weights'].keys():
-            probdat += '{}_probability\t{:.4f}\n'.format(k, avgd['weights'][k])
+            probdat += f'{k}_probability\t{avgd["weights"][k]:.4f}\n'
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -1137,7 +1136,7 @@ class Fitter:
                                                unpack=True)
 
         # Find spt
-        spt_idx = np.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+        spt_idx = np.argmin(abs(float(mamajek_temp) - out['best_fit']['teff']))
         spt = mamajek_spt[spt_idx]
         out['spectral_type'] = spt
         out_file = f'{self.out_folder}/BMA_out_{self._method}.pkl'
