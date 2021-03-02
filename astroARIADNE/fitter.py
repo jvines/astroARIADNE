@@ -624,7 +624,7 @@ class Fitter:
             #     outs.append(pickle.load(out))
         c = np.random.choice(self.colors)
         avgd = self.bayesian_model_average(outs, self._grids, self._norm,
-                                           self.n_samples, self._method, c)
+                                           self.n_samples, c)
         self.save_bma(avgd)
 
         elapsed_time = execution_time(self.start)
@@ -998,8 +998,10 @@ class Fitter:
 
         """
         out = dict()
-        logdat = '#Parameter\tmedian\tupper\tlower\t3sig_low\t3sig_up\n'
-        log_out = f'{self.out_folder}/best_fit.dat'
+        logdat_samples = '#Parameter\tmedian\tupper\tlower\t3sig_low\t3sig_up\n'
+        logdat_average = '#Parameter\tmedian\tupper\tlower\t3sig_low\t3sig_up\n'
+        log_out_samples = f'{self.out_folder}/best_fit_sample.dat'
+        log_out_average = f'{self.out_folder}/best_fit_average.dat'
         prob_out = f'{self.out_folder}/model_probabilities.dat'
 
         # Save global evidence of each model.
@@ -1012,42 +1014,59 @@ class Fitter:
         out['weights'] = avgd['weights']
 
         # Create raw samples holder
-        out['posterior_samples'] = dict()
+        out['weighted_samples'] = dict()
+        out['weighted_average'] = dict()
         j = 0
         for i, par in enumerate(order):
             if not self.coordinator[i]:
-                out['posterior_samples'][par] = avgd['averaged_samples'][par]
+                out['weighted_samples'][par] = avgd['weighted_samples'][par]
+                out['weighted_average'][par] = avgd['weighted_average'][par]
                 j += 1
             else:
-                out['posterior_samples'][par] = self.fixed[i]
+                out['weighted_samples'][par] = self.fixed[i]
+                out['weighted_average'][par] = self.fixed[i]
 
         # If normalization constant was fitted, create a distribution of radii.
 
         if use_norm and star.dist != -1:
-            rad = self._get_rad(
-                out['posterior_samples']['norm'], star.dist, star.dist_e
+            rad_sampled = self._get_rad(
+                out['weighted_samples']['norm'], star.dist, star.dist_e
             )
-            out['posterior_samples']['rad'] = rad
+            rad_averageed = self._get_rad(
+                out['weighted_average']['norm'], star.dist, star.dist_e
+            )
+            out['weighted_samples']['rad'] = rad_sampled
+            out['weighted_average']['rad'] = rad_averageed
 
         # Create a distribution of masses
 
-        logg_samp = out['posterior_samples']['logg']
-        rad_samp = out['posterior_samples']['rad']
+        logg_samp = out['weighted_samples']['logg']
+        logg_average = out['weighted_average']['logg']
+        rad_samp = out['weighted_samples']['rad']
+        rad_average = out['weighted_average']['rad']
         mass_samp = self._get_mass(logg_samp, rad_samp)
-        out['posterior_samples']['grav_mass'] = mass_samp
+        mass_average = self._get_mass(logg_average, rad_average)
+        out['weighted_samples']['grav_mass'] = mass_samp
+        out['weighted_average']['grav_mass'] = mass_average
 
         # Create a distribution of luminosities.
 
-        teff_samp = out['posterior_samples']['teff']
+        teff_samp = out['weighted_samples']['teff']
+        teff_average = out['weighted_average']['teff']
         lum_samp = self._get_lum(teff_samp, rad_samp)
-        out['posterior_samples']['lum'] = lum_samp
+        lum_average = self._get_lum(teff_average, rad_average)
+        out['weighted_samples']['lum'] = lum_samp
+        out['weighted_average']['lum'] = lum_average
 
         # Create a distribution of angular diameters.
 
         if not use_norm:
-            dist_samp = out['posterior_samples']['dist']
+            dist_samp = out['weighted_samples']['dist']
+            dist_average = out['weighted_average']['dist']
             ad_samp = self._get_angular_diameter(rad_samp, dist_samp)
-            out['posterior_samples']['AD'] = ad_samp
+            ad_average = self._get_angular_diameter(rad_average, dist_average)
+            out['weighted_samples']['AD'] = ad_samp
+            out['weighted_average']['AD'] = ad_average
 
         # Best fit
         # The logic is as follows:
@@ -1055,61 +1074,111 @@ class Fitter:
         # Find peak
         # peak is best fit.
 
-        out['best_fit'] = dict()
-        out['uncertainties'] = dict()
-        out['confidence_interval'] = dict()
-        best_theta = np.zeros(order.shape[0])
+        out['best_fit_samples'] = dict()
+        out['uncertainties_samples'] = dict()
+        out['confidence_interval_samples'] = dict()
+        out['best_fit_averaged'] = dict()
+        out['uncertainties_averaged'] = dict()
+        out['confidence_interval_averaged'] = dict()
         for i, param in enumerate(order):
             if not self.coordinator[i]:
                 if 'noise' in param:
                     continue
-                samp = out['posterior_samples'][param]
+                samp = out['weighted_samples'][param]
+                sampw = out['weighted_average'][param]
 
                 if param == 'z':
-                    logdat = out_filler(samp, logdat, param, '[Fe/H]', out)
+                    logdat_samples = out_filler(samp, logdat_samples, param,
+                                                '[Fe/H]', out, method='samples')
+                    logdat_average = out_filler(sampw, logdat_average, param,
+                                                '[Fe/H]', out,
+                                                method='averaged')
                 elif param == 'norm':
-                    logdat = out_filler(samp, logdat, param, '(R/D)^2', out,
-                                        fmt='e')
+                    logdat_samples = out_filler(samp, logdat_samples, param,
+                                                '(R/D)^2', out, fmt='e',
+                                                method='samples')
+                    logdat_average = out_filler(sampw, logdat_average, param,
+                                                '(R/D)^2', out, fmt='e',
+                                                method='averaged')
                     if star.dist != 1:
-                        logdat = out_filler(
-                            out['posterior_samples']['rad'], logdat, 'rad',
-                            'R', out
+                        logdat_samples = out_filler(
+                            out['weighted_samples']['rad'], logdat_samples,
+                            'rad', 'R', out, method='samples'
                         )
+                        logdat_average = out_filler(
+                            out['weighted_average']['rad'], logdat_average,
+                            'rad', 'R', out, method='averaged'
+                        )
+
                 else:
-                    logdat = out_filler(samp, logdat, param, param, out)
+                    logdat_samples = out_filler(samp, logdat_samples, param,
+                                                param, out, method='samples')
+                    logdat_average = out_filler(sampw, logdat_average, param,
+                                                param, out, method='averaged')
             else:
-                logdat = out_filler(
-                    0, logdat, param, param, out, fixed=self.fixed[i]
+                logdat_samples = out_filler(
+                    0, logdat_samples, param, param, out, fixed=self.fixed[i],
+                    method='samples'
                 )
-            best_theta[i] = out['best_fit'][param]
+                logdat_average = out_filler(
+                    0, logdat_average, param, param, out, fixed=self.fixed[i],
+                    method='averaged'
+                )
 
         # Add derived mass to best fit dictionary.
 
-        samp = out['posterior_samples']['grav_mass']
-        logdat = out_filler(samp, logdat, 'grav_mass', 'grav_mass', out)
+        samp = out['weighted_samples']['grav_mass']
+        sampw = out['weighted_average']['grav_mass']
+        logdat_samples = out_filler(samp, logdat_samples, 'grav_mass',
+                                    'grav_mass', out, method='samples')
+        logdat_average = out_filler(sampw, logdat_average, 'grav_mass',
+                                    'grav_mass', out, method='averaged')
 
         # Add derived luminosity to best fit dictionary.
 
-        samp = out['posterior_samples']['lum']
-        logdat = out_filler(samp, logdat, 'lum', 'lum', out)
+        samp = out['weighted_samples']['lum']
+        sampw = out['weighted_average']['lum']
+        logdat_samples = out_filler(samp, logdat_samples, 'lum', 'lum', out,
+                                    method='samples')
+        logdat_average = out_filler(sampw, logdat_average, 'lum', 'lum', out,
+                                    method='averaged')
 
         # Add derived angular diameter to best fit dictionary.
 
         if not use_norm:
-            samp = out['posterior_samples']['AD']
-            logdat = out_filler(samp, logdat, 'AD', 'AD', out)
+            samp = out['weighted_samples']['AD']
+            sampw = out['weighted_average']['AD']
+            logdat_samples = out_filler(samp, logdat_samples, 'AD', 'AD', out,
+                                        method='samples')
+            logdat_average = out_filler(sampw, logdat_average, 'AD', 'AD', out,
+                                        method='averaged')
 
-        # Add estimated age to best fit dictionary.
+        # Add estimated age to best fit dictionary. This is done with the wider
+        # sampled distribution instead of the averaged one in order to save time
 
-        age_samp, mass_samp, eep_samp = self.estimate_age(out['best_fit'],
-                                                          out['uncertainties'],
-                                                          c=choice(self.colors))
-        out['posterior_samples']['age'] = age_samp
-        out['posterior_samples']['iso_mass'] = mass_samp
-        out['posterior_samples']['eep'] = eep_samp
-        logdat = out_filler(age_samp, logdat, 'age', 'age', out)
-        logdat = out_filler(mass_samp, logdat, 'iso_mass', 'iso_mass', out)
-        logdat = out_filler(eep_samp, logdat, 'eep', 'eep', out)
+        age_samp, mass_samp, eep_samp = self.estimate_age(
+            out['best_fit_samples'],
+            out['uncertainties_samples'],
+            c=choice(self.colors)
+        )
+        # Create new thingy for MIST samples. Sadly now everything done before
+        # this update will be incompatible :(
+        out['mist_samples'] = dict()
+        out['mist_samples']['age'] = age_samp
+        out['mist_samples']['iso_mass'] = mass_samp
+        out['mist_samples']['eep'] = eep_samp
+        logdat_samples = out_filler(age_samp, logdat_samples, 'age', 'age', out,
+                                    method='samples')
+        logdat_samples = out_filler(mass_samp, logdat_samples, 'iso_mass',
+                                    'iso_mass', out, method='samples')
+        logdat_samples = out_filler(eep_samp, logdat_samples, 'eep', 'eep', out,
+                                    method='samples')
+        logdat_average = out_filler(age_samp, logdat_average, 'age', 'age', out,
+                                    method='averaged')
+        logdat_average = out_filler(mass_samp, logdat_average, 'iso_mass',
+                                    'iso_mass', out, method='averaged')
+        logdat_average = out_filler(eep_samp, logdat_average, 'eep', 'eep', out,
+                                    method='averaged')
         probdat = ''
 
         for k in avgd['weights'].keys():
@@ -1119,8 +1188,12 @@ class Fitter:
             if not self.coordinator[i]:
                 if 'noise' not in param:
                     continue
-                samp = out['posterior_samples'][param]
-                logdat = out_filler(samp, logdat, param, param, out, fmt='f')
+                samp = out['weighted_samples'][param]
+                sampw = out['weighted_average'][param]
+                logdat_samples = out_filler(samp, logdat_samples, param, param,
+                                            out, fmt='f', method='samples')
+                logdat_average = out_filler(sampw, logdat_average, param, param,
+                                            out, fmt='f', method='averaged')
 
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
@@ -1136,21 +1209,25 @@ class Fitter:
                                                dtype=str, usecols=[0, 1],
                                                unpack=True)
 
+        mamajek_temp = mamajek_temp.astype(float)
+
         # Find spt
-        spt_idx = np.argmin(abs(float(mamajek_temp) - out['best_fit']['teff']))
+        spt_idx = np.argmin(
+            abs(mamajek_temp - out['best_fit_averaged']['teff']))
         spt = mamajek_spt[spt_idx]
         out['spectral_type'] = spt
-        out_file = f'{self.out_folder}/BMA_out_{self._method}.pkl'
-        with open(log_out, 'w') as logfile:
-            logfile.write(logdat)
+        out_file = f'{self.out_folder}/BMA_out.pkl'
+        with open(log_out_samples, 'w') as logfile:
+            logfile.write(logdat_samples)
+        with open(log_out_average, 'w') as logfile:
+            logfile.write(logdat_average)
         with open(prob_out, 'w') as logfile:
             logfile.write(probdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
 
     @staticmethod
-    def bayesian_model_average(outputs, grids, norm, nsamples,
-                               method='average', c='white'):
+    def bayesian_model_average(outputs, grids, norm, nsamples, c='white'):
         """Perform Bayesian Model Averaging."""
         evidences = []
         post_samples = []
@@ -1181,52 +1258,56 @@ class Fitter:
         for i, o in enumerate(model_posteriors):
             out['weights'][o['model_grid']] = weights[i]
             out['originals'][o['model_grid']] = o['posterior_samples']
-        out['averaged_samples'] = dict()
-        if method == 'sample':
-            # Get the shortest samples
-            # ( This snippet is adapted from pymc3.sampling )
-            lens = []
-            for o in post_samples:
-                lens.append(len(o['teff']))
-            lens = np.array(lens)
-            n_min = lens.min()
-            # n is the number of samples we'll retrieve from each model
-            # The idea is that the number of samples will be proportional
-            # To the model's probability (or weight)
-            n = (n_min * weights).astype('int')
-            # normalize n to n_min
-            idx = np.argmax(n)
-            n[idx] += n_min - n.sum()
-            # First extract the correct number of samples per model
-            traces = dict()
-            for k in post_samples[0].keys():
-                if k in ban:
-                    continue
-                traces[k] = []
+        out['weighted_samples'] = dict()
+        out['weighted_average'] = dict()
+        # if method == 'sample':
+        # Get the shortest samples
+        # ( This snippet is adapted from pymc3.sampling )
+        lens = []
+        for o in post_samples:
+            lens.append(len(o['teff']))
+        lens = np.array(lens)
+        n_min = lens.min()
+        # n is the number of samples we'll retrieve from each model
+        # The idea is that the number of samples will be proportional
+        # To the model's probability (or weight)
+        n = (n_min * weights).astype('int')
+        # normalize n to n_min
+        idx = np.argmax(n)
+        n[idx] += n_min - n.sum()
+        # First extract the correct number of samples per model
+        traces = dict()
+        for k in post_samples[0].keys():
+            if k in ban:
+                continue
+            traces[k] = []
         # Begin averaging
-        if method == 'average':
-            print(colored('\t\t*** AVERAGING POSTERIOR SAMPLES ***', c))
-        elif method == 'sample':
-            print(colored('\t\t*** SAMPLING AVERAGED POSTERIOR ***', c))
+        # if method == 'average':
+        print(colored('\t\t*** AVERAGING POSTERIOR SAMPLES ***', c))
+        # elif method == 'sample':
+        #     print(colored('\t\t*** SAMPLING AVERAGED POSTERIOR ***', c))
         for k in tqdm(post_samples[0].keys()):
             if k in ban:
                 continue
-            out['averaged_samples'][k] = np.zeros(nsamples)
+            out['weighted_samples'][k] = np.zeros(nsamples)
+            out['weighted_average'][k] = np.zeros(nsamples)
             for i, o in enumerate(post_samples):
                 # Skip fixed params
                 try:
                     len(o[k])
                 except TypeError:
                     continue
-                if method == 'average':  # Do weighted averaging
-                    weighted_samples = choice(o[k], nsamples) * weights[i]
-                    out['averaged_samples'][k] += weighted_samples
-                elif method == 'sample':  # Do weighted sampling
-                    traces[k].extend(choice(o[k], n[i]))
+                # if method == 'average':
+                # Do weighted averaging
+                weighted_samples = choice(o[k], nsamples) * weights[i]
+                out['weighted_average'][k] += weighted_samples
+                # elif method == 'sample':
+                # Do weighted sampling
+                traces[k].extend(choice(o[k], n[i]))
 
-            if method == 'sample':
-                resampled = sample_from_distribution(traces[k], size=nsamples)
-                out['averaged_samples'][k] = resampled
+            # if method == 'sample':
+            resampled = sample_from_distribution(traces[k], size=nsamples)
+            out['weighted_samples'][k] = resampled
 
         out['evidences'] = dict()
         for e, g in zip(evidences, grids):
