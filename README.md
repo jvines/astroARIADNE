@@ -243,7 +243,7 @@ First, import the fitter from **ARIADNE**
 from astroARIADNE.fitter import Fitter
 ```
 
-There are several configuration parameters we have to setup, the first one is the output folder where we want **ARIADNE** to output the fitting files and results, mext we have to select the fitting engine (for BMA we can only use dynesty for now), number of live points to use, evidence tolerance threshold, and the following only apply for dynesty: bounding method, sampling method, threads, dynamic nested sampler. After selecting all of those, we need to select the models we want to use and finally, we feed them all to the fitter:
+There are several configuration parameters we have to setup, the first one is the output folder where we want **ARIADNE** to output the fitting files and results, next we have to select the fitting engine (for BMA only dynesty is supported), number of live points to use, evidence tolerance threshold, and the following only apply for dynesty: bounding method, sampling method, threads, dynamic nested sampler. After selecting all of those, we need to select the models we want to use and finally, we feed them all to the fitter:
 
 ```python
 out_folder = 'your folder here'
@@ -291,7 +291,7 @@ The next step is setting up the priors to use:
 
 ```python
 f.prior_setup = {
-	'teff': ('rave'),
+	'teff': ('default'),
 	'logg': ('default'),
 	'z': ('default'),
 	'dist': ('default'),
@@ -312,7 +312,7 @@ We offer customization on the priors as well, those are listed in the following 
 | Normal | mean, std |
 | TruncNorm | mean, std, lower\_lim, uppern\_lim |
 | Uniform | ini, end |
-| RAVE (Teff only) | --- |
+| RAVE (log g only) | --- |
 | Default | --- | 
 
 So if you knew (from a spectroscopic analysis, for example) that the effective temperature is 5600 +/- 100 and the metallicity is [Fe/H] = 0.09 +/- 0.05 and you wanted to use them as priors, and the star is nearby (< 70 pc), so you wanted to fix Av to 0, your prior dictionary should look like this:
