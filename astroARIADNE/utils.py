@@ -56,7 +56,7 @@ def estimate_pdf(distribution):
     """
     kde = gaussian_kde(distribution)
     xmin, xmax = distribution.min(), distribution.max()
-    xx = np.linspace(xmin, xmax, 500)
+    xx = np.linspace(xmin, xmax, 300)
     pdf = kde(xx)
     return xx, pdf
 
@@ -455,25 +455,28 @@ def get_noise_name(filt):
     return filt.split('_')[-1]
 
 
-def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False):
+def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False,
+               method='averaged'):
     """Fill up the output file."""
+    if method not in ['averaged', 'samples']:
+        raise Exception('Method is wrong!')
     if fixed is False:
         xx, pdf = estimate_pdf(samp)
         cdf = estimate_cdf(samp, hdr=True)
         best, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=1)
         # best = get_max_from_kde(samp)
-        out['best_fit'][param] = best
+        out[f'best_fit_{method}'][param] = best
         logdat += f'{name}\t{best:.4{fmt}}\t'
         # _, lo, up = credibility_interval(samp)
-        out['uncertainties'][param] = (best - lo, up - best)
+        out[f'uncertainties_{method}'][param] = (best - lo, up - best)
         logdat += f'{up - best:.4{fmt}}\t{best - lo:.4{fmt}}\t'
         _, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=3)
-        out['confidence_interval'][param] = (lo, up)
+        out[f'confidence_interval_{method}'][param] = (lo, up)
         logdat += f'{lo:.4{fmt}}\t{up:.4{fmt}}\n'
     else:
-        out['best_fit'][param] = fixed
-        out['uncertainties'][param] = np.nan
-        out['confidence_interval'][param] = np.nan
+        out[f'best_fit_{method}'][param] = fixed
+        out[f'uncertainties_{method}'][param] = np.nan
+        out[f'confidence_interval_{method}'][param] = np.nan
         logdat += f'{name}\t{fixed:.4{fmt}}\t'
         logdat += '(FIXED)\n'
     return logdat
