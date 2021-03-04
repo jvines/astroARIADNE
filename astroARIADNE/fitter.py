@@ -1251,7 +1251,23 @@ class Fitter:
 
     @staticmethod
     def bayesian_model_average(outputs, grids, norm, nsamples, c='white'):
-        """Perform Bayesian Model Averaging."""
+        """Perform Bayesian Model Averaging.
+
+        Parameters
+        ----------
+        outputs: array_like
+            An array or list of output pickle files from the individual model
+            fits.
+        grids: array_like
+            An array or list of the model grids used to model.
+        norm: bool
+            Flag indicating if the normalization factor was fit for.
+        nsamples: int
+            The number of samples to sample from the averaged distribution.
+        c: str, optional
+            Termcolor color.
+
+        """
         evidences = []
         post_samples = []
         model_posteriors = []
