@@ -96,7 +96,7 @@ class SEDPlotter:
     __wav_file = 'PHOENIXv2/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
     def __init__(self, input_files, out_folder, pdf=False,
-                 model=None, settings=None):
+                 model=None, settings=None, method='averaged'):
         """See class docstring."""
         print('\nInitializing plotter.\n')
         # General setup
@@ -105,14 +105,11 @@ class SEDPlotter:
         self.png = png
         self.out_folder = out_folder
         self.bma = False
+        self.method = method
 
-        chains = out_folder + '/chains'
-        likelihoods = out_folder + '/likelihoods'
-        posteriors = out_folder + '/posteriors'
-        histograms = out_folder + '/histograms'
-        self.chain_out = chains
-        self.like_out = likelihoods
-        self.post_out = posteriors
+        traces = f'{out_folder}/traces'
+        histograms = f'{out_folder}/histograms'
+        self.traces_out = traces
         self.hist_out = histograms
         self.moddir = modelsdir
         self.settings_dir = settings
@@ -143,9 +140,7 @@ class SEDPlotter:
             # Create target folders
             create_dir(out_folder)
             if self.engine != 'Bayesian Model Averaging':
-                create_dir(chains)
-                create_dir(likelihoods)
-                create_dir(posteriors)
+                create_dir(traces)
             create_dir(histograms)
 
             self.star.load_grid(self.grid)
@@ -193,18 +188,26 @@ class SEDPlotter:
                     self.interpolator = DFInterpolator(pd.read_pickle(intp))
 
             # Get best fit parameters.
-            mask = self.star.filter_mask
-            n = int(self.star.used_filters.sum())
-            theta = np.zeros(self.order.shape[0])
+            theta_samples = np.zeros(self.order.shape[0])
+            theta_average = np.zeros(self.order.shape[0])
             for i, param in enumerate(self.order):
-                if param != 'likelihood' and param != 'inflation':
-                    theta[i] = out['best_fit'][param]
-            self.theta = theta
-            # self.theta = build_params(theta, self.coordinator, self.fixed)
+                if param != 'inflation':
+                    theta_samples[i] = out['best_fit_samples'][param]
+                    theta_average[i] = out['best_fit_averaged'][param]
 
             # Calculate best fit model.
-            self.model = model_grid(self.theta, filters, wave,
-                                    self.interpolator, self.norm, self.av_law)
+            model_samples = model_grid(theta_samples, filters, wave,
+                                       self.interpolator, self.norm,
+                                       self.av_law)
+            model_average = model_grid(theta_average, filters, wave,
+                                       self.interpolator, self.norm,
+                                       self.av_law)
+            if method == 'averaged':
+                self.theta = theta_average
+                self.model = model_average
+            elif method == 'samples':
+                self.theta = theta_samples
+                self.model = model_samples
 
             # Get archival fluxes.
             self.__extract_info()
@@ -252,7 +255,6 @@ class SEDPlotter:
 
         # Model plot
         used_f = self.star.filter_names[self.star.filter_mask]
-        n_used = int(self.star.used_filters.sum())
         colors = np.array([
             'tomato', 'indianred', 'tab:red',
             'salmon', 'coral',
@@ -313,7 +315,7 @@ class SEDPlotter:
                         bbox_inches='tight')
         pass
 
-    def plot_SED(self):
+    def plot_SED(self, method='average'):
         """Create the plot of the SED."""
         if self.moddir is None:
             print('Models directory not provided, skipping SED plot.')
@@ -333,15 +335,15 @@ class SEDPlotter:
         errs = self.star.flux_er[mask]
         filters = self.star.filter_names[mask]
         wave = self.star.wave[mask]
-        theta = copy.deepcopy(self.theta)
+
         for i, th in enumerate(self.theta[n_pars:]):
             mag = mags[i]
             filt = filters[i]
             _, er = mag_to_flux(mag, th, filt)
-            theta[n_pars + i] = er
+            self.theta[n_pars + i] = er
 
         residuals, errors = get_residuals(
-            theta, flxs, errs, wave, filters, self.interpolator, self.norm,
+            self.theta, flxs, errs, wave, filters, self.interpolator, self.norm,
             self.av_law)
 
         norm_res = residuals / errors
@@ -606,7 +608,7 @@ class SEDPlotter:
             ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
         pass
 
-    def plot_chains(self):
+    def plot_trace(self):
         """Plot SED chains."""
         samples = self.out['posterior_samples']
         for i, param in enumerate(self.order):
@@ -696,6 +698,9 @@ class SEDPlotter:
         plt.close('all')
         pass
 
+    def plot_hist(self):
+        pass
+
     def plot_bma_hist(self):
         """Plot histograms."""
         print('Plotting BMA histograms.')
@@ -735,20 +740,31 @@ class SEDPlotter:
                                                maxfev=50000)
                     except RuntimeError:
                         popt = (mu, sig, n.max())
-                    xx1 = np.linspace(bins1[0], bins1[-1], 10000)
-                    xx2 = np.linspace(bins2[0], bins2[-1], 10000)
+                    xx1 = np.linspace(bins1[0], bins1[-1], 1000)
+                    xx2 = np.linspace(bins2[0], bins2[-1], 1000)
                     # Plot best fit
                     ax1.plot(xx1, kde(xx2), lw=2, alpha=1, color=colors[j])
                     ax2.plot(xx1, kde(xx2) * popt[2], lw=2, alpha=1,
                              color=colors[j])
-                # The same but for the averaged samples
+                # The same but for the weighted samples
                 n, bins, patches = ax1.hist(
-                    self.out['posterior_samples'][param], alpha=.3,
-                    bins=20, label='Average', density=True, color='tab:cyan'
+                    self.out['weighted_samples'][param], alpha=.3,
+                    bins=20, label='Weighted sampling', density=True,
+                    color='tab:cyan'
                 )
-                kde = gaussian_kde(self.out['posterior_samples'][param])
-                xx = np.linspace(bins[0], bins[-1], 1000)
-                ax1.plot(xx, kde(xx), color='tab:cyan', lw=2, alpha=1)
+                kde = gaussian_kde(self.out['weighted_samples'][param])
+                xx = np.linspace(bins[0], bins[-1], 300)
+                ax1.plot(xx, kde(xx), color='tab:cyan', lw=2, alpha=1, ls='--')
+
+                # Now ditto for the weighted average
+                n, bins, patches = ax1.hist(
+                    self.out['weighted_average'][param], alpha=.3,
+                    bins=20, label='Weighted average', density=True,
+                    color='tab:pink'
+                )
+                kde = gaussian_kde(self.out['weighted_average'][param])
+                xx = np.linspace(bins[0], bins[-1], 300)
+                ax1.plot(xx, kde(xx), color='tab:pink', lw=2, alpha=1)
                 if param == 'z':
                     param = '[Fe/H]'
                 # Normal
@@ -790,11 +806,13 @@ class SEDPlotter:
                                bbox_inches='tight')
                     f2.savefig(self.hist_out + '/weighted_' + param + '.pdf',
                                bbox_inches='tight')
+                plt.close(f1)
+                plt.close(f2)
 
         if self.bma:
             # Age hist
             f, ax = plt.subplots(figsize=(12, 4))
-            samp = self.out['posterior_samples']['age']
+            samp = self.out['mist_samples']['age']
             n, bins, patches = ax.hist(
                 samp, alpha=.3, bins=20, label='MIST', density=True
             )
@@ -824,10 +842,10 @@ class SEDPlotter:
             if self.pdf:
                 plt.savefig(self.hist_out + '/age.pdf',
                             bbox_inches='tight')
-
+            plt.close(f)
             # Mass hist
             f, ax = plt.subplots(figsize=(12, 4))
-            samp = self.out['posterior_samples']['iso_mass']
+            samp = self.out['mist_samples']['iso_mass']
             n, bins, patches = ax.hist(
                 samp, alpha=.3, bins=20, label='MIST', density=True
             )
@@ -857,10 +875,10 @@ class SEDPlotter:
             if self.pdf:
                 plt.savefig(self.hist_out + '/iso_mass.pdf',
                             bbox_inches='tight')
-
+            plt.close(f)
             # EEP hist
             f, ax = plt.subplots(figsize=(12, 4))
-            samp = self.out['posterior_samples']['eep']
+            samp = self.out['mist_samples']['eep']
             n, bins, patches = ax.hist(
                 samp, alpha=.3, bins=20, label='MIST', density=True
             )
@@ -890,23 +908,25 @@ class SEDPlotter:
             if self.pdf:
                 plt.savefig(self.hist_out + '/EEP.pdf',
                             bbox_inches='tight')
+            plt.close(f)
 
     def plot_bma_HR(self, nsamp):
         """Plot HR diagram for the star."""
         print('Plotting HR diagram')
         # Get necessary info from the star.
-        age = self.out['best_fit']['age']
-        feh = self.out['best_fit']['z']
-        teff = np.log10(self.out['best_fit']['teff'])
-        lum = np.log10(self.out['best_fit']['lum'])
-        teff_lo, teff_hi = self.out['uncertainties']['teff']
-        lum_lo, lum_hi = self.out['uncertainties']['lum']
+        age = self.out[f'best_fit_{self.method}']['age']
+        feh = self.out[f'best_fit_{self.method}']['z']
+        teff = np.log10(self.out[f'best_fit_{self.method}']['teff'])
+        lum = np.log10(self.out[f'best_fit_{self.method}']['lum'])
+        teff_lo, teff_hi = self.out[f'uncertainties_{self.method}']['teff']
+        lum_lo, lum_hi = self.out[f'uncertainties_{self.method}']['lum']
         teff_lo = teff_lo / (10 ** teff * np.log(10))
         teff_hi = teff_hi / (10 ** teff * np.log(10))
         lum_lo = lum_lo / (10 ** lum * np.log(10))
         lum_hi = lum_hi / (10 ** lum * np.log(10))
-        ages = self.out['posterior_samples']['age']
-        fehs = self.out['posterior_samples']['z']
+        ages = self.out['mist_samples']['age']
+        m = self.method if self.method == 'samples' else 'average'
+        fehs = self.out[f'weighted_{m}']['z']
 
         if feh > 0.5:
             feh = 0.5
@@ -981,7 +1001,8 @@ class SEDPlotter:
     def plot_corner(self):
         """Make corner plot."""
         print('Plotting corner.')
-        samples = self.out['posterior_samples']
+        m = self.method if self.method == 'samples' else 'average'
+        samples = self.out[f'weighted_{m}']
         all_samps = []
         theta_lo = []
         theta_up = []
@@ -1070,10 +1091,10 @@ class SEDPlotter:
                 tick.label.set_fontname(self.fontname)
 
             if self.pdf:
-                plt.savefig(self.out_folder + '/CORNER.pdf',
+                plt.savefig(f'{self.out_folder}/CORNER.pdf',
                             bbox_inches='tight')
             if self.png:
-                plt.savefig(self.out_folder + '/CORNER.png',
+                plt.savefig(f'{self.out_folder}/CORNER.png',
                             bbox_inches='tight')
         pass
 
