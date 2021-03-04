@@ -1173,12 +1173,35 @@ class Fitter:
                                     'iso_mass', out, method='samples')
         logdat_samples = out_filler(eep_samp, logdat_samples, 'eep', 'eep', out,
                                     method='samples')
-        logdat_average = out_filler(age_samp, logdat_average, 'age', 'age', out,
-                                    method='averaged')
-        logdat_average = out_filler(mass_samp, logdat_average, 'iso_mass',
-                                    'iso_mass', out, method='averaged')
-        logdat_average = out_filler(eep_samp, logdat_average, 'eep', 'eep', out,
-                                    method='averaged')
+        # Ugly... but faster than doing the kde 2x times...
+        age = out['best_fit_samples']['age']
+        age_unc = out['uncertainties_samples']['age']
+        age_ci = out['confidence_interval_samples']['age']
+        iso_mass = out['best_fit_samples']['iso_mass']
+        iso_mass_unc = out['uncertainties_samples']['iso_mass']
+        iso_mass_ci = out['confidence_interval_samples']['iso_mass']
+        eep = out['best_fit_samples']['eep']
+        eep_unc = out['uncertainties_samples']['eep']
+        eep_ci = out['confidence_interval_samples']['eep']
+        out['best_fit_averaged']['age'] = age
+        out['best_fit_averaged']['iso_mass'] = iso_mass
+        out['best_fit_averaged']['eep'] = eep
+        out['uncertainties_averaged']['age'] = age
+        out['uncertainties_averaged']['iso_mass'] = iso_mass
+        out['uncertainties_averaged']['eep'] = eep
+        out['confidence_interval_averaged']['age'] = age
+        out['confidence_interval_averaged']['iso_mass'] = iso_mass
+        out['confidence_interval_averaged']['eep'] = eep
+        logdat_average += f'age\t{age:.4f}\t'
+        logdat_average += f'{age_unc[1]:.4f}\t{age_unc[0]:.4f}\t'
+        logdat_average += f'{age_ci[0]:.4f}\t{age_ci[1]}\n'
+        logdat_average += f'iso_mas\t{iso_mass:.4f}\t'
+        logdat_average += f'{iso_mass_unc[1]:.4f}\t{iso_mass_unc[0]:.4f}\t'
+        logdat_average += f'{iso_mass_ci[0]:.4f}\t{iso_mass_ci[1]}\n'
+        logdat_average += f'eep\t{eep:.4f}\t'
+        logdat_average += f'{eep_unc[1]:.4f}\t{eep_unc[0]:.4f}\t'
+        logdat_average += f'{eep_ci[0]:.4f}\t{eep_ci[1]}\n'
+        ###
         probdat = ''
 
         for k in avgd['weights'].keys():
