@@ -392,10 +392,10 @@ def create_dir(path):
     except OSError:
         err_msg = f"Creation of the directory {path:s} failed. "
         err_msg += "It might already exist"
-        print(err_msg)
+        print(colored(err_msg, 'red'))
         pass
     else:
-        print(f"Created the directory {path:s} ")
+        print(colored(f"Created the directory {path:s}", 'blue'))
         pass
     pass
 
