@@ -754,7 +754,7 @@ class SEDPlotter:
                 )
                 kde = gaussian_kde(self.out['weighted_samples'][param])
                 xx = np.linspace(bins[0], bins[-1], 300)
-                ax1.plot(xx, kde(xx), color='tab:cyan', lw=2, alpha=1)
+                ax1.plot(xx, kde(xx), color='tab:cyan', lw=2, alpha=1, ls='--')
 
                 # Now ditto for the weighted average
                 n, bins, patches = ax1.hist(
