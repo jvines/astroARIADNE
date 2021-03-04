@@ -1239,7 +1239,7 @@ class Fitter:
             abs(mamajek_temp - out['best_fit_averaged']['teff']))
         spt = mamajek_spt[spt_idx]
         out['spectral_type'] = spt
-        out_file = f'{self.out_folder}/BMA_out.pkl'
+        out_file = f'{self.out_folder}/BMA.pkl'
         with open(log_out_samples, 'w') as logfile:
             logfile.write(logdat_samples)
         with open(log_out_average, 'w') as logfile:
@@ -1285,7 +1285,7 @@ class Fitter:
         weights = [np.exp(e) / np.exp(weights).sum() for e in weights]
         weights = np.array(weights)
         # We're not averaging these
-        ban = ['loglike', 'priors', 'posteriors', 'mass']
+        ban = ['loglike', 'priors', 'posteriors']
         if norm:  # if normalization was used, we won't average the radius
             ban.append('rad')
         # Create an output dictionary for the averaged samples.
@@ -1299,33 +1299,11 @@ class Fitter:
             out['originals'][o['model_grid']] = o['posterior_samples']
         out['weighted_samples'] = dict()
         out['weighted_average'] = dict()
-        # if method == 'sample':
-        # Get the shortest samples
-        # ( This snippet is adapted from pymc3.sampling )
-        lens = []
-        for o in post_samples:
-            lens.append(len(o['teff']))
-        lens = np.array(lens)
-        n_min = lens.min()
-        # n is the number of samples we'll retrieve from each model
-        # The idea is that the number of samples will be proportional
-        # To the model's probability (or weight)
-        n = (n_min * weights).astype('int')
-        # normalize n to n_min
-        idx = np.argmax(n)
-        n[idx] += n_min - n.sum()
-        # First extract the correct number of samples per model
-        traces = dict()
-        for k in post_samples[0].keys():
-            if k in ban:
-                continue
-            traces[k] = []
-        # Begin averaging
-        # if method == 'average':
+
         print(colored('\t\t*** AVERAGING POSTERIOR SAMPLES ***', c))
-        # elif method == 'sample':
-        #     print(colored('\t\t*** SAMPLING AVERAGED POSTERIOR ***', c))
         for k in tqdm(post_samples[0].keys()):
+            traces = []
+            extended_weights = []
             if k in ban:
                 continue
             out['weighted_samples'][k] = np.zeros(nsamples)
@@ -1336,17 +1314,16 @@ class Fitter:
                     len(o[k])
                 except TypeError:
                     continue
-                # if method == 'average':
-                # Do weighted averaging
+                # This is for the weighted sampling
+                traces.append(o[k])
+                extended_weights.append(np.ones(len(o[k])) * weights[i])
+                # This is for the weighted averaging
                 weighted_samples = choice(o[k], nsamples) * weights[i]
                 out['weighted_average'][k] += weighted_samples
-                # elif method == 'sample':
-                # Do weighted sampling
-                traces[k].extend(choice(o[k], n[i]))
 
-            # if method == 'sample':
-            resampled = sample_from_distribution(traces[k], size=nsamples)
-            out['weighted_samples'][k] = resampled
+            avg_kde = gaussian_kde(np.concatenate(traces),
+                                   weights=np.concatenate(extended_weights))
+            out['weighted_samples'][k] = avg_kde.resample(nsamples)[0]
 
         out['evidences'] = dict()
         for e, g in zip(evidences, grids):
