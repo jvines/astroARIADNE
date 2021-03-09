@@ -764,7 +764,7 @@ class SEDPlotter:
                 )
                 kde = gaussian_kde(self.out['weighted_average'][param])
                 xx = np.linspace(bins[0], bins[-1], 300)
-                ax1.plot(xx, kde(xx), color='tab:pink', lw=2, alpha=1)
+                ax1.plot(xx, kde(xx), color='tab:pink', lw=2, alpha=1, ls='-.')
                 if param == 'z':
                     param = '[Fe/H]'
                 # Normal
