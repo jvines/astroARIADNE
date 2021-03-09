@@ -254,11 +254,11 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     theta = np.zeros(order.shape[0] - 1 + n)
     for i, param in enumerate(order):
         if param != 'loglike':
-            theta[i] = out['best_fit_average'][param]
+            theta[i] = out['best_fit_averaged'][param]
         if param == 'inflation':
             for m, fi in enumerate(star.filter_names[mask]):
                 _p = get_noise_name(fi) + '_noise'
-                theta[i + m] = out['best_fit_average'][_p]
+                theta[i + m] = out['best_fit_averaged'][_p]
 
     if engine != 'Bayesian Model Averaging':
         z, z_err = out['global_lnZ'], out['global_lnZerr']
@@ -280,8 +280,8 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             p2 = '[Fe/H]'
         fmt_str += f'{p2} : {theta[i]:.4{fmt}} '
         if not coordinator[i]:
-            unlo, unhi = out['uncertainties_average'][p]
-            lo, up = out['confidence_interval_average'][p]
+            unlo, unhi = out['uncertainties_averaged'][p]
+            lo, up = out['confidence_interval_averaged'][p]
             fmt_str += f'+ {unhi:.4{fmt}} - {unlo:.4{fmt}} '
             fmt_str += f'[{lo:.4{fmt}}, {up:.4{fmt}}]\n'
         else:
@@ -289,47 +289,47 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
 
     if not use_norm:
         ad = out['best_fit']['AD']
-        unlo, unhi = out['uncertainties_average']['AD']
-        lo, up = out['confidence_interval_average']['AD']
+        unlo, unhi = out['uncertainties_averaged']['AD']
+        lo, up = out['confidence_interval_averaged']['AD']
         fmt_str += f'\t\t\tAngular Diameter : {ad:.4f} '
         fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     mass = out['best_fit']['grav_mass']
-    unlo, unhi = out['uncertainties_average']['grav_mass']
-    lo, up = out['confidence_interval_average']['grav_mass']
+    unlo, unhi = out['uncertainties_averaged']['grav_mass']
+    lo, up = out['confidence_interval_averaged']['grav_mass']
     fmt_str += f'\t\t\tGrav mass : {mass:.4f} '
     fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     lum = out['best_fit']['lum']
-    unlo, unhi = out['uncertainties_average']['lum']
-    lo, up = out['confidence_interval_average']['lum']
+    unlo, unhi = out['uncertainties_averaged']['lum']
+    lo, up = out['confidence_interval_averaged']['lum']
     fmt_str += f'\t\t\tLuminosity : {lum:.4f} '
     fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     if engine == 'Bayesian Model Averaging':
         miso = out['best_fit']['iso_mass']
-        unlo, unhi = out['uncertainties_average']['iso_mass']
-        lo, up = out['confidence_interval_average']['iso_mass']
+        unlo, unhi = out['uncertainties_averaged']['iso_mass']
+        lo, up = out['confidence_interval_averaged']['iso_mass']
         fmt_str += f'\t\t\tIso mass : {miso:.4f} '
         fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
         age = out['best_fit']['age']
-        unlo, unhi = out['uncertainties_average']['age']
-        lo, up = out['confidence_interval_average']['age']
+        unlo, unhi = out['uncertainties_averaged']['age']
+        lo, up = out['confidence_interval_averaged']['age']
         fmt_str += f'\t\t\tAge (Gyr) : {age:.4f} '
         fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
         eep = out['best_fit']['eep']
-        unlo, unhi = out['uncertainties_average']['eep']
-        lo, up = out['confidence_interval_average']['eep']
+        unlo, unhi = out['uncertainties_averaged']['eep']
+        lo, up = out['confidence_interval_averaged']['eep']
         fmt_str += f'\t\t\tEEP : {eep:.4f} '
         fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     for i, p in enumerate(order):
         if 'noise' not in p:
             continue
-        unlo, unhi = out['uncertainties_average'][p]
-        lo, up = out['confidence_interval_average'][p]
+        unlo, unhi = out['uncertainties_averaged'][p]
+        lo, up = out['confidence_interval_averaged'][p]
         p_ = 'Excess '
         if 'SDSS' not in p and 'PS1' not in p:
             p1, p2 = p.split('_')
