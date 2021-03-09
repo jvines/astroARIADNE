@@ -218,8 +218,7 @@ def display_routine(engine, live_points, dlogz, ndim, bound=None, sample=None,
     pass
 
 
-def end(coordinator, elapsed_time, out_folder, engine, use_norm,
-        method='average'):
+def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     """Display end of run information.
 
     What is displayed is:
@@ -239,7 +238,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm,
             ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
         )
     if engine == 'Bayesian Model Averaging':
-        res_dir = f'{out_folder}/BMA_out_{method}.pkl'
+        res_dir = f'{out_folder}/BMA.pkl'
     else:
         res_dir = f'{out_folder}/{engine}_out.pkl'
     with closing(open(res_dir, 'rb')) as jar:
@@ -436,17 +435,24 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False,
     if method not in ['averaged', 'samples']:
         raise Exception('Method is wrong!')
     if fixed is False:
-        xx, pdf = estimate_pdf(samp)
-        cdf = estimate_cdf(samp, hdr=True)
-        best, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=1)
-        # best = get_max_from_kde(samp)
+        try:
+            xx, pdf = estimate_pdf(samp)
+            cdf = estimate_cdf(samp, hdr=True)
+            best, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=1)
+            _, lo3, up3 = credibility_interval_hdr(xx, pdf, cdf, sigma=3)
+        except ValueError:
+            wrn = f'HDR failed for parameter {param}, reverting to regular CI'
+            wrn += ' calculation. Be sure to check the histograms afterwards'
+            wrn += ' for diagnosis.'
+            print(colored(wrn, 'red'))
+            best, lo, up = credibility_interval(samp)
+            _, lo3, up3 = credibility_interval(samp, alpha=3)
         out[f'best_fit_{method}'][param] = best
         logdat += f'{name}\t{best:.4{fmt}}\t'
-        # _, lo, up = credibility_interval(samp)
         out[f'uncertainties_{method}'][param] = (best - lo, up - best)
         logdat += f'{up - best:.4{fmt}}\t{best - lo:.4{fmt}}\t'
-        _, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=3)
-        out[f'confidence_interval_{method}'][param] = (lo, up)
+
+        out[f'confidence_interval_{method}'][param] = (lo3, up3)
         logdat += f'{lo:.4{fmt}}\t{up:.4{fmt}}\n'
     else:
         out[f'best_fit_{method}'][param] = fixed
