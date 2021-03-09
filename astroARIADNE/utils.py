@@ -288,38 +288,38 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             fmt_str += 'fixed\n'
 
     if not use_norm:
-        ad = out['best_fit']['AD']
+        ad = out['best_fit_averaged']['AD']
         unlo, unhi = out['uncertainties_averaged']['AD']
         lo, up = out['confidence_interval_averaged']['AD']
         fmt_str += f'\t\t\tAngular Diameter : {ad:.4f} '
         fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
-    mass = out['best_fit']['grav_mass']
+    mass = out['best_fit_averaged']['grav_mass']
     unlo, unhi = out['uncertainties_averaged']['grav_mass']
     lo, up = out['confidence_interval_averaged']['grav_mass']
     fmt_str += f'\t\t\tGrav mass : {mass:.4f} '
     fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
-    lum = out['best_fit']['lum']
+    lum = out['best_fit_averaged']['lum']
     unlo, unhi = out['uncertainties_averaged']['lum']
     lo, up = out['confidence_interval_averaged']['lum']
     fmt_str += f'\t\t\tLuminosity : {lum:.4f} '
     fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
     if engine == 'Bayesian Model Averaging':
-        miso = out['best_fit']['iso_mass']
+        miso = out['best_fit_averaged']['iso_mass']
         unlo, unhi = out['uncertainties_averaged']['iso_mass']
         lo, up = out['confidence_interval_averaged']['iso_mass']
         fmt_str += f'\t\t\tIso mass : {miso:.4f} '
         fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
-        age = out['best_fit']['age']
+        age = out['best_fit_averaged']['age']
         unlo, unhi = out['uncertainties_averaged']['age']
         lo, up = out['confidence_interval_averaged']['age']
         fmt_str += f'\t\t\tAge (Gyr) : {age:.4f} '
         fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
 
-        eep = out['best_fit']['eep']
+        eep = out['best_fit_averaged']['eep']
         unlo, unhi = out['uncertainties_averaged']['eep']
         lo, up = out['confidence_interval_averaged']['eep']
         fmt_str += f'\t\t\tEEP : {eep:.4f} '
