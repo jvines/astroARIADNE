@@ -338,7 +338,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             p1 += '_' + p2
             p2 = p3
         fmt_str += f'\t\t\t{p_ + p1} {p2} : {theta[i]:.4f} '
-        fmt_str += f'{unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
+        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
     print(colored(fmt_str, c), end='')
 
     spt = out['spectral_type']
