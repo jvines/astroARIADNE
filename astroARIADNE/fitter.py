@@ -102,7 +102,6 @@ class Fitter:
         self.grid = 'phoenix'
         self.estimate_logg = False
         self.av_law = 'fitzpatrick'
-        self._method = 'average'
         self.n_samples = None
         self.bma = False
         self.prior_setup = None
@@ -301,14 +300,6 @@ class Fitter:
         if law == laws[3]:
             law_f = extinction.fitzpatrick99
         self._av_law = law_f
-
-    @property
-    def method(self):
-        return self._method
-
-    @method.setter
-    def method(self, met):
-        self._method = met
 
     def initialize(self):
         """Initialize the fitter.
@@ -629,7 +620,7 @@ class Fitter:
 
         elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time, self.out_folder,
-            'Bayesian Model Averaging', self.norm, self._method)
+            'Bayesian Model Averaging', self.norm)
         pass
 
     def _bma_dynesty(self, intp, grid):
