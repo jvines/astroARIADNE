@@ -609,7 +609,7 @@ class SEDPlotter:
             flux *= wave * norm
             ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
         if self.save:
-            data = np.hstack((wave, flux)).T
+            data = np.vstack((wave, flux)).T
             np.savetxt(f'{self.out_folder}/SED.dat', data, fmt='%s',
                        header='wavelength(mu m) wave*flux(erg cm-2 s-2)')
         pass
