@@ -463,9 +463,13 @@ class SEDPlotter:
             tick.set_fontname(self.fontname)
 
         if self.pdf:
-            plt.savefig(self.out_folder + '/SED.pdf', bbox_inches='tight')
+            plt.savefig(f'{self.out_folder}/SED.pdf', bbox_inches='tight')
         if self.png:
-            plt.savefig(self.out_folder + '/SED.png', bbox_inches='tight')
+            plt.savefig(f'{self.out_folder}/SED.png', bbox_inches='tight')
+        if self.save:
+            data = np.vstack((self.wave, self.model * self.wave)).T
+            np.savetxt(f'{self.out_folder}/synthetic.dat', data, fmt='%s',
+                       header='wavelength(mu m) wave*flux(erg cm-2 s-2)')
         pass
 
     def SED(self, ax):
