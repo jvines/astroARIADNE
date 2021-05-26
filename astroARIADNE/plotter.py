@@ -96,7 +96,8 @@ class SEDPlotter:
     __wav_file = 'PHOENIXv2/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
     def __init__(self, input_files, out_folder, pdf=False,
-                 model=None, settings=None, method='averaged'):
+                 model=None, settings=None, method='averaged',
+                 save_model=False):
         """See class docstring."""
         print('\nInitializing plotter.\n')
         # General setup
@@ -106,6 +107,7 @@ class SEDPlotter:
         self.out_folder = out_folder
         self.bma = False
         self.method = method
+        self.save = save_model
 
         traces = f'{out_folder}/traces'
         histograms = f'{out_folder}/histograms'
@@ -606,6 +608,10 @@ class SEDPlotter:
             flux = apply(ext, flux)
             flux *= wave * norm
             ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
+        if self.save:
+            data = np.hstack((wave, flux)).T
+            np.savetxt(f'{self.out_folder}/SED.dat', data, fmt='%s',
+                       header='wavelength(mu m) wave*flux(erg cm-2 s-2)')
         pass
 
     def plot_trace(self):
