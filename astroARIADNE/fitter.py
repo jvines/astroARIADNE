@@ -1293,29 +1293,35 @@ class Fitter:
 
         print(colored('\t\t*** AVERAGING POSTERIOR SAMPLES ***', c))
         for k in tqdm(post_samples[0].keys()):
+            if k in ban:  # Skip things that are not main parameters.
+                continue
+            try:  # Skip fixed params.
+                len(post_samples[0][k])
+            except TypeError:
+                continue
             traces = []
             extended_weights = []
-            if k in ban:
-                continue
             out['weighted_samples'][k] = np.zeros(nsamples)
             out['weighted_average'][k] = np.zeros(nsamples)
             for i, o in enumerate(post_samples):
-                # Skip fixed params
-                try:
-                    len(o[k])
-                except TypeError:
-                    continue
-                # This is for the weighted sampling
+                # This is for the weighted sampling.
                 traces.append(o[k])
                 extended_weights.append(np.ones(len(o[k])) * weights[i])
-                # This is for the weighted averaging
+                # This is for the weighted averaging.
+                # The weighted averaging consists of taking the weighted
+                # average of the posterior samples, supersampled to maked them
+                # coincide in length.
                 weighted_samples = choice(o[k], nsamples) * weights[i]
                 out['weighted_average'][k] += weighted_samples
-
+            # Do the weighted sampling. For this we're going to estimate the
+            # KDE of the 'master' posterior built by taking random samples
+            # from each model where the number of samples is proportional
+            # to the model's relative probability. This is equivalent
+            # to taking the KDE of each model and then do the weighted average
             avg_kde = gaussian_kde(np.concatenate(traces),
                                    weights=np.concatenate(extended_weights))
             out['weighted_samples'][k] = avg_kde.resample(nsamples)[0]
-
+        # Now we save the evidences.
         out['evidences'] = dict()
         for e, g in zip(evidences, grids):
             out['evidences'][g] = e
