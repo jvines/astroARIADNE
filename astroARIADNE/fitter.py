@@ -374,12 +374,14 @@ class Fitter:
                 self.n_samples = 'max'
 
             if self.star.offline:
-                self.star.temp = 4001
+                if self.star.temp is None:
+                    self.star.temp = 4001
                 off_msg = 'Offline mode assumes that the stellar'
                 off_msg += ' temperature is greater than 4000 K'
                 off_msg += '. If you believe this is not the case then please '
-                off_msg += 'add a temperature to the Star constructor'
-                print(off_msg)
+                off_msg += 'add a temperature to the Star constructor. '
+                off_msg += f'The input temperature is {self.star.temp}'
+                print(colored(off_msg, 'yellow'))
 
             for mod in self._bma_models:
                 # We'll assume that if ARIADNE is running in offline mode
