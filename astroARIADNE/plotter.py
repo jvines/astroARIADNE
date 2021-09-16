@@ -1242,11 +1242,6 @@ class SEDPlotter:
         #tab = Table(fits.open(selected_SED)[1].data)
         #flux = np.array(tab['FLUX'].tolist()) * conversion
         #wave = np.array(tab['WAVELENGTH'].tolist()) * u.angstrom.to(u.um)
-        #flux=np.loadtxt(selected_SED,dtype='str',usecols=1)
-        #wave=np.loadtxt(selected_SED,dtype='str',usecols=0)
-        #flux=np.array([float(i.replace('D','E')) for i in flux])
-        #flux=10**(flux-8.)* conversion
-        #wave=np.array([float(i.replace('D','E')) for i in wave]) * u.angstrom.to(u.um)
         wave=np.loadtxt(selected_SED,dtype='str',usecols=0)
         flux=np.loadtxt(selected_SED,dtype='str',usecols=1)
         wave=np.array([float(i.replace('D','E')) for i in wave])
