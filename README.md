@@ -254,7 +254,7 @@ dlogz = 0.5
 bound = 'multi'
 sample = 'rwalk'
 threads = 4
-dynamic = True
+dynamic = False
 
 setup = [engine, nlive, dlogz, bound, sample, threads, dynamic]
 
