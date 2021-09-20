@@ -379,7 +379,7 @@ class SEDPlotter:
                    marker=self.marker_model,
                    edgecolors=self.marker_colors_model,
                    s=self.scatter_size,
-                   facecolor='', zorder=3,
+                   facecolor='none', zorder=3,
                    lw=3)
 
         # Residual plot
@@ -400,7 +400,7 @@ class SEDPlotter:
                      marker=self.marker_model,
                      edgecolors=self.marker_colors_model,
                      s=self.scatter_size,
-                     facecolor='',
+                     facecolor='none',
                      lw=3,
                      zorder=10)
 
