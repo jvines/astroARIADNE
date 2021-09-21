@@ -555,7 +555,10 @@ class Librarian:
             CatalogWarning(name, 5).warn()
             return
         if not near:
-            tyc1, tyc2, tyc3 = self.ids['TYCHO2'].split('-')
+            try:
+                tyc1, tyc2, tyc3 = self.ids['TYCHO2'].split('-')
+            except TypeError:
+                tyc1, tyc2, tyc3 = self.ids['TYCHO2'].split('b-')
             mask = cat['TYC1'] == int(tyc1)
             mask *= cat['TYC2'] == int(tyc2)
             mask *= cat['TYC3'] == int(tyc3)
