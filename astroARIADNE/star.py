@@ -7,6 +7,9 @@ import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
 from dustmaps.sfd import SFDQuery
+from dustmaps.planck import PlanckQuery, PlanckGNILCQuery
+from dustmaps.lenz2017 import Lenz2017Query
+from dustmaps.bayestar import BayestarQuery
 from scipy.interpolate import RegularGridInterpolator
 from termcolor import colored
 
@@ -172,7 +175,7 @@ class Star:
 
     # pyphot filter names
 
-    filter_names = sp.array([
+    filter_names = np.array([
         '2MASS_H', '2MASS_J', '2MASS_Ks',
         'GROUND_COUSINS_I', 'GROUND_COUSINS_R',
         'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
@@ -192,14 +195,23 @@ class Star:
         'grey', 'magenta', 'cyan', 'white'
     ]
 
+    dustmaps = {
+        'SFD': SFDQuery,
+        'Lenz': Lenz2017Query,
+        'Planck13': PlanckQuery,
+        'Planck16': PlanckGNILCQuery,
+        'Bayestar': BayestarQuery,
+    }
+
     def __init__(self, starname, ra, dec, g_id=None,
                  plx=None, plx_e=None,
                  rad=None, rad_e=None,
                  temp=None, temp_e=None,
                  lum=None, lum_e=None,
                  dist=None, dist_e=None,
-                 Av=None, offline=False,
-                 mag_dict=None, verbose=True, ignore=None):
+                 Av=None, Av_e=None,
+                 offline=False, mag_dict=None, verbose=True, ignore=None,
+                 dustmap='SFD'):
         """See class docstring."""
         # MISC
         self.verbose = verbose
@@ -322,11 +334,26 @@ class Star:
 
         # Get max Av
         if Av is None:
-            sfd = SFDQuery()
-            coords = SkyCoord(self.ra, self.dec,
-                              unit=(u.deg, u.deg), frame='icrs')
-            ebv = sfd(coords)
-            self.Av = ebv * 2.742
+            dmap = self.dustmaps[dustmap]()
+            coords = SkyCoord(self.ra, self.dec, distance=self.dist,
+                              unit=(u.deg, u.deg, u.pc), frame='icrs')
+            if dustmap in ['SFD', 'Lenz']:
+                ebv = dmap(coords)
+                self.Av = ebv * 2.742
+            elif dustmap == 'Bayestar':
+                # import pdb; pdb.set_trace()
+                ebvs = dmap(coords, mode='percentile', pct=[15, 50, 84])
+                if np.any(np.isnan(ebvs)):
+                    StarWarning(None, 2).warn()
+                    ebv = self.dustmaps['SFD']()(coords)
+                    self.Av = ebv * 2.742
+                else:
+                    mags = ebvs * 2.742 * 0.884
+                    self.Av = mags[1]
+                    self.Av_e = max([mags[1] - mags[0], mags[2] - mags[1]])
+            elif dustmap in ['Planck13', 'Planck16']:
+                ebv = dmap(coords)
+                self.Av = ebv * 3.1
         else:
             self.Av = Av
         # Get the wavelength and fluxes of the retrieved magnitudes.

@@ -477,7 +477,15 @@ class Fitter:
             self.fixed[av_idx] = 0
             defaults['Av'] = None
         else:
-            defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
+            if self.star.Av_e is None:
+                defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
+            else:
+                mu = self.star.Av
+                sig = self.star.Av_e
+                low = 0
+                up = 100
+                b, a = (up - mu) / sig, (low - mu) / sig
+                defaults['Av'] = st.truncnorm(loc=mu, scale=sig, a=a, b=b)
         # Noise model prior setup.
         mask = self.star.filter_mask
         flxs = self.star.flux[mask]

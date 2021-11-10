@@ -181,8 +181,9 @@ class StarWarning(Error):
 
     Notes
     -----
-    Type 0 means the warning is input detected
-    Type 1 means offline is true but no mag dict was given
+    Type 0 means the warning is input detected.
+    Type 1 means offline is true but no mag dict was given.
+    Type 2 means the extinction map returned NaN.
     """
 
     def __init__(self, par, type):
@@ -194,6 +195,9 @@ class StarWarning(Error):
             self.message = 'You are running ARIADNE offline but no magnitudes '
             self.message += 'were given. Make sure you are providing a valid '
             self.message += 'mag_dict.'
+        if type == 2:
+            self.message = 'The selected extinction map returned a NaN! '
+            self.message += 'Reverting back to the SFD map!'
 
     def warn(self):
         print('Star Warning ! ! !')

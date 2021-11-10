@@ -220,15 +220,33 @@ s.add_mag(13.751, 0.032, 'PS1_r')
 If for whatever reason **ARIADNE** found a bad photometry point and you needed to remove it, you can invoke the `remove_mag` method. For example you wanted to remove the TESS magnitude due to it being from a blended source, you can just run
 
 ```python
-s.remove_mag('TESS')
+s.remove_mag('NGTS')
 ```
 
 A list of allowed filters can be found [here](https://github.com/jvines/astroARIADNE/blob/master/filters.md)
 
-After the photometry + stellar parameter retrieval has finished, we can estimate the star's log g to use as prior later with the `estimate_logg` method:
+### Interstellar extinction
+
+**ARIADNE** has an incorporated prior for the interstellar extinction in the Visual band, $A_{\rm V}$ which consists of a uniform prior between 0 and the maximum line-of-sight value provided by the [SFD dust maps](https://ui.adsabs.harvard.edu/abs/2011ApJ...737..103S/abstract).
+This, however, can be changed either by a custom prior (see Fitter setup) or by changing the dustmap used. We provide following dustmaps:
+
+- [SFD (2011)](https://ui.adsabs.harvard.edu/abs/2011ApJ...737..103S/abstract)
+- [Planck Collaboration (2013)](http://adsabs.harvard.edu/abs/2014A%26A...571A..11P)
+- [Planck Collaboration (2016; GNILC)](https://ui.adsabs.harvard.edu/abs/2016A%26A...596A.109P/abstract)
+- [Lenz, Hensley & Doré (2017)](https://arxiv.org/abs/1706.00011)
+- [Bayestar (2019)](https://ui.adsabs.harvard.edu/abs/2019ApJ...887...93G)
+
+These maps are all implemented through the [dustmaps](https://dustmaps.readthedocs.io/en/latest/index.html) package and need to be downloaded. Instructions to download the dustmaps can be found in its documentation.
+
+To change the dustmap you need to provide the `dustmap` parameter to the `Star` constructor, for example:
 
 ```python
-s.estimate_logg()
+ra = 75.795
+dec = -30.399
+starname = 'NGTS-6'
+gaia_id = 4875693023844840448
+
+s = Star(starname, ra, dec, g_id=gaia_id, dustmap='Bayestar')
 ```
 
 This concludes the stellar setup and now we're ready to set up the parameters for the fitting routine.
