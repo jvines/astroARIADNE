@@ -334,6 +334,7 @@ class Star:
 
         # Get max Av
         if Av is None:
+            self.Av_e = None
             dmap = self.dustmaps[dustmap]()
             coords = SkyCoord(self.ra, self.dec, distance=self.dist,
                               unit=(u.deg, u.deg, u.pc), frame='icrs')
