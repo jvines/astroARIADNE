@@ -131,7 +131,7 @@ class Librarian:
             'J/A+A/580/A23/catalog', -1
         ],
         'STROMGREN_HAUCK': [
-            'II/215', -1
+            'II/215/catalog', -1
         ],
         'MERMILLIOD': [
             'II/168/ubvmeans', -1
@@ -318,8 +318,7 @@ class Librarian:
                 self._retrieve_from_galex(current_cat, c)
                 continue
             elif c == 'MERMILLIOD':
-                current_cat = self._gaia_mermilliod_xmatch(cats, self.ra,
-                                                           self.dec,
+                current_cat = self._gaia_mermilliod_xmatch(self.ra, self.dec,
                                                            self.radius)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
@@ -327,7 +326,7 @@ class Librarian:
                 self._retrieve_from_mermilliod(current_cat)
                 continue
             elif c == 'STROMGREN_PAUNZ':
-                current_cat = self._gaia_paunzen_xmatch(cats, self.ra, self.dec,
+                current_cat = self._gaia_paunzen_xmatch(self.ra, self.dec,
                                                         self.radius)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
@@ -335,7 +334,7 @@ class Librarian:
                 self._retrieve_from_stromgren(current_cat, 'STROMGREN_PAUNZEN')
                 continue
             elif c == 'STROMGREN_HAUCK':
-                current_cat = self._gaia_hauck_xmatch(cats, self.ra, self.dec,
+                current_cat = self._gaia_hauck_xmatch(self.ra, self.dec,
                                                       self.radius)
                 if len(current_cat) == 0:
                     CatalogWarning(c, 5).warn()
@@ -742,36 +741,36 @@ class Librarian:
         return xm
 
     @staticmethod
-    def _gaia_mermilliod_xmatch(cats, ra, dec, radius):
-        mermilliod = cats['II/168/ubvmeans']
+    def _gaia_mermilliod_xmatch(ra, dec, radius):
         coord = SkyCoord(ra=ra * u.deg,
                          dec=dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=radius)
-        xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
+        xm = XMatch.query(cat1='vizier:I/345/gaia2',
+                          cat2='vizier:II/168/ubvmeans',
                           colRA2='_RA', colDec2='_DE',
                           area=region, max_distance=radius)
         xm.sort('angDist')
         return xm
 
     @staticmethod
-    def _gaia_paunzen_xmatch(cats, ra, dec, radius):
-        mermilliod = cats['J/A+A/580/A23/catalog']
+    def _gaia_paunzen_xmatch(ra, dec, radius):
         coord = SkyCoord(ra=ra * u.deg,
                          dec=dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=radius)
-        xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
-                          colRA2='RAJ2000', colDec2='DEJ2000',
+        xm = XMatch.query(cat1='vizier:I/345/gaia2',
+                          cat2='vizier:J/A+A/580/A23/catalog',
+                          colRA2='RAICRS', colDec2='DEICRS',
                           area=region, max_distance=radius)
         xm.sort('angDist')
         return xm
 
     @staticmethod
-    def _gaia_hauck_xmatch(cats, ra, dec, radius):
-        mermilliod = cats['J/A+A/580/A23/catalog']
+    def _gaia_hauck_xmatch(ra, dec, radius):
         coord = SkyCoord(ra=ra * u.deg,
                          dec=dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=radius)
-        xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=mermilliod,
+        xm = XMatch.query(cat1='vizier:I/345/gaia2',
+                          cat2='vizier:II/215/catalog',
                           colRA2='_RA.icrs', colDec2='_DE.icrs',
                           area=region, max_distance=radius)
         xm.sort('angDist')
