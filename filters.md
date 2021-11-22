@@ -33,6 +33,12 @@ The allowed filters are:
 - SDSS\_r
 - SDSS\_u
 - SDSS\_z
+- SkyMapper\_u
+- SkyMapper\_v
+- SkyMapper\_g
+- SkyMapper\_r
+- SkyMapper\_i
+- SkyMapper\_z
 - SPITZER\_IRAC\_36
 - SPITZER\_IRAC\_45
 - WISE\_RSR\_W1
