@@ -39,6 +39,8 @@ class Librarian:
         'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
         'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y', 'PS1_z',
         'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
+        'SkyMapper_u', 'SkyMapper_v', 'SkyMapper_g', 'SkyMapper_r',
+        'SkyMapper_i', 'SkyMapper_z',
         'WISE_RSR_W1', 'WISE_RSR_W2',
         'GALEX_FUV', 'GALEX_NUV',
         'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
@@ -84,48 +86,53 @@ class Librarian:
     __tess_mags = ['Tmag']
     __tess_errs = ['e_Tmag']
     __tess_filters = ['TESS']
+    __skymapper_mags = ['uPSF', 'vPSF', 'gPSF', 'rPSF', 'iPSF', 'zPSF']
+    __skymapper_errs = ['e_uPSF', 'e_vPSF', 'e_gPSF',
+                        'e_rPSF', 'e_iPSF', 'e_zPSF']
+    __skymapper_filters = ['SkyMapper_u', 'SkyMapper_v', 'SkyMapper_g',
+                           'SkyMapper_r', 'SkyMapper_i', 'SkyMapper_z']
 
     # APASS DR9, WISE, PAN-STARRS DR1, GAIA DR2, 2MASS, SDSS DR9
     catalogs = {
         'APASS': [
-            'II/336/apass9', list(zip(__apass_mags,
-                                      __apass_errs, __apass_filters))
+            'II/336/apass9', list(zip(__apass_mags, __apass_errs,
+                                      __apass_filters))
         ],
         'Wise': [
-            'II/328/allwise', list(zip(__wise_mags,
-                                       __wise_errs, __wise_filters))
+            'II/328/allwise', list(zip(__wise_mags, __wise_errs,
+                                       __wise_filters))
         ],
         'Pan-STARRS': [
             'II/349/ps1', list(zip(__ps1_mags, __ps1_errs, __ps1_filters))
         ],
         'Gaia': [
-            'I/345/gaia2',
-            list(zip(__gaia_mags, __gaia_errs, __gaia_filters))
+            'I/345/gaia2', list(zip(__gaia_mags, __gaia_errs, __gaia_filters))
         ],
         '2MASS': [
-            'II/246/out', list(zip(__tmass_mags,
-                                   __tmass_errs, __tmass_filters))
+            'II/246/out', list(zip(__tmass_mags, __tmass_errs, __tmass_filters))
         ],
         'SDSS': [
             'V/147/sdss12', list(zip(__sdss_mags, __sdss_errs, __sdss_filters))
         ],
         'GALEX': [
-            'II/312/ais', list(zip(__galex_mags,
-                                   __galex_errs, __galex_filters))
+            'II/312/ais', list(zip(__galex_mags, __galex_errs, __galex_filters))
         ],
         'ASCC': [
             'I/280B/ascc', list(zip(__ascc_mags, __ascc_errs, __ascc_filters))
         ],
         'TYCHO2': [
-            'I/259/tyc2', list(zip(__tycho_mags,
-                                   __tycho_errs, __tycho_filters))
+            'I/259/tyc2', list(zip(__tycho_mags, __tycho_errs, __tycho_filters))
         ],
         'GLIMPSE': [
-            'II/293/glimpse', list(zip(__irac_mags,
-                                       __irac_errs, __irac_filters))
+            'II/293/glimpse', list(zip(__irac_mags, __irac_errs,
+                                       __irac_filters))
         ],
         'TESS': [
             'TIC', list(zip(__tess_mags, __tess_errs, __tess_filters))
+        ],
+        'SkyMapper': [
+            'II/358/smss', list(zip(__skymapper_mags, __skymapper_errs,
+                                    __skymapper_filters))
         ],
         'STROMGREN_PAUNZ': [
             'J/A+A/580/A23/catalog', -1
@@ -135,7 +142,7 @@ class Librarian:
         ],
         'MERMILLIOD': [
             'II/168/ubvmeans', -1
-        ]
+        ],
     }
 
     def __init__(self, starname, ra, dec, radius=None, g_id=None,
@@ -215,21 +222,22 @@ class Librarian:
             'Pan-STARRS': '',
             'SDSS': '',
             'Wise': '',
-            'Gaia': self.g_id
+            'Gaia': self.g_id,
+            'SkyMapper': self.g_id,
         }
         for c, n in zip(cats, names):
             if c == 'apassdr9':
                 cat = 'APASS'
-            if c == 'tmass':
+            elif c == 'tmass':
                 cat = '2MASS'
                 c = 'tmass'
-            if c == 'panstarrs1':
+            elif c == 'panstarrs1':
                 cat = 'Pan-STARRS'
-            if c == 'sdssdr9':
+            elif c == 'sdssdr9':
                 cat = 'SDSS'
-            if c == 'allwise':
+            elif c == 'allwise':
                 cat = 'Wise'
-            if c == 'tycho2':
+            elif c == 'tycho2':
                 cat = 'TYCHO2'
             if cat in self.ignore:
                 IDS[cat] = 'skipped'
@@ -306,8 +314,8 @@ class Librarian:
                 self._get_gaia(current_cat)
                 continue
             elif c == '2MASS':
-                self._get_2mass_glimpse(cats, False, '2MASS')
-                self._get_2mass_glimpse(cats, False, 'GLIMPSE')
+                self._get_2mass_glimpse(cats, '2MASS')
+                self._get_2mass_glimpse(cats, 'GLIMPSE')
                 continue
             elif c == 'GALEX':
                 current_cat = self._gaia_galex_xmatch(cats, self.ra, self.dec,
@@ -317,6 +325,8 @@ class Librarian:
                     continue
                 self._retrieve_from_galex(current_cat, c)
                 continue
+            elif c == 'SkyMapper':
+                self._get_skymapper(current_cat)
             elif c == 'MERMILLIOD':
                 current_cat = self._gaia_mermilliod_xmatch(self.ra, self.dec,
                                                            self.radius)
@@ -582,7 +592,7 @@ class Librarian:
         else:
             CatalogWarning('WISE', 8).warn()
 
-    def _get_2mass_glimpse(self, cats, near, name):
+    def _get_2mass_glimpse(self, cats, name):
         print('Checking catalog ' + name)
         try:
             cat = cats[self.catalogs[name][0]]
@@ -622,6 +632,15 @@ class Librarian:
         print('Checking catalog Gaia DR2')
         mask = cat['DR2Name'] == 'Gaia DR2 {0}'.format(self.ids['Gaia'])
         self._retrieve_from_cat(cat[mask], 'Gaia')
+
+    def _get_skymapper(self, cat):
+        print('Checking catalog SkyMapper DR1.1')
+        mask = cat['Gaiadr2Id1'] == self.ids['Gaia']
+        is_good_quality = cat[mask]['flags'] == 0
+        if is_good_quality:
+            self._retrieve_from_cat(cat[mask], 'SkyMapper')
+        else:
+            CatalogWarning('SkyMapper', 8).warn()
 
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
