@@ -1,6 +1,5 @@
 """plot_utils module for plotting SEDs."""
 
-import copy
 import glob
 from random import choice
 
@@ -266,6 +265,7 @@ class SEDPlotter:
             'orangered', 'chocolate', 'khaki',
             'limegreen', 'darkgreen', 'lime', 'seagreen', 'lawngreen', 'green',
             'aquamarine', 'turquoise', 'lightseagreen', 'teal', 'cadetblue',
+            'tab:pink', 'tab:purple', 'tab:cyan', 'aqua', 'azure', 'dodgerblue',
             'firebrick', 'darkred',
             'blueviolet', 'darkviolet',
             'midnightblue', 'blue',
@@ -317,7 +317,7 @@ class SEDPlotter:
                         bbox_inches='tight')
         pass
 
-    def plot_SED(self, method='average'):
+    def plot_SED(self):
         """Create the plot of the SED."""
         if self.moddir is None:
             print('Models directory not provided, skipping SED plot.')
