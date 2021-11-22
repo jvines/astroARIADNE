@@ -10,7 +10,7 @@ broadband filters.
 import astropy.constants as const
 import astropy.units as u
 import pyphot
-import scipy as sp
+import numpy as np
 
 
 def extract_info(magnitudes, errors, filters):
@@ -77,9 +77,9 @@ def mag_to_flux(mag, mag_err, band):
         flux_err = convert_f_nu_to_f_lambda(flux_err, leff)
     else:
         # Get flux in erg / cm2 / s / um
-        f0 = get_band_info(band)
+        f0 = get_zero_flux(band)
         flux = 10 ** (-.4 * mag) * f0
-        flux_err = abs(-.4 * flux * sp.log(10) * mag_err)
+        flux_err = abs(-.4 * flux * np.log(10) * mag_err)
     return flux, flux_err
 
 
@@ -92,15 +92,14 @@ def flux_to_mag(flux, flux_err, band):
     if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band:
         f0 = convert_f_nu_to_f_lambda(3.631e-20, leff)
     else:
-        f0 = get_band_info(band)
-    mag = -2.5 * sp.log10(flux / f0)
-    mag_err = 2.5 * flux_err / (sp.log(10) * flux)
+        f0 = get_zero_flux(band)
+    mag = -2.5 * np.log10(flux / f0)
+    mag_err = 2.5 * flux_err / (np.log(10) * flux)
     return mag, mag_err
 
 
-def get_band_info(band):
+def get_zero_flux(band):
     """Look for the filter information in the pyphot library of filters."""
-    # TODO: rename?
     # Load photometry filter library
     filt = pyphot.get_library()[band]
     # Get Vega zero flux in erg / cm2 / s / um
@@ -130,5 +129,5 @@ def get_bandpass(band):
 def mag_to_flux_AB(mag, mag_err):
     """Calculate flux in erg s-1 cm-2 Hz-1."""
     flux = 10 ** (-.4 * (mag + 48.6))
-    flux_err = abs(-.4 * flux * sp.log(10) * mag_err)
+    flux_err = abs(-.4 * flux * np.log(10) * mag_err)
     return flux, flux_err
