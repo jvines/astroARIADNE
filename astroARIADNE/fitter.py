@@ -3,7 +3,7 @@ import pickle
 import random
 import time
 import warnings
-from multiprocessing import Pool, Process
+from multiprocessing import Pool, Process, set_start_method
 from tqdm import tqdm
 
 import extinction
@@ -39,6 +39,8 @@ except ModuleNotFoundError:
     warnings.warn(
         '(py)MultiNest installation (or libmultinest.dylib) not detected.'
     )
+
+set_start_method('fork')
 
 
 class Fitter:
@@ -1443,6 +1445,7 @@ class Fitter:
                          1, 1, 1,
                          0, 0, 0, 0, 0, 0,
                          0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0,
                          1, 1,
                          0, 0,
                          0, 0,
