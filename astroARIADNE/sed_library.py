@@ -33,16 +33,13 @@ def get_interpolated_flux(temp, logg, z, filts, interpolators):
 
     Parameters
     ----------
-    temp : float
+    temp: float
         The effective temperature.
-
-    logg : float
+    logg: float
         The superficial gravity.
-
-    z : float
+    z: float
         The metallicity.
-
-    filt : str
+    filts: str
         The desired filter.
 
     Returns
@@ -78,14 +75,12 @@ def model_grid(theta, filts, wave, interpolators, use_norm, av_law):
         interpolated fluxes
 
     """
-    model = dict()
     Rv = 3.1  # For extinction.
 
     if use_norm:
         teff, logg, z, norm, Av = theta[:5]
     else:
         teff, logg, z, dist, rad, Av = theta[:6]
-        # dist = (dist * u.pc).to(u.solRad).value
         dist *= 4.435e+7  # Transform from pc to solRad
 
     flux = get_interpolated_flux(teff, logg, z, filts, interpolators)
@@ -116,8 +111,6 @@ def log_likelihood(theta, flux, flux_er, wave, filts, interpolators, use_norm,
     res, ers = get_residuals(theta, flux, flux_er, wave,
                              filts, interpolators, use_norm, av_law)
 
-    # c = np.log(2 * np.pi * ers ** 2)
-    # lnl = (c + (res ** 2 / ers ** 2)).sum()
     lnl = fast_loglik(res, ers)
 
     if not np.isfinite(lnl):
