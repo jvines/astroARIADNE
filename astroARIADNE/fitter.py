@@ -959,6 +959,7 @@ class Fitter:
         log_out_samples = f'{self.out_folder}/best_fit_sample.dat'
         log_out_average = f'{self.out_folder}/best_fit_average.dat'
         prob_out = f'{self.out_folder}/model_probabilities.dat'
+        synth_out = f'{self.out_folder}/synthetic_fluxes.dat'
 
         # Save global evidence of each model.
         out['lnZ'] = avgd['evidences']
@@ -1160,8 +1161,29 @@ class Fitter:
         ###
         probdat = ''
 
+        max_prob = 0
+        max_prob_mod = ''
         for k in avgd['weights'].keys():
+            if avgd['weights'][k] > max_prob:
+                max_prob = avgd['weights'][k]
+                max_prob_mod = k
             probdat += f'{k}_probability\t{avgd["weights"][k]:.4f}\n'
+
+        # Get synthetic mag and fluxes for highest probability model.
+        intp = self.load_interpolator(max_prob_mod)
+        ogteff = avgd['originals'][max_prob_mod]['teff']
+        oglogg = avgd['originals'][max_prob_mod]['logg']
+        ogfeh = avgd['originals'][max_prob_mod]['z']
+        fluxes = np.zeros((len(oglogg), len(filter_names)))
+        for i, t, g, z in zip(range(len(oglogg)), ogteff, oglogg, ogfeh):
+            fluxes[i, :] = get_interpolated_flux(t, g, z, filter_names, intp)
+        synthdat = 'Filter\tFlux\n'
+        for i, filt in enumerate(filter_names):
+            samp = fluxes[:, i]
+            # xx, pdf = estimate_pdf(samp)
+            # cdf = estimate_cdf(samp, hdr=True)
+            b, _, _ = credibility_interval(samp, alpha=1)
+            synthdat += f'{filt}\t{b:.6e}\n'
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
