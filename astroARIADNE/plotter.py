@@ -277,7 +277,7 @@ class SEDPlotter:
                 self.wave, self.flux, self.flux_er,
                 self.bandpass, used_f):
             ax.errorbar(w, fl * w,
-                        xerr=bp, yerr=fe,
+                        xerr=bp, yerr=fe * w,
                         fmt='',
                         ecolor=c,
                         marker=None)
