@@ -115,8 +115,6 @@ class Fitter:
 
     @star.setter
     def star(self, star):
-        # if not isinstance(star, Star) and star is not None:
-        #     InstanceError(star, Star).__raise__()
         self._star = star
 
     @property
@@ -386,45 +384,15 @@ class Fitter:
             for mod in self._bma_models:
                 # We'll assume that if ARIADNE is running in offline mode
                 # Then the star will have > 4000 K
-                if mod.lower() == 'phoenix':
-                    with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pd.read_pickle(intp))
-                if mod.lower() == 'btsettl':
-                    with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
-                        df = DFInterpolator(pd.read_pickle(intp))
-                if mod.lower() == 'btnextgen':
-                    if self.star.temp > 4000:
-                        continue
-                    else:
-                        with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as inp:
-                            df = DFInterpolator(pd.read_pickle(inp))
-                if mod.lower() == 'btcond':
-                    if self.star.temp > 4000:
-                        continue
-                    else:
-                        with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
-                            df = DFInterpolator(pd.read_pickle(intp))
-                if mod.lower() == 'ck04':
-                    if self.star.temp > 4000:
-                        with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                            df = DFInterpolator(pd.read_pickle(intp))
-                    else:
-                        # Warning temp too low for model
-                        continue
-                if mod.lower() == 'kurucz':
-                    if self.star.temp > 4000:
-                        with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                            df = DFInterpolator(pd.read_pickle(intp))
-                    else:
-                        # Warning temp too low for model.
-                        continue
-                # if mod.lower() == 'coelho':
-                #     if self.star.temp > 3500:
-                #         with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                #             df = DFInterpolator(pd.read_pickle(intp))
-                #     else:
-                #         # Warning
-                #         continue
+                if (mod.lower() in ['btcond', 'btnextgen'] and
+                    self.star.temp > 4000) or \
+                        (mod.lower() in ['ck04', 'kurucz'] and
+                         self.star.temp < 4000) or \
+                        (mod.lower() == 'coelho' and self.star.temp < 3500):
+                    continue
+
+                df = self.load_interpolator(mod.lower())
+
                 self._interpolators.append(df)
                 self._grids.append(mod)
             thr = self._threads if self._sequential else len(
@@ -468,8 +436,9 @@ class Fitter:
             defaults['rad'] = st.uniform(loc=0.05, scale=100)
         # Normalization prior setup.
         else:
-            up = 1 / 1e-20
-            defaults['norm'] = st.truncnorm(a=0, b=up, loc=0, scale=1e-15)
+            # up = 1 / 1e-30
+            # defaults['norm'] = st.truncnorm(a=0, b=up, loc=1e-20, scale=1e-10)
+            defaults['norm'] = st.uniform(loc=0, scale=1e-20)
         # Extinction prior setup.
         if self.star.Av == 0.:
             av_idx = 4 if self._norm else 5
@@ -587,33 +556,20 @@ class Fitter:
         if len(self.star.filter_names[self.star.filter_mask]) <= 5:
             print(colored('\t\t\tNOT ENOUGH POINTS TO MAKE THE FIT! !', 'red'))
             return
-        thr = self._threads if self._sequential else len(self._interpolators)
-        # display('Bayesian Model Averaging', self.star, self._nlive,
-        #         self._dlogz, self.ndim, self._bound, self._sample,
-        #         thr, self._dynamic)
-        if not self._sequential:
-            jobs = []
-            n_threads = len(self._interpolators)
-            for intp, gr in zip(self._interpolators, self._grids):
-                p = Process(target=self._bma_dynesty, args=([intp, gr]))
-                jobs.append(p)
-                p.start()
-            for p in jobs:
-                p.join()
-        else:
-            global interpolator
-            for intp, gr in zip(self._interpolators, self._grids):
-                interpolator = intp
-                self.grid = gr
-                out_file = self.out_folder + '/' + gr + '_out.pkl'
-                print('\t\t\tFITTING MODEL : ' + gr)
-                try:
-                    self.fit_dynesty(out_file=out_file)
-                except ValueError as e:
-                    dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
-                    pickle.dump(self.sampler.results, open(dump_out, 'wb'))
-                    DynestyError(dump_out, gr, e).__raise__()
-                    continue
+
+        global interpolator
+        for intp, gr in zip(self._interpolators, self._grids):
+            interpolator = intp
+            self.grid = gr
+            out_file = self.out_folder + '/' + gr + '_out.pkl'
+            print('\t\t\tFITTING MODEL : ' + gr)
+            try:
+                self.fit_dynesty(out_file=out_file)
+            except ValueError as e:
+                dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
+                pickle.dump(self.sampler.results, open(dump_out, 'wb'))
+                DynestyError(dump_out, gr, e).__raise__()
+                continue
 
         # Now that the fitting finished, read the outputs and average
         # the posteriors
@@ -776,20 +732,20 @@ class Fitter:
         Saves a dictionary as a pickle file. The dictionary contains the
         following:
 
-        lnZ : The global evidence.
-        lnZerr : The global evidence error.
-        posterior_samples : A dictionary containing the samples of each
+        lnZ: The global evidence.
+        lnZerr: The global evidence error.
+        posterior_samples: A dictionary containing the samples of each
                             parameter (even if it's fixed), the evidence,
                             log likelihood, the prior, and the posterior
                             for each set of sampled parameters.
-        fixed : An array with the fixed parameter values.
+        fixed: An array with the fixed parameter values.
         coordinator : An array with the status of each parameter (1 for fixed
                       0 for free)
-        best_fit : The best fit is chosen to be the median of each sample.
+        best_fit: The best fit is chosen to be the median of each sample.
                    It also includes the log likelihood of the best fit.
-        star : The Star object containing the information of the star (name,
+        star: The Star object containing the information of the star (name,
                magnitudes, fluxes, coordinates, etc)
-        engine : The fitting engine used (i.e. MultiNest or Dynesty)
+        engine: The fitting engine used (i.e. MultiNest or Dynesty)
 
         Also creates a log file with the best fit parameters and 1 sigma
         error bars.
@@ -806,7 +762,6 @@ class Fitter:
         else:
             lnz, lnzer, posterior_samples = self.dynesty_results(results)
 
-        n = int(self.star.used_filters.sum())
         mask = self.star.filter_mask
 
         # Save global evidence
@@ -876,7 +831,6 @@ class Fitter:
             out['posterior_samples']['loglike'][i] = log_likelihood(
                 theta, flux, flux_er, wave, filts, interpolator, self.norm,
                 av_law)
-        lnlike = out['posterior_samples']['loglike']
 
         # Best fit
         # The logic is as follows:
@@ -1389,15 +1343,40 @@ class Fitter:
         ad = (diameter / (dist * u.pc.to(u.solRad))) * u.rad.to(u.marcsec)
         return ad
 
+    @staticmethod
+    def load_interpolator(model):
+        """Load a DFInterpolator."""
+        if model.lower() == 'phoenix':
+            with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'btsettl':
+            with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'btnextgen':
+            with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as inp:
+                df = DFInterpolator(pd.read_pickle(inp))
+        elif model.lower() == 'btcond':
+            with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'ck04':
+            with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'kurucz':
+            with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'coelho':
+            with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        return df
+
     def estimate_age(self, bf, unc, c='white'):
         """Estimate age using MIST isochrones.
 
         Parameters
         ----------
-        bf : dict
+        bf: dict
             A dictionary with the best fit parameters.
-
-        unc : dict
+        unc: dict
             A dictionary with the uncertainties.
 
         """
