@@ -433,6 +433,10 @@ class SEDPlotter:
             axis='both', which='major',
             labelsize=self.tick_labelsize
         )
+        ax.tick_params(
+            axis='both', which='minor',
+            labelsize=self.tick_labelsize
+        )
         ax_r.tick_params(
             axis='both', which='major',
             labelsize=self.tick_labelsize
