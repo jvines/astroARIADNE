@@ -302,6 +302,10 @@ class SEDPlotter:
             axis='both', which='major',
             labelsize=self.tick_labelsize
         )
+        ax.tick_params(
+            axis='both', which='minor',
+            labelsize=self.tick_labelsize
+        )
         ax.set_xticks(np.linspace(1, 10, 10))
         ax.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
         ax.set_xlim([0.1, 6])
