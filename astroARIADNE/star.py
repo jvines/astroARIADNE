@@ -10,7 +10,6 @@ from dustmaps.sfd import SFDQuery
 from dustmaps.planck import PlanckQuery, PlanckGNILCQuery
 from dustmaps.lenz2017 import Lenz2017Query
 from dustmaps.bayestar import BayestarQuery
-from scipy.interpolate import RegularGridInterpolator
 from termcolor import colored
 
 from .config import gridsdir, filter_names, colors, iso_mask, iso_bands
@@ -44,158 +43,79 @@ class Star:
 
     Parameters
     ----------
-    starname : str
+    starname: str
         The name of the object. If ra and dec aren't provided nor is a
         list of magnitudes with associated uncertainties provided, the search
         for stellar magnitudes will be done using the object's name instead.
-
-    ra : float
+    ra: float
         RA coordinate of the object in degrees.
-
-    dec : float
+    dec: float
         DEC coordinate of the object in degrees.
-
-    g_id : int, optional
+    g_id: int, optional
         The Gaia DR2 identifier.
-
-    get_plx : bool, optional
-        Set to True in order to query Gaia DR2 for the stellar parallax.
-
-    plx : float, optional
+    plx: float, optional
         The parallax of the star in case no internet connection is available
         or if no parallax can be found on Gaia DR2.
-
-    plx_e : float, optional
+    plx_e: float, optional
         The error on the parallax.
-
-    get_rad : bool, optional
-        Set to True in order to query Gaia DR2 for the stellar radius, if
-        available.
-
-    rad : float, optional
+    rad: float, optional
         The radius of the star in case no internet connection is available
         or if no radius can be found on Gaia DR2.
-
-    rad_e : float, optional
+    rad_e: float, optional
         The error on the stellar radius.
-
-    get_temp : bool, optional
-        Set to True in order to query Gaia DR2 for the effective temperature,
-        if available.
-
-    temp : float, optional
+    temp: float, optional
         The effective temperature of the star in case no internet connection
         is available or if no effective temperature can be found on Gaia DR2.
-
-    temp_e : float, optional
+    temp_e: float, optional
         The error on the effective temperature.
-
-    get_lum : bool, optional
-        Set to True in order to query Gaia DR2 for the stellar luminosity,
-        if available.
-
-    lum : float, optional
+    lum: float, optional
         The stellar luminosity in case no internet connection
         is available or if no luminosity can be found on Gaia DR2.
-
-    lum_e : float, optional
+    lum_e: float, optional
         The error on the stellar luminosity.
-
-    dist : float, optional
+    dist: float, optional
         The distance in parsec.
-
-    dist_e : float, optional
+    dist_e: float, optional
         The error on the distance.
-
-    mag_dict : dictionary, optional
+    mag_dict: dictionary, optional
         A dictionary with the filter names as keys (names must correspond to
         those in the filter_names attribute) and with a tuple containing the
         magnitude and error for that filter as the value. Provide in case no
         internet connection is available.
-
-    offline : bool
+    offline: bool
         If False it overrides the coordinate search entirely.
-
-    verbose : bool, optional
+    verbose: bool, optional
         Set to False to suppress printed outputs.
-
-    ignore : list, optional
+    ignore: list, optional
         A list with the catalogs to ignore for whatever reason.
 
     Attributes
     ----------
-    catalogs : dict
-        A dictionary with the Vizier catalogs of different surveys
-        used to retrieve stellar magnitudes.
-
-    full_grid : ndarray
+    full_grid: ndarray
         The full grid of fluxes.
-
-    teff : ndarray
+    teff: ndarray
         The effective temperature axis of the flux grid.
-
-    logg : ndarray
+    logg: ndarray
         The gravity axis of the flux grid
-
-    z : ndarray, float
+    z: ndarray, float
         If fixed_z is False, then z is the metallicity axis of the flux grid.
         Otherwise z has the same value as fixed_z
-
-    starname : str
+    starname: str
         The name of the object.
-
-    ra : float
+    ra: float
         RA coordinate of the object.
-
-    dec : float
+    dec: float
         DEC coordinate of the object.
-
-    filters : ndarray
-        An array containing the filters or bands for which there is
-        archival photometry
-
-    magnitudes : ndarray
-        An array containing the archival magnitudes for the object.
-
-    errors : ndarray
-        An array containing the uncertainties in the magnitudes.
-
-    wave : ndarray
+    wave: ndarray
         An array containing the wavelengths associated to the different
         filters retrieved.
-
-    flux : ndarray
+    flux: ndarray
         An array containing the fluxes of the different retrieved magnitudes.
 
-    grid : ndarray
-        An array containing a grid with teff, logg and z if it's not fixed
-        to be used for interpolation later.
-
     """
+    filter_names = filter_names
 
-    # pyphot filter names
-
-    filter_names = np.array([
-        '2MASS_H', '2MASS_J', '2MASS_Ks',
-        'GROUND_COUSINS_I', 'GROUND_COUSINS_R',
-        'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
-        'TYCHO_B_MvB', 'TYCHO_V_MvB',
-        'STROMGREN_b', 'STROMGREN_u', 'STROMGREN_v', 'STROMGREN_y',
-        'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
-        'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y', 'PS1_z',
-        'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
-        'SkyMapper_u', 'SkyMapper_v', 'SkyMapper_g', 'SkyMapper_r',
-        'SkyMapper_i', 'SkyMapper_z',
-        'WISE_RSR_W1', 'WISE_RSR_W2',
-        'GALEX_FUV', 'GALEX_NUV',
-        'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
-        'NGTS_I', 'TESS', 'KEPLER_Kp'
-    ])
-
-    colors = [
-        'red', 'green', 'blue', 'yellow',
-        'grey', 'magenta', 'cyan', 'white'
-    ]
+    colors = colors
 
     dustmaps = {
         'SFD': SFDQuery,
@@ -206,12 +126,9 @@ class Star:
     }
 
     def __init__(self, starname, ra, dec, g_id=None,
-                 plx=None, plx_e=None,
-                 rad=None, rad_e=None,
-                 temp=None, temp_e=None,
-                 lum=None, lum_e=None,
-                 dist=None, dist_e=None,
-                 Av=None, Av_e=None,
+                 plx=None, plx_e=None, rad=None, rad_e=None,
+                 temp=None, temp_e=None, lum=None, lum_e=None,
+                 dist=None, dist_e=None, Av=None, Av_e=None,
                  offline=False, mag_dict=None, verbose=True, ignore=None,
                  dustmap='SFD'):
         """See class docstring."""
@@ -344,7 +261,6 @@ class Star:
                 ebv = dmap(coords)
                 self.Av = ebv * 2.742
             elif dustmap == 'Bayestar':
-                # import pdb; pdb.set_trace()
                 ebvs = dmap(coords, mode='percentile', pct=[15, 50, 84])
                 if np.any(np.isnan(ebvs)):
                     StarWarning(None, 2).warn()
@@ -429,61 +345,6 @@ class Star:
         self.z = self.full_grid[:, 2]
         if self.verbose:
             print('Grid ' + model + ' loaded.')
-
-    def interpolate(self, out_name):
-        """Create interpolation grids for later evaluation."""
-        raise DeprecationWarning()
-        if self.verbose:
-            print('Interpolating grids for filters:')
-        interpolators = np.zeros(self.filter_names.shape[0], dtype=object)
-        ut = np.unique(self.full_grid[:, 0])
-        ug = np.unique(self.full_grid[:, 1])
-        uz = np.unique(self.full_grid[:, 2])
-        for ii, f in enumerate(self.filter_names):
-            cube = np.zeros((ut.shape[0], ug.shape[0], uz.shape[0]))
-            if self.verbose:
-                print(f)
-            for i, t in enumerate(ut):
-                t_idx = self.full_grid[:, 0] == t
-                for j, g in enumerate(ug):
-                    g_idx = self.full_grid[:, 1] == g
-                    for k, z in enumerate(uz):
-                        z_idx = self.full_grid[:, 2] == z
-                        flx = self.full_grid[:, 3 + ii][t_idx * g_idx * z_idx]
-                        insert = flx[0] if len(flx) == 1 else 0
-                        cube[i, j, k] = insert
-            filt_idx = np.where(f == self.filter_names)[0]
-            interpolators[filt_idx] = RegularGridInterpolator(
-                (ut, ug, uz), cube, bounds_error=False)
-        with open(out_name + '.pkl', 'wb') as jar:
-            pickle.dump(interpolators, jar)
-
-    def get_interpolated_flux(self, temp, logg, z, filt):
-        """Interpolate the grid of fluxes in a given teff, logg and z.
-
-        Parameters
-        ----------
-        temp : float
-            The effective temperature.
-
-        logg : float
-            The superficial gravity.
-
-        z : float
-            The metallicity.
-
-        filt : str
-            The desired filt.
-
-        Returns
-        -------
-        flux : float
-            The interpolated flux at temp, logg, z for filt filt.
-
-        """
-        values = (temp, logg, z) if not self.fixed_z else (temp, logg)
-        flux = self.interpolators[filt](values)
-        return flux
 
     def calculate_distance(self):
         """Calculate distance using parallax in solar radii."""
@@ -618,4 +479,3 @@ class Star:
             self.flux[filt_idx] = flux[k]
             self.flux_er[filt_idx] = flux_er[k]
             self.bandpass[filt_idx] = bandpass[k]
-
