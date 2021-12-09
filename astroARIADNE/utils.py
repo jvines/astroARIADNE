@@ -381,7 +381,6 @@ def execution_time(start):
     days, rest1 = rest0 // 86400, rest0 % 86400
     hours, rest2 = rest1 // 3600, rest1 % 3600
     minutes, seconds = rest2 // 60, rest2 % 60
-    elapsed = ''
     if weeks == 0:
         if days == 0:
             if hours == 0:
