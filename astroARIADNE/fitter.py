@@ -1224,6 +1224,8 @@ class Fitter:
             logfile.write(logdat_average)
         with open(prob_out, 'w') as logfile:
             logfile.write(probdat)
+        with open(synth_out, 'w') as logfile:
+            logfile.write(synthdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
 
