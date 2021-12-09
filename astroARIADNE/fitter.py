@@ -1356,7 +1356,9 @@ class Fitter:
         norm = samples
         # Create a synthetic distribution for distance.
         # N = (R / D) ** 2
-        d = st.norm(loc=dist, scale=dist_e).rvs(size=norm.shape[0])
+        b, a = (np.inf - dist) / dist_e, (0 - dist) / dist_e
+        d = st.truncnorm(loc=dist, scale=dist_e, a=a, b=b).rvs(
+            size=norm.shape[0])
         n = np.sqrt(norm)
         r = n * d  # This is in pc
         r *= u.pc.to(u.solRad)  # Transform to Solar radii
