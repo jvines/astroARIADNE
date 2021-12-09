@@ -16,7 +16,8 @@ from astropy.constants import sigma_sb
 from isochrones.interp import DFInterpolator
 from termcolor import colored
 
-from .config import filesdir, gridsdir, priorsdir
+from .config import filesdir, gridsdir, priorsdir, filter_names, colors, \
+    iso_mask, iso_bands
 from .error import *
 from .isochrone import estimate
 from .phot_utils import *
@@ -86,10 +87,7 @@ class Fitter:
 
     """
 
-    colors = [
-        'red', 'green', 'blue', 'yellow',
-        'grey', 'magenta', 'cyan', 'white'
-    ]
+    colors = colors
 
     def __init__(self):
 
@@ -1437,30 +1435,10 @@ class Fitter:
         if self.star.lum != 0 and self.star.lum_e != 0:
             params['logL'] = (np.log10(bf['lum']),
                               abs(np.log10(max(unc['lum']))))
-        mask = np.array([1, 1, 1,
-                         0, 0,
-                         1, 1, 1,
-                         0, 0,
-                         0, 0, 0, 0,
-                         1, 1, 1,
-                         0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0,
-                         1, 1,
-                         0, 0,
-                         0, 0,
-                         0, 1, 0])
-        mags = self.star.mags[mask == 1]
-        mags_e = self.star.mag_errs[mask == 1]
-        bands = [
-            'H', 'J', 'K',
-            'U', 'V', 'B',
-            'G', 'RP', 'BP',
-            'W1', 'W2',
-            'TESS'
-        ]
+        mags = self.star.mags[iso_mask == 1]
+        mags_e = self.star.mag_errs[iso_mask == 1]
         used_bands = []
-        for m, e, b in zip(mags, mags_e, bands):
+        for m, e, b in zip(mags, mags_e, iso_bands):
             if m != 0:
                 params[b] = (m, e)
                 used_bands.append(b)

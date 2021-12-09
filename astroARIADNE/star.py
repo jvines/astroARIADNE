@@ -13,7 +13,7 @@ from dustmaps.bayestar import BayestarQuery
 from scipy.interpolate import RegularGridInterpolator
 from termcolor import colored
 
-from .config import gridsdir
+from .config import gridsdir, filter_names, colors, iso_mask, iso_bands
 from .isochrone import estimate
 from .librarian import Librarian
 from .error import StarWarning
@@ -555,30 +555,10 @@ class Star:
         if self.get_rad and self.rad is not None and self.rad != 0:
             params['radius'] = (self.rad, self.rad_e)
         params['parallax'] = (self.plx, self.plx_e)
-        mask = np.array([1, 1, 1,
-                         0, 0,
-                         1, 1, 1,
-                         0, 0,
-                         0, 0, 0, 0,
-                         1, 1, 1,
-                         0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0,
-                         1, 1,
-                         0, 0,
-                         0, 0,
-                         0, 1, 0])
-        mags = self.mags[mask == 1]
-        mags_e = self.mag_errs[mask == 1]
-        bands = [
-            'H', 'J', 'K',
-            'U', 'V', 'B',
-            'G', 'RP', 'BP',
-            'W1', 'W2',
-            'TESS'
-        ]
+        mags = self.mags[iso_mask == 1]
+        mags_e = self.mag_errs[iso_mask == 1]
         used_bands = []
-        for m, e, b in zip(mags, mags_e, bands):
+        for m, e, b in zip(mags, mags_e, iso_bands):
             if m != 0:
                 params[b] = (m, e)
                 used_bands.append(b)
