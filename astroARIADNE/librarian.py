@@ -631,6 +631,7 @@ class Librarian:
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
         """Retrieve Bailer-Jones DR2 distance."""
+        import pdb; pdb.set_trace()
         cat = Vizier.query_region(
             SkyCoord(
                 ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
