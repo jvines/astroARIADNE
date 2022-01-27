@@ -1,5 +1,5 @@
 # Allowed filters in ARIADNE
-**ARIADNE** uses pyphot (<https://mfouesneau.github.io/docs/pyphot/>) as an interface for photometry, and thus we use the same filter naming convention \<facility\>\<instrument\>\<filter\>
+**ARIADNE** uses pyphot (<https://mfouesneau.github.io/pyphot/libcontent.html>) as an interface for photometry, and thus we use the same filter naming convention \<facility\>\<instrument\>\<filter\>
 
 The allowed filters are:
 
