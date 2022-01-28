@@ -13,7 +13,6 @@ from astroquery.mast import Catalogs
 from astroquery.vizier import Vizier
 from astroquery.xmatch import XMatch
 from regions import CircleSkyRegion
-from tqdm import tqdm
 
 from .error import CatalogWarning
 from .config import filter_names
@@ -631,11 +630,10 @@ class Librarian:
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
         """Retrieve Bailer-Jones DR2 distance."""
-        import pdb; pdb.set_trace()
         cat = Vizier.query_region(
             SkyCoord(
                 ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=radius, catalog='I/347/gaia2dis'
+            ), radius=radius
         )['I/347/gaia2dis']
         cat.sort('_r')
         idx = np.where(cat['Source'] == g_id)[0]
