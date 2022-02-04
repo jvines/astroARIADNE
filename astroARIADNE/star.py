@@ -374,7 +374,7 @@ class Star:
             print('\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers))
             print('\t\t----------------\t---------\t-----------')
             for i in range(master.shape[0]):
-                printer = '\t\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
+                printer = '\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
                 print(printer.format(*master[i]))
         print('')
 
@@ -449,6 +449,7 @@ class Star:
         self.filter_mask = np.where(self.used_filters == 1)[0]
 
         self.__reload_fluxes()
+        print(colored(f'\t\tAdded {filt} {mag} +/- {err}!!', 'yellow'))
         pass
 
     def remove_mag(self, filt):
