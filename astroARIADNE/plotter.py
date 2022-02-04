@@ -783,8 +783,23 @@ class SEDPlotter:
                 kde = gaussian_kde(self.out['weighted_average'][param])
                 xx = np.linspace(bins[0], bins[-1], 300)
                 ax1.plot(xx, kde(xx), color='tab:pink', lw=2, alpha=1, ls='-.')
-                if param == 'z':
-                    param = '[Fe/H]'
+                lab = 'fix this'
+                if param == 'teff':
+                    lab = 'Teff (K)'
+                elif param == 'rad':
+                    lab = r'R$_*$ (R$_\odot$)'
+                elif param == 'dist':
+                    lab = 'D (pc)'
+                elif param == 'logg':
+                    lab = 'Log g'
+                elif param == 'Av':
+                    lab = r'A$_{\rm V}$ (mag)'
+                elif param == 'z':
+                    lab = '[Fe/H]'
+                elif param == 'Age':
+                    lab = 'Age (Gyr)'
+                elif param == 'Mass':
+                    lab = r'Mass (M$_\odot$)'
                 # Normal
                 ax1.set_ylabel('PDF',
                                fontsize=self.fontsize,
@@ -797,7 +812,7 @@ class SEDPlotter:
                                )
                 axes = [ax1, ax2]
                 for ax in axes:
-                    ax.set_xlabel(param,
+                    ax.set_xlabel(lab,
                                   fontsize=self.fontsize,
                                   fontname=self.fontname
                                   )
@@ -812,7 +827,7 @@ class SEDPlotter:
                     )
                     ax.legend(loc=0, prop={'size': 16})
 
-                if param == '[Fe/H]':
+                if param == 'z':
                     param = 'Fe_H'
                 if self.png:
                     f1.savefig(self.hist_out + '/' + param + '.png',
