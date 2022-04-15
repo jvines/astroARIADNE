@@ -117,6 +117,43 @@ archivePrefix = "arXiv",
   adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
 ```
+
+### Isochrones
+
+```
+@MISC{isochrones,
+       author = {{Morton}, Timothy D.},
+        title = "{isochrones: Stellar model grid package}",
+     keywords = {Software},
+         year = "2015",
+        month = "Mar",
+          eid = {ascl:1503.010},
+        pages = {ascl:1503.010},
+archivePrefix = {ascl},
+       eprint = {1503.010},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2015ascl.soft03010M},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+
+@ARTICLE{MIST,
+       author = {{Dotter}, Aaron},
+        title = "{MESA Isochrones and Stellar Tracks (MIST) 0: Methods for the Construction of Stellar Isochrones}",
+      journal = {\apjs},
+     keywords = {methods: numerical, stars: evolution, Astrophysics - Solar and Stellar Astrophysics, Astrophysics - Instrumentation and Methods for Astrophysics},
+         year = "2016",
+        month = "Jan",
+       volume = {222},
+       number = {1},
+          eid = {8},
+        pages = {8},
+          doi = {10.3847/0067-0049/222/1/8},
+archivePrefix = {arXiv},
+       eprint = {1601.05144},
+ primaryClass = {astro-ph.SR},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2016ApJS..222....8D},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
 ## Models
 ### Phoenix v2
 
