@@ -1,6 +1,9 @@
 """plot_utils module for plotting SEDs."""
 
+__all__ = ['SEDPlotter']
+
 import glob
+import pickle
 from random import choice
 
 import matplotlib.pyplot as plt

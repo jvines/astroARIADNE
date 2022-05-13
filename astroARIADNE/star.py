@@ -1,6 +1,7 @@
 """Star.py contains the Star class which contains the data regarding a star."""
 
-import pickle
+__all__ = ['Star']
+
 import random
 
 import astropy.units as u

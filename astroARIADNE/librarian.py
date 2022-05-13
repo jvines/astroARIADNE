@@ -1,5 +1,8 @@
 # @auto-fold regex /^\s*if/ /^\s*else/ /^\s*elif/ /^\s*def/
 """Helper class to look up broadband photometry and stellar parameters."""
+
+__all__ = ['Librarian']
+
 import os
 import sys
 import warnings
