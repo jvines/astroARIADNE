@@ -19,7 +19,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
 from scipy.optimize import curve_fit
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, norm
 
 import corner
 from dynesty import plotting as dyplot
@@ -165,6 +165,10 @@ class SEDPlotter:
             errs = self.star.flux_er[mask]
             filters = self.star.filter_names[mask]
             wave = self.star.wave[mask]
+
+            irx_mask = self.star.irx_filter_mask
+            irx_filt = self.star.filter_names[irx_mask]
+            irx_wave = self.star.wave[irx_mask]
             for filt, flx, flx_e in zip(filters, flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = np.append(self.order, p_)
@@ -206,12 +210,20 @@ class SEDPlotter:
             model_average = model_grid(theta_average, filters, wave,
                                        self.interpolator, self.norm,
                                        self.av_law)
+            irx_model_sam = model_grid(theta_samples, irx_filt, irx_wave,
+                                       self.interpolator, self.norm,
+                                       self.av_law)
+            irx_model_avg = model_grid(theta_average, irx_filt, irx_wave,
+                                       self.interpolator, self.norm,
+                                       self.av_law)
             if method == 'averaged':
                 self.theta = theta_average
                 self.model = model_average
+                self.irx_model = irx_model_avg
             elif method == 'samples':
                 self.theta = theta_samples
                 self.model = model_samples
+                self.irx_model = irx_model_sam
 
             # Get archival fluxes.
             self.__extract_info()
@@ -245,6 +257,29 @@ class SEDPlotter:
         self.flux_er = np.array(self.flux_er)
         self.wave = np.array(self.wave)
         self.bandpass = np.array(self.bandpass).T
+        # Do the same for IR bandpasses
+        self.irx_flux = []
+        self.irx_flux_er = []
+        self.irx_wave = []
+        self.irx_bandpass = []
+
+        for i, f in zip(self.star.irx_used_filters, self.star.flux):
+            if i:
+                self.irx_flux.append(f)
+        for i, e in zip(self.star.irx_used_filters, self.star.flux_er):
+            if i:
+                self.irx_flux_er.append(e)
+        for i, w in zip(self.star.irx_used_filters, self.star.wave):
+            if i:
+                self.irx_wave.append(w)
+        for i, bp in zip(self.star.irx_used_filters, self.star.bandpass):
+            if i:
+                self.irx_bandpass.append(bp)
+
+        self.irx_flux = np.array(self.irx_flux)
+        self.irx_flux_er = np.array(self.irx_flux_er)
+        self.irx_wave = np.array(self.irx_wave)
+        self.irx_bandpass = np.array(self.irx_bandpass).T
 
     def plot_SED_no_model(self, s=None):
         """Plot raw photometry."""
@@ -324,7 +359,7 @@ class SEDPlotter:
                         bbox_inches='tight')
         pass
 
-    def plot_SED(self):
+    def plot_SED(self, ir_excess=False):
         """Create the plot of the SED."""
         if self.moddir is None:
             print('Models directory not provided, skipping SED plot.')
@@ -333,6 +368,9 @@ class SEDPlotter:
         # Get plot ylims.
         ymin = (self.flux * self.wave).min()
         ymax = (self.flux * self.wave).max()
+
+        if ir_excess:
+            ymin = (self.irx_model * self.irx_wave).min()
 
         n_filt = self.star.used_filters.sum()
         n_pars = int(len(self.theta) - n_filt)
@@ -365,57 +403,69 @@ class SEDPlotter:
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
 
-        self.SED(ax)
+        self.SED(ax, ir_excess=ir_excess)
 
         # Model plot
         ax.errorbar(self.wave, self.flux * self.wave,
                     xerr=self.bandpass, yerr=errors,
-                    fmt=',',
-                    ecolor=self.error_color,
-                    zorder=0,
+                    fmt=',', ecolor=self.error_color, zorder=0,
                     marker=None)
-
         ax.scatter(self.wave, self.flux * self.wave,
-                   edgecolors='black',
-                   marker=self.marker,
-                   c=self.marker_colors,
-                   s=self.scatter_size, zorder=1,
-                   alpha=self.scatter_alpha)
-
+                   edgecolors='black', marker=self.marker, c=self.marker_colors,
+                   s=self.scatter_size, zorder=1, alpha=self.scatter_alpha)
         ax.scatter(self.wave, self.model * self.wave,
                    marker=self.marker_model,
-                   edgecolors=self.marker_colors_model,
-                   s=self.scatter_size,
-                   facecolor='none', zorder=3,
-                   lw=3)
+                   edgecolors=self.marker_colors_model, s=self.scatter_size,
+                   facecolor='none', zorder=3, lw=3)
+
+        if ir_excess:
+            ax.errorbar(self.irx_wave, self.irx_flux * self.irx_wave,
+                        xerr=self.irx_bandpass, yerr=self.irx_flux_er,
+                        fmt=',', ecolor=self.irx_error_color, zorder=0,
+                        marker=None)
+            ax.scatter(self.irx_wave, self.irx_flux * self.irx_wave,
+                       edgecolors='black', marker=self.marker,
+                       c=self.marker_colors_irx, s=self.scatter_size, zorder=1,
+                       alpha=self.scatter_alpha)
+            ax.scatter(self.irx_wave, self.irx_model * self.irx_wave,
+                       marker=self.marker_model,
+                       edgecolors=self.marker_colors_model_irx,
+                       s=self.scatter_size, facecolor='none', zorder=3, lw=3)
 
         # Residual plot
         ax_r.axhline(y=0, lw=2, ls='--', c='k', alpha=.7)
 
         ax_r.errorbar(self.wave, np.zeros(self.wave.shape[0]),
                       xerr=self.bandpass, yerr=self.flux_er,
-                      fmt=',',
-                      ecolor=self.error_color,
-                      marker=None)
+                      fmt=',', ecolor=self.error_color, marker=None)
         ax_r.scatter(self.wave, np.zeros(self.wave.shape[0]),
-                     edgecolors='black',
-                     marker=self.marker,
-                     c=self.marker_colors,
-                     s=self.scatter_size,
+                     edgecolors='black', marker=self.marker,
+                     c=self.marker_colors, s=self.scatter_size,
                      alpha=self.scatter_alpha)
         ax_r.scatter(self.wave, norm_res,
                      marker=self.marker_model,
-                     edgecolors=self.marker_colors_model,
-                     s=self.scatter_size,
-                     facecolor='none',
-                     lw=3,
-                     zorder=10)
+                     edgecolors=self.marker_colors_model, s=self.scatter_size,
+                     facecolor='none', lw=3, zorder=10)
+
+        if ir_excess:
+            irx_res = (self.irx_flux - self.irx_model) / self.irx_flux_er
+            ax_r.errorbar(self.irx_wave, np.zeros(self.irx_wave.shape[0]),
+                          xerr=self.irx_bandpass, yerr=self.irx_flux_er,
+                          fmt=',', ecolor=self.irx_error_color, marker=None)
+            ax_r.scatter(self.irx_wave, np.zeros(self.irx_wave.shape[0]),
+                         edgecolors='black', marker=self.marker,
+                         c=self.marker_colors_irx, s=self.scatter_size,
+                         alpha=self.scatter_alpha)
+            ax_r.scatter(self.irx_wave, irx_res,
+                         marker=self.marker_model,
+                         edgecolors=self.marker_colors_model_irx,
+                         s=self.scatter_size, facecolor='none', lw=3, zorder=10)
 
         # Formatting
         res_std = norm_res.std()
-        ax.set_ylim([ymin * 0.8, ymax * 1.2])
+        ax.set_ylim([ymin * 0.6, ymax * 1.5])
         # ax_r.set_ylim([-5, 5])
-        ax_r.set_ylim([-4 * res_std, 4 * res_std])
+        ax_r.set_ylim([-5 * res_std, 5 * res_std])
         ax.set_xscale('log', nonposx='clip')
         ax.set_yscale('log', nonposy='clip')
         ax_r.set_xscale('log', nonposx='clip')
@@ -444,22 +494,31 @@ class SEDPlotter:
             axis='both', which='major',
             labelsize=self.tick_labelsize
         )
-        ax_r.set_xticks(np.linspace(1, 10, 10))
+        xticks = np.linspace(1, 10, 10)
+        if ir_excess:
+            xticks = [1, 3, 5, 10, 20, 50, 100, 250]
+        ax_r.set_xticks(xticks)
         ax_r.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
-        ax.set_xticks(np.linspace(1, 10, 10))
+        ax.set_xticks(xticks)
         ax.get_xaxis().set_major_formatter(ticker.NullFormatter())
         ylocmin = ticker.LinearLocator(numticks=4)
 
         ax_r.yaxis.set_minor_locator(ylocmin)
         ax_r.yaxis.set_minor_formatter(ticker.NullFormatter())
 
+        xlims1 = [0.125, 6]
+        xlims2 = [0.25, 6]
+        if ir_excess:
+            xlims1 = [0.125, 250]
+            xlims2 = [0.25, 250]
+
         if 'GALEX_FUV' in self.star.filter_names[self.star.filter_mask] or \
                 'GALEX_NUV' in self.star.filter_names[self.star.filter_mask]:
-            ax.set_xlim([0.125, 6])
-            ax_r.set_xlim([0.125, 6])
+            ax.set_xlim(xlims1)
+            ax_r.set_xlim(xlims1)
         else:
-            ax.set_xlim([0.25, 6])
-            ax_r.set_xlim([0.25, 6])
+            ax.set_xlim(xlims2)
+            ax_r.set_xlim(xlims2)
 
         labels = [item.get_text() for item in ax.get_xticklabels()]
 
@@ -483,7 +542,7 @@ class SEDPlotter:
                        header='wavelength(mu m) wave*flux(erg cm-2 s-2)')
         pass
 
-    def SED(self, ax):
+    def SED(self, ax, ir_excess=False):
         """Plot the SED model."""
         Rv = 3.1  # For extinction.
         if not self.norm:
@@ -502,6 +561,8 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
+            if ir_excess:
+                upper_lim = wave < wave[-1]
 
             flux = self.fetch_Phoenix()
 
@@ -527,6 +588,8 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
+            if ir_excess:
+                upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
             flux = flux[lower_lim * upper_lim]
@@ -548,6 +611,8 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
+            if ir_excess:
+                upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
             flux = flux[lower_lim * upper_lim]
@@ -569,6 +634,8 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
+            if ir_excess:
+                upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
             flux = flux[lower_lim * upper_lim]
@@ -590,6 +657,8 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
+            if ir_excess:
+                upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
             flux = flux[lower_lim * upper_lim]
@@ -603,6 +672,8 @@ class SEDPlotter:
 
             lower_lim = 0.15 < wave
             upper_lim = wave < 4.629296073126975
+            if ir_excess:
+                upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
             flux = flux[lower_lim * upper_lim]
