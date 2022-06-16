@@ -16,53 +16,48 @@ try:
 except KeyError:
     modelsdir = None
 
-# pyphot filter names
+# pyphot filter names.
 filter_names = np.array([
-        '2MASS_H', '2MASS_J', '2MASS_Ks',
-        'GROUND_COUSINS_I', 'GROUND_COUSINS_R',
-        'GROUND_JOHNSON_U', 'GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
-        'TYCHO_B_MvB', 'TYCHO_V_MvB',
-        'STROMGREN_b', 'STROMGREN_u', 'STROMGREN_v', 'STROMGREN_y',
-        'GaiaDR2v2_G', 'GaiaDR2v2_RP', 'GaiaDR2v2_BP',
-        'PS1_g', 'PS1_i', 'PS1_r', 'PS1_w', 'PS1_y', 'PS1_z',
-        'SDSS_g', 'SDSS_i', 'SDSS_r', 'SDSS_u', 'SDSS_z',
-        'SkyMapper_u', 'SkyMapper_v', 'SkyMapper_g', 'SkyMapper_r',
-        'SkyMapper_i', 'SkyMapper_z',
-        'WISE_RSR_W1', 'WISE_RSR_W2',
-        'GALEX_FUV', 'GALEX_NUV',
-        'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
-        'NGTS_I', 'TESS', 'KEPLER_Kp'
-    ])
+       'GALEX_FUV', 'GALEX_NUV', 'STROMGREN_u', 'SkyMapper_u', 'SDSS_u',
+       'GROUND_JOHNSON_U', 'SkyMapper_v', 'STROMGREN_v', 'TYCHO_B_MvB',
+       'GROUND_JOHNSON_B', 'STROMGREN_b', 'SDSS_g', 'PS1_g',
+       'SkyMapper_g', 'GaiaDR2v2_BP', 'TYCHO_V_MvB', 'STROMGREN_y',
+       'GROUND_JOHNSON_V', 'SkyMapper_r', 'SDSS_r', 'PS1_r', 'PS1_w',
+       'KEPLER_Kp', 'GaiaDR2v2_G', 'GROUND_COUSINS_R', 'NGTS_I', 'SDSS_i',
+       'PS1_i', 'SkyMapper_i', 'GaiaDR2v2_RP', 'GROUND_COUSINS_I', 'TESS',
+       'PS1_z', 'SDSS_z', 'SkyMapper_z', 'PS1_y', '2MASS_J', '2MASS_H',
+       '2MASS_Ks', 'WISE_RSR_W1', 'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
+       'WISE_RSR_W2', 'WISE_RSR_W3', 'HERSCHEL_PACS_BLUE',
+       'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED'
+])
 
-# termcolor colors
+# termcolor colors.
 colors = [
         'red', 'green', 'blue', 'yellow',
         'grey', 'magenta', 'cyan', 'white'
     ]
 
-# Isochrone mask array
-iso_mask = np.array([1, 1, 1,
-                     0, 0,
-                     1, 1, 1,
-                     0, 0,
-                     0, 0, 0, 0,
-                     1, 1, 1,
-                     0, 0, 0, 0, 0, 0,
-                     0, 0, 0, 0, 0,
-                     0, 0, 0, 0, 0, 0,
-                     1, 1,
-                     0, 0,
-                     0, 0,
-                     0, 1, 0])
+# Isochrone mask array.
+iso_mask = np.array([
+    0, 0, 0, 0, 0,
+    1, 0, 0, 0,
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    1, 0, 0, 0, 0,
+    0, 1, 0, 0, 0,
+    0, 0, 1, 0, 1,
+    0, 0, 0, 0, 1, 1,
+    1, 1, 0, 0,
+    1, 0, 0,
+    0, 0
+])
 
-# Isochrone bands array
+# Filter bands for isochrones.
 iso_bands = [
-            'H', 'J', 'K',
-            'U', 'V', 'B',
-            'G', 'RP', 'BP',
-            'W1', 'W2',
-            'TESS'
-        ]
+    'U', 'B', 'BP', 'V', 'G', 'RP', 'TESS',
+    'J', 'H', 'K', 'W1', 'W2'
+]
+
 
 __bibtex__ = '''
 @article{ARIADNE,
