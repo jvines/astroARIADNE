@@ -1174,6 +1174,8 @@ class Fitter:
             probdat += f'{k}_probability\t{avgd["weights"][k]:.4f}\n'
 
         # Get synthetic mag and fluxes for highest probability model.
+        # To calculate synth fluxes for all bands use btsettl.
+        max_prob_mod = 'btsettl'
         intp = self.load_interpolator(max_prob_mod)
         ogteff = avgd['originals'][max_prob_mod]['teff']
         oglogg = avgd['originals'][max_prob_mod]['logg']
@@ -1311,7 +1313,7 @@ class Fitter:
             # from each model where the number of samples is proportional
             # to the model's relative probability. This is equivalent
             # to taking the KDE of each model and then do the weighted average
-            avg_kde = gaussian_kde(np.concatenate(traces),
+            avg_kde = st.gaussian_kde(np.concatenate(traces),
                                    weights=np.concatenate(extended_weights))
             out['weighted_samples'][k] = avg_kde.resample(nsamples)[0]
         # Now we save the evidences.
