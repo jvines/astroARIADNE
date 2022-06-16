@@ -12,12 +12,15 @@ scatter_size 60
 marker o
 marker_model D
 marker_colors aqua
-marker_colors_model magenta
+marker_colors_irx lightcoral
+marker_colors_model mediumslateblue
+marker_colors_model_irx orangered
 scatter_alpha 0.85
 model_color black
 
 ### SED ERRORBARS
 error_color tab:blue
+irx_error_color tab:orange
 error_alpha 1
 
 ### CORNER PLOT
