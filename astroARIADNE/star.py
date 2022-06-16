@@ -252,6 +252,10 @@ class Star:
                 filters.append(k)
         self.filter_mask = np.where(self.used_filters == 1)[0]
 
+        # IRX filters
+        self.irx_filter_mask = np.array([])
+        self.irx_used_filters = np.zeros(self.filter_names.shape[0])
+
         # Get max Av
         if Av is None:
             self.Av_e = None
@@ -278,8 +282,7 @@ class Star:
             self.Av = Av
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
-            self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
-            self.filter_names[self.filter_mask])
+            self.mags, self.mag_errs, self.filter_names)
 
         self.wave = np.zeros(self.filter_names.shape[0])
         self.flux = np.zeros(self.filter_names.shape[0])
@@ -289,9 +292,9 @@ class Star:
         for k in wave.keys():
             filt_idx = np.where(k == self.filter_names)[0]
             self.wave[filt_idx] = wave[k]
+            self.bandpass[filt_idx] = bandpass[k]
             self.flux[filt_idx] = flux[k]
             self.flux_er[filt_idx] = flux_er[k]
-            self.bandpass[filt_idx] = bandpass[k]
 
         rel_er = self.flux_er[self.filter_mask] / self.flux[self.filter_mask]
         mx_rel_er = rel_er.max() + 0.1
@@ -363,19 +366,19 @@ class Star:
         master, headers = self.__prepare_mags()
         if c is not None:
             print(
-                colored('\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers), c)
+                colored('\t\t{:^20s}\t{:^9s}\t{:^11s}'.format(*headers), c)
             )
             print(colored(
-                '\t\t----------------\t---------\t-----------', c)
+                '\t\t--------------------\t---------\t-----------', c)
             )
             for i in range(master.shape[0]):
-                printer = '\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
+                printer = '\t\t{:^20s}\t{: ^9.4f}\t{: ^11.4f}'
                 print(colored(printer.format(*master[i]), c))
         else:
-            print('\t\t{:^16s}\t{:^9s}\t{:^11s}'.format(*headers))
-            print('\t\t----------------\t---------\t-----------')
+            print('\t\t{:^20s}\t{:^9s}\t{:^11s}'.format(*headers))
+            print('\t\t--------------------\t---------\t-----------')
             for i in range(master.shape[0]):
-                printer = '\t\t{:^16s}\t{: ^9.4f}\t{: ^11.4f}'
+                printer = '\t\t{:^20s}\t{: ^9.4f}\t{: ^11.4f}'
                 print(printer.format(*master[i]))
         print('')
 
@@ -388,9 +391,12 @@ class Star:
 
     def __prepare_mags(self):
         """Prepare mags for either printing or saving in a file."""
-        mags = self.mags[self.filter_mask]
-        ers = self.mag_errs[self.filter_mask]
-        filt = self.filter_names[self.filter_mask]
+        mags = self.mags[np.append(self.filter_mask,
+                                   self.irx_filter_mask).astype(int)]
+        ers = self.mag_errs[np.append(self.filter_mask,
+                                      self.irx_filter_mask).astype(int)]
+        filt = self.filter_names[np.append(self.filter_mask,
+                                           self.irx_filter_mask).astype(int)]
         master = np.zeros(
             mags.size,
             dtype=[
@@ -446,8 +452,12 @@ class Star:
         mask = self.filter_names == filt
         self.mags[mask] = mag
         self.mag_errs[mask] = err
-        self.used_filters[mask] = 1
-        self.filter_mask = np.where(self.used_filters == 1)[0]
+        if filt not in self.filter_names[-4:]:
+            self.used_filters[mask] = 1
+            self.filter_mask = np.where(self.used_filters == 1)[0]
+        else:
+            self.irx_used_filters[mask] = 1
+        self.irx_filter_mask = np.where(self.irx_used_filters == 1)[0]
 
         self.__reload_fluxes()
         print(colored(f'\t\tAdded {filt} {mag} +/- {err}!!', 'yellow'))
@@ -455,6 +465,7 @@ class Star:
 
     def remove_mag(self, filt):
         """Remove an individual photometry point."""
+        # TODO: fix this
         mask = self.filter_names == filt
         self.mags[mask] = 0
         self.mag_errs[mask] = 0
@@ -467,8 +478,7 @@ class Star:
     def __reload_fluxes(self):
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
-            self.mags[self.filter_mask], self.mag_errs[self.filter_mask],
-            self.filter_names[self.filter_mask])
+            self.mags, self.mag_errs, self.filter_names)
 
         self.wave = np.zeros(self.filter_names.shape[0])
         self.flux = np.zeros(self.filter_names.shape[0])
@@ -478,6 +488,6 @@ class Star:
         for k in wave.keys():
             filt_idx = np.where(k == self.filter_names)[0]
             self.wave[filt_idx] = wave[k]
+            self.bandpass[filt_idx] = bandpass[k]
             self.flux[filt_idx] = flux[k]
             self.flux_er[filt_idx] = flux_er[k]
-            self.bandpass[filt_idx] = bandpass[k]
