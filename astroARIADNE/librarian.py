@@ -637,15 +637,15 @@ class Librarian:
             SkyCoord(
                 ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
             ), radius=radius
-        )['I/347/gaia2dis']
+        )['I/352/gedr3dis']
         cat.sort('_r')
         idx = np.where(cat['Source'] == g_id)[0]
         if len(idx) == 0:
             # Raise exception, for now do nothing
             return -1, -1
-        dist = cat[idx]['rest'][0]
-        lo = dist - cat[idx]['b_rest'][0]
-        hi = cat[idx]['B_rest'][0] - dist
+        dist = cat[idx]['rgeo'][0]
+        lo = dist - cat[idx]['b_rgeo'][0]
+        hi = cat[idx]['B_rgeo'][0] - dist
         return dist, max(lo, hi)
 
     @staticmethod
