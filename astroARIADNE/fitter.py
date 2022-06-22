@@ -288,8 +288,8 @@ class Fitter:
         ]
         law = law.lower()
         if law not in laws:
-            err_msg = f'Extinction law {law} not recognized. Available extinction'
-            err_msg += ' laws are: `cardelli`, `odonnell`'
+            err_msg = f'Extinction law {law} not recognized.'
+            err_msg += 'Available extinction  laws are: `cardelli`, `odonnell`'
             err_msg += ', `calzetti`, and `fitzpatrick`'
             InputError(err_msg).__raise__()
         law_f = None
@@ -422,8 +422,9 @@ class Fitter:
             defaults['logg'] = st.norm(
                 loc=self.star.logg, scale=self.star.logg_e)
         else:
-            with open(priorsdir + '/logg_ppf.pkl', 'rb') as jar:
-                defaults['logg'] = pickle.load(jar)
+            # with open(priorsdir + '/logg_ppf.pkl', 'rb') as jar:
+            #     defaults['logg'] = pickle.load(jar)
+            defaults['logg'] = st.uniform(loc=3.5, scale=2.5)
         # Teff prior from RAVE
         with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
             defaults['teff'] = pickle.load(jar)
