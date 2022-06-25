@@ -99,7 +99,7 @@ class SEDPlotter:
 
     def __init__(self, input_files, out_folder, pdf=False,
                  model=None, settings=None, method='averaged',
-                 save_model=False):
+                 save_model=False, ir_excess=False):
         """See class docstring."""
         print('\nInitializing plotter.\n')
         # General setup
@@ -110,6 +110,7 @@ class SEDPlotter:
         self.bma = False
         self.method = method
         self.save = save_model
+        self.irx = ir_excess
 
         traces = f'{out_folder}/traces'
         histograms = f'{out_folder}/histograms'
@@ -165,10 +166,10 @@ class SEDPlotter:
             errs = self.star.flux_er[mask]
             filters = self.star.filter_names[mask]
             wave = self.star.wave[mask]
-
-            irx_mask = self.star.irx_filter_mask
-            irx_filt = self.star.filter_names[irx_mask]
-            irx_wave = self.star.wave[irx_mask]
+            if self.irx:
+                irx_mask = self.star.irx_filter_mask
+                irx_filt = self.star.filter_names[irx_mask]
+                irx_wave = self.star.wave[irx_mask]
             for filt, flx, flx_e in zip(filters, flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = np.append(self.order, p_)
@@ -210,20 +211,23 @@ class SEDPlotter:
             model_average = model_grid(theta_average, filters, wave,
                                        self.interpolator, self.norm,
                                        self.av_law)
-            irx_model_sam = model_grid(theta_samples, irx_filt, irx_wave,
-                                       self.interpolator, self.norm,
-                                       self.av_law)
-            irx_model_avg = model_grid(theta_average, irx_filt, irx_wave,
-                                       self.interpolator, self.norm,
-                                       self.av_law)
+            if self.irx:
+                irx_model_sam = model_grid(theta_samples, irx_filt, irx_wave,
+                                           self.interpolator, self.norm,
+                                           self.av_law)
+                irx_model_avg = model_grid(theta_average, irx_filt, irx_wave,
+                                           self.interpolator, self.norm,
+                                           self.av_law)
             if method == 'averaged':
                 self.theta = theta_average
                 self.model = model_average
-                self.irx_model = irx_model_avg
+                if self.irx:
+                    self.irx_model = irx_model_avg
             elif method == 'samples':
                 self.theta = theta_samples
                 self.model = model_samples
-                self.irx_model = irx_model_sam
+                if self.irx:
+                    self.irx_model = irx_model_sam
 
             # Get archival fluxes.
             self.__extract_info()
@@ -359,7 +363,7 @@ class SEDPlotter:
                         bbox_inches='tight')
         pass
 
-    def plot_SED(self, ir_excess=False):
+    def plot_SED(self):
         """Create the plot of the SED."""
         if self.moddir is None:
             print('Models directory not provided, skipping SED plot.')
@@ -369,7 +373,7 @@ class SEDPlotter:
         ymin = (self.flux * self.wave).min()
         ymax = (self.flux * self.wave).max()
 
-        if ir_excess:
+        if self.irx:
             ymin = (self.irx_model * self.irx_wave).min()
 
         n_filt = self.star.used_filters.sum()
@@ -403,7 +407,7 @@ class SEDPlotter:
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
 
-        self.SED(ax, ir_excess=ir_excess)
+        self.SED(ax)
 
         # Model plot
         ax.errorbar(self.wave, self.flux * self.wave,
@@ -418,7 +422,7 @@ class SEDPlotter:
                    edgecolors=self.marker_colors_model, s=self.scatter_size,
                    facecolor='none', zorder=3, lw=3)
 
-        if ir_excess:
+        if self.irx:
             ax.errorbar(self.irx_wave, self.irx_flux * self.irx_wave,
                         xerr=self.irx_bandpass, yerr=self.irx_flux_er,
                         fmt=',', ecolor=self.irx_error_color, zorder=0,
@@ -447,7 +451,7 @@ class SEDPlotter:
                      edgecolors=self.marker_colors_model, s=self.scatter_size,
                      facecolor='none', lw=3, zorder=10)
 
-        if ir_excess:
+        if self.irx:
             irx_res = (self.irx_flux - self.irx_model) / self.irx_flux_er
             ax_r.errorbar(self.irx_wave, np.zeros(self.irx_wave.shape[0]),
                           xerr=self.irx_bandpass, yerr=self.irx_flux_er,
@@ -495,7 +499,7 @@ class SEDPlotter:
             labelsize=self.tick_labelsize
         )
         xticks = np.linspace(1, 10, 10)
-        if ir_excess:
+        if self.irx:
             xticks = [1, 3, 5, 10, 20, 50, 100, 250]
         ax_r.set_xticks(xticks)
         ax_r.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
@@ -508,7 +512,7 @@ class SEDPlotter:
 
         xlims1 = [0.125, 6]
         xlims2 = [0.25, 6]
-        if ir_excess:
+        if self.irx:
             xlims1 = [0.125, 250]
             xlims2 = [0.25, 250]
 
@@ -542,7 +546,7 @@ class SEDPlotter:
                        header='wavelength(mu m) wave*flux(erg cm-2 s-2)')
         pass
 
-    def SED(self, ax, ir_excess=False):
+    def SED(self, ax):
         """Plot the SED model."""
         Rv = 3.1  # For extinction.
         if not self.norm:
@@ -561,7 +565,7 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
-            if ir_excess:
+            if self.irx:
                 upper_lim = wave < wave[-1]
 
             flux = self.fetch_Phoenix()
@@ -588,7 +592,7 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
-            if ir_excess:
+            if self.irx:
                 upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
@@ -611,7 +615,7 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
-            if ir_excess:
+            if self.irx:
                 upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
@@ -634,7 +638,7 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
-            if ir_excess:
+            if self.irx:
                 upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
@@ -657,7 +661,7 @@ class SEDPlotter:
 
             lower_lim = 0.125 < wave
             upper_lim = wave < 4.629296073126975
-            if ir_excess:
+            if self.irx:
                 upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
@@ -672,7 +676,7 @@ class SEDPlotter:
 
             lower_lim = 0.15 < wave
             upper_lim = wave < 4.629296073126975
-            if ir_excess:
+            if self.irx:
                 upper_lim = wave < wave[-1]
 
             wave = wave[lower_lim * upper_lim]
