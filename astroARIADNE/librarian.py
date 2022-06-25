@@ -9,7 +9,7 @@ import warnings
 
 import astropy.units as u
 import numpy as np
-from astropy.coordinates import Angle, SkyCoord
+from astropy.coordinates import SkyCoord
 from astropy.utils.exceptions import AstropyWarning
 from astroquery.gaia import Gaia
 from astroquery.mast import Catalogs
