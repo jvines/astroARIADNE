@@ -27,7 +27,7 @@ filter_names = np.array([
        'PS1_i', 'SkyMapper_i', 'GaiaDR2v2_RP', 'GROUND_COUSINS_I', 'TESS',
        'PS1_z', 'SDSS_z', 'SkyMapper_z', 'PS1_y', '2MASS_J', '2MASS_H',
        '2MASS_Ks', 'WISE_RSR_W1', 'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
-       'WISE_RSR_W2', 'WISE_RSR_W3', 'HERSCHEL_PACS_BLUE',
+       'WISE_RSR_W2', 'WISE_RSR_W3', 'WISE_RSR_W4', 'HERSCHEL_PACS_BLUE',
        'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED'
 ])
 
@@ -48,7 +48,7 @@ iso_mask = np.array([
     0, 0, 1, 0, 1,
     0, 0, 0, 0, 1, 1,
     1, 1, 0, 0,
-    1, 0, 0,
+    1, 0, 0, 0,
     0, 0
 ])
 
