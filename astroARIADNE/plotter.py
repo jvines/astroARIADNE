@@ -111,6 +111,8 @@ class SEDPlotter:
         self.method = method
         self.save = save_model
         self.irx = ir_excess
+        if self.irx:
+            model = 'btsettl'
 
         traces = f'{out_folder}/traces'
         histograms = f'{out_folder}/histograms'
