@@ -28,7 +28,7 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.7",
         "License :: OSI Approved :: MIT License",
-        "Operating System :: MacOS X",
+        "Operating System :: MacOS :: MacOS X",
         "Operating System :: Unix",
         "Topic :: Scientific/Engineering :: Astronomy"
     ],
