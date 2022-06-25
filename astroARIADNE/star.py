@@ -452,7 +452,7 @@ class Star:
         mask = self.filter_names == filt
         self.mags[mask] = mag
         self.mag_errs[mask] = err
-        if filt not in self.filter_names[-4:]:
+        if filt not in self.filter_names[-5:]:
             self.used_filters[mask] = 1
             self.filter_mask = np.where(self.used_filters == 1)[0]
         else:
@@ -465,7 +465,6 @@ class Star:
 
     def remove_mag(self, filt):
         """Remove an individual photometry point."""
-        # TODO: fix this
         mask = self.filter_names == filt
         self.mags[mask] = 0
         self.mag_errs[mask] = 0
