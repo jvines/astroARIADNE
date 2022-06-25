@@ -5,7 +5,10 @@ photometry to different stellar atmosphere models automatically using Nested
 Sampling algorithms.
 
 # Installation
-To install **ARIADNE** you can clone this repository with
+
+You can install **ARIADNE** with `pip install astroARIADNE`
+
+Otherwise you can clone this repository with
 
 ```
 git clone https://github.com/jvines/astroARIADNE.git
@@ -17,8 +20,6 @@ And then run
 ```
 python setupy.py install
 ```
-
-Or try ```pip install astroARIADNE``` (Soon to be available!)
 
 But for the code to work, first you must install the necessary dependencies.
 
