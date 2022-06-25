@@ -4,10 +4,9 @@ __all__ = ['Fitter', 'dynesty_log_like', 'dynesty_loglike_bma', 'pt_dynesty',
            'pt_multinest']
 
 import pickle
-import random
 import time
 import warnings
-from multiprocessing import Pool, Process, set_start_method
+from multiprocessing import Pool, set_start_method
 from tqdm import tqdm
 
 import extinction
