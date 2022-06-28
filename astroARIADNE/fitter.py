@@ -388,9 +388,9 @@ class Fitter:
                 # We'll assume that if ARIADNE is running in offline mode
                 # Then the star will have > 4000 K
                 if (mod.lower() in ['btcond', 'btnextgen'] and
-                    self.star.temp > 4000) or \
+                    self.star.temp + self.star.temp_e > 4000) or \
                         (mod.lower() in ['ck04', 'kurucz'] and
-                         self.star.temp < 4000) or \
+                         self.star.temp + self.star.temp_e < 4000) or \
                         (mod.lower() == 'coelho' and self.star.temp < 3500):
                     continue
 
