@@ -167,7 +167,7 @@ from astroARIADNE.star import Star
 After importing, a star has to be defined.
 
 Stars are defined in **ARIADNE** by their RA and DEC in degrees, a name, and
-optionally the Gaia DR2 source id, for example:
+optionally the Gaia DR3 source id, for example:
 
 ```python
 ra = 75.795
@@ -184,10 +184,10 @@ itself using a cone search centered around the RA and DEC.
 
 Executing the previous block will start the photometry and stellar parameter
 retrieval routine. **ARIADNE** will query Gaia DR2 for an estimate on the
-temperature, radius and the parallax, which can be used as priors for the
-fitting routine, and luminosity for completeness, as it's not used during the
-fit, and prints them along with its TIC, KIC IDs if any of those exist, its Gaia
-DR2 ID, and maximum line-of-sight extinction Av:
+temperature, radius, parallax and luminosity for display as preliminar
+information, as it's not used during the fit, and prints them along with its
+TIC, KIC IDs if any of those exist, its Gaia DR3 ID, and maximum line-of-sight
+extinction Av:
 
 ```
 			Gaia DR2 ID : 4875693023844840448
