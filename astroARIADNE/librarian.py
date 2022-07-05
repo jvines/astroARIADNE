@@ -142,6 +142,7 @@ class Librarian:
         self.tic = None
         self.kic = None
         self.ids = []
+        self.dr2_id = None
 
         self.used_filters = np.zeros(self.filter_names.shape[0])
         self.mags = np.zeros(self.filter_names.shape[0])
@@ -189,12 +190,14 @@ class Librarian:
                 dr2.radius_percentile_upper,
                 dr2.lum_val,
                 dr2.lum_percentile_lower,
-                dr2.lum_percentile_upper
+                dr2.lum_percentile_upper,
+                dr2.source_id2 AS source_id
             FROM
                 gaiadr3.gaia_source AS dr3
             JOIN
                 (SELECT
                     n.dr3_source_id AS source_id,
+                    n.dr2_source_id AS source_id2,
                     dr2.teff_val,
                     dr2.teff_percentile_lower,
                     dr2.teff_percentile_upper,
@@ -220,6 +223,7 @@ class Librarian:
             """
         j = Gaia.launch_job_async(query)
         res = j.get_results()
+        self.dr2_id = res['source_id'][0]
         self.plx, self.plx_e = self._get_parallax(res)
         self.temp, self.temp_e = self._get_teff(res)
         self.rad, self.rad_e = self._get_radius(res)
@@ -227,7 +231,6 @@ class Librarian:
         self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
                                                     self.radius, self.g_id)
         pass
-
 
     def gaia_query(self):
         """Query Gaia to get different catalog IDs."""
@@ -268,17 +271,10 @@ class Librarian:
             FROM
                 gaiadr2.gaia_source AS gaia
             JOIN
-                (SELECT
-                    n.dr2_source_id AS source_id
-                FROM
-                    gaiadr3.dr2_neighbourhood AS n
-                WHERE
-                    n.dr3_source_id = {self.g_id}
-                ) AS dr2
-            ON dr2.source_id = gaia.source_id
-            JOIN
                 gaiadr2.{c}_best_neighbour AS {n}
             ON gaia.source_id={n}.source_id
+            WHERE
+                gaia.source_id={self.dr2_id}
             """
             j = Gaia.launch_job_async(query)
             r = j.get_results()
@@ -432,7 +428,7 @@ class Librarian:
 
     def _retrieve_from_mermilliod(self, cat):
         print('Checking catalog Mermilliod')
-        mask = cat['source_id'] == self.g_id
+        mask = cat['source_id'] == self.dr2_id
         cat = cat[mask][0]
         v = cat['Vmag']
         v_e = cat['e_Vmag']
@@ -467,7 +463,7 @@ class Librarian:
 
     def _retrieve_from_stromgren(self, cat, n):
         print('Checking catalog ' + n)
-        mask = cat['source_id'] == self.g_id
+        mask = cat['source_id'] == self.dr2_id
         cat = cat[mask][0]
         y = cat['Vmag']
         y_e = cat['e_Vmag']
@@ -500,7 +496,7 @@ class Librarian:
 
     def _retrieve_from_galex(self, cat, name):
         print('Checking catalog GALEX')
-        mask = cat['source_id'] == self.g_id
+        mask = cat['source_id'] == self.dr2_id
         cat = cat[mask][0]
         Fexf = cat['Fexf']
         Nexf = cat['Nexf']
