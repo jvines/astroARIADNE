@@ -11,7 +11,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="astroARIADNE",
-    version="1.0.0",
+    version="1.0.1",
     author="Jose Vines",
     author_email="jose.vines@ug.uchile.cl",
     maintainer="Jose Vines",
