@@ -94,7 +94,7 @@ class Librarian:
             'II/349/ps1', list(zip(__ps1_mags, __ps1_errs, __ps1_filters))
         ],
         'Gaia': [
-            'I/345/gaia2', list(zip(__gaia_mags, __gaia_errs, __gaia_filters))
+            'I/355/gaiadr3', list(zip(__gaia_mags, __gaia_errs, __gaia_filters))
         ],
         '2MASS': [
             'II/246/out', list(zip(__tmass_mags, __tmass_errs, __tmass_filters))
@@ -170,22 +170,54 @@ class Librarian:
         # self.close_logfile()
         pass
 
+
     def gaia_params(self):
         """Retrieve parallax, radius, teff and lum from Gaia."""
-        # If gaia DR2 id is provided, query by id
-        fields = np.array([
-            'parallax', 'parallax_error', 'teff_val',
-            'teff_percentile_lower', 'teff_percentile_upper',
-            'radius_val', 'radius_percentile_lower',
-            'radius_percentile_upper', 'lum_val',
-            'lum_percentile_lower', 'lum_percentile_upper'
-        ])
-        query = 'select '
-        for f in fields[:-1]:
-            query += 'gaia.' + f + ', '
-        query += 'gaia.' + fields[-1]
-        query += ' from gaiadr2.gaia_source as gaia'
-        query += ' where gaia.source_id={0}'.format(self.g_id)
+        # If gaia DR3 id is provided, query by id
+
+        query = f"""
+            SELECT
+                dr3.parallax, dr3.parallax_error,
+                dr3.pmra, dr3.pmra_error,
+                dr3.pmdec, dr3.pmdec_error,
+                dr3.radial_velocity, dr3.radial_velocity_error,
+                dr2.teff_val,
+                dr2.teff_percentile_lower,
+                dr2.teff_percentile_upper,
+                dr2.radius_val,
+                dr2.radius_percentile_lower,
+                dr2.radius_percentile_upper,
+                dr2.lum_val,
+                dr2.lum_percentile_lower,
+                dr2.lum_percentile_upper
+            FROM
+                gaiadr3.gaia_source AS dr3
+            JOIN
+                (SELECT
+                    n.dr3_source_id AS source_id,
+                    dr2.teff_val,
+                    dr2.teff_percentile_lower,
+                    dr2.teff_percentile_upper,
+                    dr2.radius_val,
+                    dr2.radius_percentile_lower,
+                    dr2.radius_percentile_upper,
+                    dr2.lum_val,
+                    dr2.lum_percentile_lower,
+                    dr2.lum_percentile_upper
+                FROM
+                    gaiadr3.dr2_neighbourhood AS n
+                JOIN
+                    gaiadr2.gaia_source AS dr2
+                ON
+                    n.dr2_source_id = dr2.source_id
+                WHERE
+                    n.dr3_source_id = {self.g_id}
+                ) AS dr2
+            ON
+                dr3.source_id = dr2.source_id
+            WHERE
+                dr3.source_id = {self.g_id}
+            """
         j = Gaia.launch_job_async(query)
         res = j.get_results()
         self.plx, self.plx_e = self._get_parallax(res)
@@ -196,10 +228,9 @@ class Librarian:
                                                     self.radius, self.g_id)
         pass
 
+
     def gaia_query(self):
         """Query Gaia to get different catalog IDs."""
-        # cats = ['tmass', 'panstarrs1', 'sdssdr9', 'allwise']
-        # names = ['tmass', 'ps', 'sdss', 'allwise']
         cats = ['tycho2', 'panstarrs1', 'sdssdr9',
                 'allwise', 'tmass', 'apassdr9']
         names = ['tycho', 'ps', 'sdss', 'allwise', 'tmass', 'apass']
@@ -231,11 +262,24 @@ class Librarian:
                 IDS[cat] = 'skipped'
                 CatalogWarning(cat, 7).warn()
                 continue
-            query = 'select original_ext_source_id from '
-            query += 'gaiadr2.gaia_source as gaia join '
-            query += 'gaiadr2.{}_best_neighbour as {} '.format(c, n)
-            query += 'on gaia.source_id={}.source_id where '.format(n)
-            query += 'gaia.source_id={}'.format(self.g_id)
+            query = f"""
+            SELECT
+                {n}.original_ext_source_id
+            FROM
+                gaiadr2.gaia_source AS gaia
+            JOIN
+                (SELECT
+                    n.dr2_source_id AS source_id
+                FROM
+                    gaiadr3.dr2_neighbourhood AS n
+                WHERE
+                    n.dr3_source_id = {self.g_id}
+                ) AS dr2
+            ON dr2.source_id = gaia.source_id
+            JOIN
+                gaiadr2.{c}_best_neighbour AS {n}
+            ON gaia.source_id={n}.source_id
+            """
             j = Gaia.launch_job_async(query)
             r = j.get_results()
             if len(r):
@@ -617,8 +661,8 @@ class Librarian:
             CatalogWarning('Pan-STARRS', 8).warn()
 
     def _get_gaia(self, cat):
-        print('Checking catalog Gaia DR2')
-        mask = cat['DR2Name'] == 'Gaia DR2 {0}'.format(self.ids['Gaia'])
+        print('Checking catalog Gaia DR3')
+        mask = cat['DR3Name'] == f'Gaia DR3 {self.ids["Gaia"]}'
         self._retrieve_from_cat(cat[mask], 'Gaia')
 
     def _get_skymapper(self, cat):

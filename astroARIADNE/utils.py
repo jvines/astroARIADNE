@@ -144,7 +144,7 @@ def display_star_fin(star, c):
     plx, plx_e = star.plx, star.plx_e
     lum, lum_e = star.lum, star.lum_e
     dist, dist_e = star.dist, star.dist_e
-    print(colored(f'\t\t\tGaia DR2 ID : {star.g_id}', c))
+    print(colored(f'\t\t\tGaia DR3 ID : {star.g_id}', c))
     if star.tic:
         print(colored(f'\t\t\tTIC : {star.tic}', c))
     if star.kic:
