@@ -175,7 +175,6 @@ class Librarian:
     def gaia_params(self):
         """Retrieve parallax, radius, teff and lum from Gaia."""
         # If gaia DR3 id is provided, query by id
-
         query = f"""
             SELECT
                 dr3.parallax, dr3.parallax_error,
@@ -734,7 +733,7 @@ class Librarian:
     @staticmethod
     def _get_gaia_id(ra, dec, radius):
         c = SkyCoord(ra, dec, unit=(u.deg, u.deg), frame='icrs')
-        j = Gaia.cone_search_async(c, radius)
+        j = Gaia.cone_search_async(c, radius, table_name='gaiadr3.gaia_source')
         res = j.get_results()
         return res['source_id'][0]
 
