@@ -460,7 +460,7 @@ class Star:
         self.irx_filter_mask = np.where(self.irx_used_filters == 1)[0]
 
         self.__reload_fluxes()
-        print(colored(f'\t\tAdded {filt} {mag} +/- {err}!!', 'yellow'))
+        print(colored(f'\t\t\tAdded {filt} {mag} +/- {err}!!', 'yellow'))
         pass
 
     def remove_mag(self, filt):
@@ -472,6 +472,7 @@ class Star:
         self.filter_mask = np.where(self.used_filters == 1)[0]
 
         self.__reload_fluxes()
+        print(colored(f'\t\t\tRemoved {filt}!!', 'yellow'))
         pass
 
     def __reload_fluxes(self):
