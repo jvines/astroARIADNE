@@ -334,8 +334,8 @@ class SEDPlotter:
                        alpha=self.scatter_alpha, label=fi)
 
         ax.set_ylim([ymin * .8, ymax * 1.25])
-        ax.set_xscale('log', nonposx='clip')
-        ax.set_yscale('log', nonposy='clip')
+        ax.set_xscale('log', nonpositive='clip')
+        ax.set_yscale('log', nonpositive='clip')
         ax.set_ylabel(r'$\lambda$F$_\lambda$ (erg cm$^{-2}$s$^{-1}$)',
                       fontsize=self.fontsize,
                       fontname=self.fontname
@@ -472,9 +472,9 @@ class SEDPlotter:
         ax.set_ylim([ymin * 0.6, ymax * 1.5])
         # ax_r.set_ylim([-5, 5])
         ax_r.set_ylim([-5 * res_std, 5 * res_std])
-        ax.set_xscale('log', nonposx='clip')
-        ax.set_yscale('log', nonposy='clip')
-        ax_r.set_xscale('log', nonposx='clip')
+        ax.set_xscale('log', nonpositive='clip')
+        ax.set_yscale('log', nonpositive='clip')
+        ax_r.set_xscale('log', nonpositive='clip')
         ax_r.set_xlabel(r'$\lambda (\mu m)$',
                         fontsize=self.fontsize,
                         fontname=self.fontname
