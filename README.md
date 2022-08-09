@@ -39,9 +39,12 @@ But for the code to work, first you must install the necessary dependencies.
 - extinction (<https://extinction.readthedocs.io/en/latest/>)
 - pyphot (<http://mfouesneau.github.io/docs/pyphot/>)
 - dustmaps (<https://dustmaps.readthedocs.io/en/latest/>)
-- PyMultinest (<https://johannesbuchner.github.io/PyMultiNest/>)
+- PyMultinest (<https://johannesbuchner.github.io/PyMultiNest/>) [**OPTIONAL**]
 - dynesty (<https://dynesty.readthedocs.io/en/latest/>)
 - isochrones (<https://isochrones.readthedocs.io/en/latest/>)
+
+**PyMultinest is an optional package and can be hard to install! If you're
+planning on doing BMA only then you can skip installing it!!**
 
 Most can be easily installed with pip or conda but some might have special
 instructions (like PyMultinest!!)
