@@ -7,10 +7,14 @@ import random
 import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
-from dustmaps.sfd import SFDQuery
-from dustmaps.planck import PlanckQuery, PlanckGNILCQuery
-from dustmaps.lenz2017 import Lenz2017Query
-from dustmaps.bayestar import BayestarQuery
+try:
+    from dustmaps.sfd import SFDQuery
+    from dustmaps.planck import PlanckQuery, PlanckGNILCQuery
+    from dustmaps.lenz2017 import Lenz2017Query
+    from dustmaps.bayestar import BayestarQuery
+    avflag = True
+except ModuleNotFoundError:
+    avflag = False
 from termcolor import colored
 
 from .config import gridsdir, filter_names, colors, iso_mask, iso_bands
@@ -257,7 +261,7 @@ class Star:
         self.irx_used_filters = np.zeros(self.filter_names.shape[0])
 
         # Get max Av
-        if Av is None:
+        if Av is None and avflag:
             self.Av_e = None
             dmap = self.dustmaps[dustmap]()
             coords = SkyCoord(self.ra, self.dec, distance=self.dist,
@@ -278,6 +282,9 @@ class Star:
             elif dustmap in ['Planck13', 'Planck16']:
                 ebv = dmap(coords)
                 self.Av = ebv * 3.1
+        elif Av is None and not avflag:
+            self.Av = 0.5
+            self.Av_e = 2
         else:
             self.Av = Av
         # Get the wavelength and fluxes of the retrieved magnitudes.
