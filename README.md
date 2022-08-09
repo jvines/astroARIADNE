@@ -31,7 +31,7 @@ But for the code to work, first you must install the necessary dependencies.
 - astropy (<https://astropy.readthedocs.io/en/stable/>)
 - astroquery (<https://astroquery.readthedocs.io/en/latest/>)
 - regions (<https://astropy-regions.readthedocs.io/en/latest/index.html>)
-- PyAstronomy (<https://pyastronomy.readthedocs.io/en/v_0-15-2/>)
+- PyAstronomy (<https://pyastronomy.readthedocs.io/en/latest/>)
 - corner (<https://corner.readthedocs.io/en/latest/>)
 - tqdm (<https://tqdm.github.io/>)
 - matplotlib (<https://matplotlib.org/>)
