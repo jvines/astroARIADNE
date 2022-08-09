@@ -11,12 +11,9 @@ if __name__ == '__main__':
 
     s = Star(starname, ra, dec, g_id=gaia_id)
 
-    # Comment to use a custom log g prior or the default prior
-    s.estimate_logg()
-
     # Output setup
     out_folder = 'YOUR OUTPUT FOLDER HERE'
-    in_file = out_folder + '/BMA_out.pkl'  # used as input for plotting
+    in_file = out_folder + '/BMA.pkl'  # used as input for plotting
     plots_out_folder = out_folder + '/plots'
 
     # Setup parameters
