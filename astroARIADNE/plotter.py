@@ -441,17 +441,17 @@ class SEDPlotter:
         # Residual plot
         ax_r.axhline(y=0, lw=2, ls='--', c='k', alpha=.7)
 
-        ax_r.errorbar(self.wave, np.zeros(self.wave.shape[0]),
+        ax_r.errorbar(self.wave, norm_res, zorder=3,
                       xerr=self.bandpass, yerr=self.flux_er,
                       fmt=',', ecolor=self.error_color, marker=None)
-        ax_r.scatter(self.wave, np.zeros(self.wave.shape[0]),
+        ax_r.scatter(self.wave, norm_res, zorder=3,
                      edgecolors='black', marker=self.marker,
                      c=self.marker_colors, s=self.scatter_size,
                      alpha=self.scatter_alpha)
-        ax_r.scatter(self.wave, norm_res,
-                     marker=self.marker_model,
-                     edgecolors=self.marker_colors_model, s=self.scatter_size,
-                     facecolor='none', lw=3, zorder=10)
+        # ax_r.scatter(self.wave, norm_res,
+        #              marker=self.marker_model,
+        #              edgecolors=self.marker_colors_model, s=self.scatter_size,
+        #              facecolor='none', lw=3, zorder=10)
 
         if self.irx:
             irx_res = (self.irx_flux - self.irx_model) / self.irx_flux_er
