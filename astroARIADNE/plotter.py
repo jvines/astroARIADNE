@@ -24,7 +24,7 @@ from scipy.stats import gaussian_kde, norm
 import corner
 from dynesty import plotting as dyplot
 
-from .config import filesdir, gridsdir, modelsdir
+from .config import (filesdir, gridsdir, modelsdir)
 from .isochrone import get_isochrone
 from .phot_utils import *
 from .sed_library import *

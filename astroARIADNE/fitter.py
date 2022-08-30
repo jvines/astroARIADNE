@@ -6,7 +6,7 @@ __all__ = ['Fitter', 'dynesty_log_like', 'dynesty_loglike_bma', 'pt_dynesty',
 import pickle
 import time
 import warnings
-from multiprocessing import Pool, set_start_method
+from multiprocessing import (Pool, set_start_method)
 from tqdm import tqdm
 
 import extinction
@@ -19,8 +19,8 @@ from astropy.constants import sigma_sb
 from isochrones.interp import DFInterpolator
 from termcolor import colored
 
-from .config import filesdir, gridsdir, priorsdir, filter_names, colors, \
-    iso_mask, iso_bands
+from .config import (filesdir, gridsdir, priorsdir, filter_names, colors,
+                     iso_mask, iso_bands)
 from .error import *
 from .isochrone import estimate
 from .phot_utils import *

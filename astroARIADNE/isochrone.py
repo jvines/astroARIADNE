@@ -13,7 +13,7 @@ from numba.core.errors import (NumbaDeprecationWarning,
 import dynesty
 from dynesty.utils import resample_equal
 
-from .error import DynestyError, InputError
+from .error import (DynestyError, InputError)
 from .utils import credibility_interval
 
 warnings.filterwarnings(

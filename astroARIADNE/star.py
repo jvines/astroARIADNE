@@ -9,7 +9,7 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 try:
     from dustmaps.sfd import SFDQuery
-    from dustmaps.planck import PlanckQuery, PlanckGNILCQuery
+    from dustmaps.planck import (PlanckQuery, PlanckGNILCQuery)
     from dustmaps.lenz2017 import Lenz2017Query
     from dustmaps.bayestar import BayestarQuery
     avflag = True
@@ -17,12 +17,12 @@ except ModuleNotFoundError:
     avflag = False
 from termcolor import colored
 
-from .config import gridsdir, filter_names, colors, iso_mask, iso_bands
+from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands)
 from .isochrone import estimate
 from .librarian import Librarian
 from .error import StarWarning
 from .phot_utils import *
-from .utils import display_star_fin, display_star_init
+from .utils import (display_star_fin, display_star_init)
 
 
 def extract_from_lib(lib):

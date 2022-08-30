@@ -16,7 +16,7 @@ from contextlib import closing
 
 import numpy as np
 from scipy.special import erf
-from scipy.stats import gaussian_kde, norm
+from scipy.stats import (gaussian_kde, norm)
 from termcolor import colored
 
 
