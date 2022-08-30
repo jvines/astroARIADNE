@@ -100,7 +100,7 @@ def get_residuals(theta, flux, flux_er, wave, filts, interpolators, use_norm,
     model = model_grid(theta, filts, wave, interpolators, use_norm, av_law)
     start = 5 if use_norm else 6
     inflation = theta[start:]
-    residuals = model - flux
+    residuals = flux - model
     errs = np.sqrt(flux_er ** 2 + inflation ** 2)
     return residuals, errs
 
