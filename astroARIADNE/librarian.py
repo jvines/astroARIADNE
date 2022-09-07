@@ -298,8 +298,8 @@ class Librarian:
         """
         print('Looking online for archival magnitudes for star', end=' ')
         print(self.starname)
-
-        cats = self.get_catalogs(self.ra, self.dec, self.radius)
+        catalogs = [c[1][0] for c in self.catalogs.items()]
+        cats = self.get_catalogs(self.ra, self.dec, self.radius, catalogs)
         skips = ['ASCC', 'GLIMPSE']
 
         for c in self.catalogs.keys():
@@ -736,12 +736,12 @@ class Librarian:
         return res['source_id'][0]
 
     @staticmethod
-    def get_catalogs(ra, dec, radius):
+    def get_catalogs(ra, dec, radius, catalogs):
         """Retrieve available catalogs for a star from Vizier."""
         cats = Vizier.query_region(
             SkyCoord(
                 ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=radius
+            ), radius=radius, catalogs=catalogs
         )
 
         return cats
