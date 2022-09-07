@@ -741,7 +741,7 @@ class Librarian:
         cats = Vizier.query_region(
             SkyCoord(
                 ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=radius, catalogs=catalogs
+            ), radius=radius, catalog=catalogs
         )
 
         return cats
