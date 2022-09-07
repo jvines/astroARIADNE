@@ -672,11 +672,9 @@ class Librarian:
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
         """Retrieve Bailer-Jones DR2 distance."""
-        cat = Vizier.query_region(
-            SkyCoord(
+        cat = Vizier.query_region(SkyCoord(
                 ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=radius
-        )['I/352/gedr3dis']
+            ), radius=radius, catalog='I/352/gedr3dis')['I/352/gedr3dis']
         cat.sort('_r')
         idx = np.where(cat['Source'] == g_id)[0]
         if len(idx) == 0:
