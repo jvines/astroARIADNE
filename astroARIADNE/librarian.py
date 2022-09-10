@@ -671,7 +671,7 @@ class Librarian:
 
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
-        """Retrieve Bailer-Jones DR2 distance."""
+        """Retrieve Bailer-Jones EDR3 distance."""
         cat = Vizier.query_region(SkyCoord(
                 ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
             ), radius=radius / 2, catalog='I/352/gedr3dis')['I/352/gedr3dis']
