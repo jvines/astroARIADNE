@@ -131,6 +131,7 @@ class CatalogWarning(Error):
     Type 6 means the selected magnitude was already retrieved
     Type 7 means catalog was manually skipped
     Type 8 means the given entry is either of bad quality or is a galaxy
+    Type 9 means no EDR3 distance was found.
 
     """
 
@@ -157,6 +158,9 @@ class CatalogWarning(Error):
             self.message = 'Catalog ' + par + ' entry is either an extended'
             self.message += ' source, is of bad quality or is contaminated.'
             self.message += ' Skipping.'
+        if type == 9:
+            self.message = 'Unable to find distance in Bailer-Jones Gaia EDR3!'
+            self.message += ' Calculating from Parallax instead.'
 
     def warn(self):
         """Print error message."""

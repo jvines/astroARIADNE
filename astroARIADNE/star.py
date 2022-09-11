@@ -216,6 +216,9 @@ class Star:
                 self.dist_e = dist_e
             else:
                 self.calculate_distance()
+            # In case self.dist == -999 (no BJ EDR3 distance found)
+            if self.dist == -999:
+                self.calculate_distance()
 
             if self.get_rad:
                 self.rad = libouts[4]

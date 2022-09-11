@@ -672,9 +672,22 @@ class Librarian:
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
         """Retrieve Bailer-Jones EDR3 distance."""
-        cat = Vizier.query_region(SkyCoord(
-                ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=radius / 2, catalog='I/352/gedr3dis')['I/352/gedr3dis']
+        tries = [1, 2, 3, 4]
+        for t in tries:
+            try:
+                failed = False
+                cat = Vizier.query_region(
+                    SkyCoord(
+                        ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'),
+                    radius=radius / t,
+                    catalog='I/352/gedr3dis')['I/352/gedr3dis']
+                break
+            except TypeError:
+                failed = True
+                continue
+        if failed:
+            CatalogWarning(-1, 9).warn()
+            return -999, -999
         cat.sort('_r')
         idx = np.where(cat['Source'] == g_id)[0]
         if len(idx) == 0:
