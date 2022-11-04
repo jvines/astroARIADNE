@@ -433,7 +433,7 @@ class Fitter:
         if not self._norm:
             if self.star.dist != -1:
                 defaults['dist'] = st.truncnorm(
-                    a=0, b=1e100, loc=self.star.dist, scale=3 * self.star.dist_e
+                    a=0, b=1e100, loc=self.star.dist, scale=1.5 * self.star.dist_e
                 )
             else:
                 defaults['dist'] = st.uniform(loc=1, scale=3000)
@@ -1174,8 +1174,6 @@ class Fitter:
             probdat += f'{k}_probability\t{avgd["weights"][k]:.4f}\n'
 
         # Get synthetic mag and fluxes for highest probability model.
-        # To calculate synth fluxes for all bands use btsettl.
-        max_prob_mod = 'btsettl'
         intp = self.load_interpolator(max_prob_mod)
         ogteff = avgd['originals'][max_prob_mod]['teff']
         oglogg = avgd['originals'][max_prob_mod]['logg']
