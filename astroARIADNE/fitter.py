@@ -1174,7 +1174,8 @@ class Fitter:
             probdat += f'{k}_probability\t{avgd["weights"][k]:.4f}\n'
 
         # Get synthetic mag and fluxes for highest probability model.
-        intp = self.load_interpolator(max_prob_mod)
+        synth_mod = 'btsettl'
+        intp = self.load_interpolator(synth_mod)
         ogteff = avgd['originals'][max_prob_mod]['teff']
         oglogg = avgd['originals'][max_prob_mod]['logg']
         ogfeh = avgd['originals'][max_prob_mod]['z']
