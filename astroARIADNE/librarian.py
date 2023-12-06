@@ -191,8 +191,7 @@ class Librarian:
                 dr2.lum_val,
                 dr2.lum_percentile_lower,
                 dr2.lum_percentile_upper,
-                dr3.source_id AS dr3_source_id,
-                dr2.source_id2 AS dr2_source_id
+                dr2.source_id2 AS source_id
             FROM
                 gaiadr3.gaia_source AS dr3
             JOIN
