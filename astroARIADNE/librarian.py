@@ -11,6 +11,7 @@ import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.utils.exceptions import AstropyWarning
+from astropy.table import Table
 from astroquery.gaia import Gaia
 from astroquery.mast import Catalogs
 from astroquery.vizier import Vizier
@@ -190,7 +191,8 @@ class Librarian:
                 dr2.lum_val,
                 dr2.lum_percentile_lower,
                 dr2.lum_percentile_upper,
-                dr2.source_id2 AS source_id
+                dr3.source_id AS dr3_source_id,
+                dr2.source_id2 AS dr2_source_id
             FROM
                 gaiadr3.gaia_source AS dr3
             JOIN
@@ -222,6 +224,8 @@ class Librarian:
             """
         j = Gaia.launch_job_async(query)
         res = j.get_results()
+        if len(res) > 1:
+            res = Table.from_pandas(res.to_pandas().dropna())
         self.dr2_id = res['source_id'][0]
         self.plx, self.plx_e = self._get_parallax(res)
         self.temp, self.temp_e = self._get_teff(res)

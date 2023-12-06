@@ -433,7 +433,7 @@ class Fitter:
         if not self._norm:
             if self.star.dist != -1:
                 defaults['dist'] = st.truncnorm(
-                    a=0, b=1e100, loc=self.star.dist, scale=1.5 * self.star.dist_e
+                    a=0, b=1e100, loc=self.star.dist, scale=3 * self.star.dist_e
                 )
             else:
                 defaults['dist'] = st.uniform(loc=1, scale=3000)
