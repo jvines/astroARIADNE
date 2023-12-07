@@ -754,12 +754,15 @@ class Librarian:
     @staticmethod
     def get_catalogs(ra, dec, radius, catalogs):
         """Retrieve available catalogs for a star from Vizier."""
-        cats = Vizier.query_region(
-            SkyCoord(
-                ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
-            ), radius=radius, catalog=catalogs
-        )
-
+        tries = [0.5, 0.25, 0.1, 1, 2, 3, 4][::-1]
+        for t in tries:
+            cats = Vizier.query_region(
+                SkyCoord(
+                    ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'
+                ), radius=radius / t, catalog=catalogs
+            )
+            if len(cats):
+                break
         return cats
 
     @staticmethod
