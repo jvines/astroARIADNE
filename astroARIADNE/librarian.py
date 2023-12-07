@@ -675,7 +675,7 @@ class Librarian:
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
         """Retrieve Bailer-Jones EDR3 distance."""
-        tries = [1, 2, 3, 4]
+        tries = [0.5, 0.25, 0.1, 1, 2, 3, 4][::-1]
         for t in tries:
             try:
                 failed = False
