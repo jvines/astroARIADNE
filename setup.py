@@ -33,7 +33,7 @@ setup(
         "Topic :: Scientific/Engineering :: Astronomy"
     ],
     requires=["numpy", "scipy", "matplotlib", "astropy", "astroquery",
-              "tqdm", "regions", "pyphot", "PyAstronomy", "termcolor",
+              "tqdm", "regions", "PyAstronomy", "termcolor",
               "dustmaps", "pandas", "numba", "isochrones", "dynesty",
               "h5py", "tabulate"],
     package_data={'astroARIADNE': ['Datafiles']},
