@@ -11,7 +11,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="astroARIADNE",
-    version="1.0.9",
+    version="1.1.0",
     author="Jose Vines",
     author_email="jose.vines@ug.uchile.cl",
     maintainer="Jose Vines",
@@ -33,7 +33,9 @@ setup(
         "Topic :: Scientific/Engineering :: Astronomy"
     ],
     requires=["numpy", "scipy", "matplotlib", "astropy", "astroquery",
-              "tqdm", "regions", "pyphot", "PyAstronomy", "termcolor"],
+              "tqdm", "regions", "pyphot", "PyAstronomy", "termcolor",
+              "dustmaps", "pandas", "numba", "isochrones", "dynesty",
+              "h5py", "tabulate"],
     package_data={'astroARIADNE': ['Datafiles']},
     include_package_data=True,
     python_requires='>=3.7',
