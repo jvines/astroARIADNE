@@ -8,7 +8,7 @@ Sampling algorithms.
 
 You can install **ARIADNE** with `pip install astroARIADNE`
 
-Otherwise you can clone this repository with
+Otherwise, you can clone this repository with
 
 ```
 git clone https://github.com/jvines/astroARIADNE.git
@@ -37,17 +37,17 @@ But for the code to work, first you must install the necessary dependencies.
 - matplotlib (<https://matplotlib.org/>)
 - termcolor (<https://pypi.org/project/termcolor/>)
 - extinction (<https://extinction.readthedocs.io/en/latest/>)
-- pyphot (<http://mfouesneau.github.io/docs/pyphot/>)
-- dustmaps (<https://dustmaps.readthedocs.io/en/latest/>)
+- pyphot (<http://mfouesneau.github.io/docs/pyphot/>) [**MIGHT NEED MANUAL INSTALLATION DUE OT NOT BEING IN PYPI**]
+- dustmaps (<https://dustmaps.readthedocs.io/en/latest/>) [**NEEDS CONFIGURING AND DOWNLOADING OF DUSTMAPS**]
 - PyMultinest (<https://johannesbuchner.github.io/PyMultiNest/>) [**OPTIONAL**]
 - dynesty (<https://dynesty.readthedocs.io/en/latest/>)
-- isochrones (<https://isochrones.readthedocs.io/en/latest/>)
+- isochrones (<https://isochrones.readthedocs.io/en/latest/>) [**NEEDS EXTRA SETUP WITH `nosetests isochrones`**]
 
 **PyMultinest is an optional package and can be hard to install! If you're
 planning on doing BMA only then you can skip installing it!!**
 
 Most can be easily installed with pip or conda but some might have special
-instructions (like PyMultinest!!)
+instructions (like PyMultinest, **dustmaps** and **isochrones**!!)
 
 **ARIADNE** has been tested on OS X up to Catalina and Linux. It does **NOT**
 run on Windows because healpy, a dependency of dustmaps isn't available for
@@ -61,7 +61,7 @@ them!
 | ------------- |:-------------:|
 | Phoenix v2      | <ftp://phoenix.astro.physik.uni-goettingen.de/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/> |
 | Phoenix v2   wavelength file   | <ftp://phoenix.astro.physik.uni-goettingen.de/HiResFITS/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits> |
-| BT-Models      | <http://osubdd.ens-lyon.fr/phoenix/>  |
+| BT-Models      | <http://svo2.cab.inta-csic.es/theory/newov2/>  |
 | Castelli & Kurucz | <http://ssb.stsci.edu/cdbs/tarfiles/synphot3.tar.gz>      |
 | Kurucz 1993 | <http://ssb.stsci.edu/cdbs/tarfiles/synphot4.tar.gz>  |
 
@@ -173,10 +173,10 @@ Stars are defined in **ARIADNE** by their RA and DEC in degrees, a name, and
 optionally the Gaia DR3 source id, for example:
 
 ```python
-ra = 75.795
-dec = -30.399
-starname = 'NGTS-6'
-gaia_id = 4875693023844840448
+starname = 'WASP-19'
+ra = 148.41676021592826
+dec = -45.65910531582427
+gaia_id = 5411736896952029568
 
 s = Star(starname, ra, dec, g_id=gaia_id)
 ```
@@ -193,17 +193,17 @@ TIC, KIC IDs if any of those exist, its Gaia DR3 ID, and maximum line-of-sight
 extinction Av:
 
 ```
-			Gaia DR2 ID : 4875693023844840448
-			TIC : 1528696
-			Effective temperature : 4975.000 +/- 104.390
-			Stellar radius : 0.656 +/- 0.141
-			Stellar Luminosity : 0.238 +/- 0.003
-			Parallax : 3.297 +/- 0.036
-			Maximum Av : 0.030
+                        Gaia DR2 ID : 5411736896952029568
+			Gaia Effective temperature : 5458.333 +/- 109.667
+			Gaia Stellar radius : 1.001 +/- 0.195
+			Gaia Stellar Luminosity : 0.802 +/- 0.009
+			Gaia Parallax : 3.751 +/- 0.024
+			Bailer-Jones distance : 265.144 +/- 0.620
+			Maximum Av : 0.581
 ```
 
 If you already know any of those values, you can override the search for them by
-providing them in the Star constructor with their respective uncerainties.
+providing them in the Star constructor with their respective uncertainties.
 Likewise if you already have the magnitudes and wish to override the on-line
 search, you can provide a dictionary where the keys are the filters and values
 are the mag, mag_err tuples.
@@ -215,27 +215,28 @@ method from Star:
 s.print_mags()
 ```
 
-This will print the filters used, magnitudes and uncertainties. For NGTS-6 this
+This will print the filters used, magnitudes and uncertainties. For WASP-19 this
 would look like this:
 
 ```
-		     Filter     	Magnitude	Uncertainty
-		----------------	---------	-----------
-		    2MASS_H     	 11.7670 	  0.0380
-		    2MASS_J     	 12.2220 	  0.0330
-		    2MASS_Ks    	 11.6500 	  0.0320
-		GROUND_JOHNSON_V	 14.0870 	  0.0210
-		GROUND_JOHNSON_B	 15.1710 	  0.0140
-		  GaiaDR2v2_G   	 13.8175 	  0.0006
-		  GaiaDR2v2_RP  	 13.1127 	  0.0015
-		  GaiaDR2v2_BP  	 14.4012 	  0.0027
-		     SDSS_g     	 14.6390 	  0.0580
-		     SDSS_i     	 13.3780 	  0.0570
-		     SDSS_r     	 13.7030 	  0.0320
-		  WISE_RSR_W1   	 11.5550 	  0.0270
-		  WISE_RSR_W2   	 11.6360 	  0.0270
-		   GALEX_NUV    	 21.9520 	  0.4090
-		      TESS      	 13.1686 	  0.0062
+		       Filter       	Magnitude	Uncertainty
+		--------------------	---------	-----------
+		    SkyMapper_u     	 14.1050 	  0.0070
+		    SkyMapper_v     	 13.7370 	  0.0060
+		  GROUND_JOHNSON_B  	 16.7920 	  0.1820
+		    SkyMapper_g     	 12.4320 	  0.0030
+		    GaiaDR2v2_BP    	 12.5227 	  0.0017
+		  GROUND_JOHNSON_V  	 16.0100 	  0.0000
+		    SkyMapper_r     	 12.0630 	  0.0050
+		    GaiaDR2v2_G     	 12.1088 	  0.0005
+		    SkyMapper_i     	 11.8740 	  0.0050
+		    GaiaDR2v2_RP    	 11.5532 	  0.0014
+		    SkyMapper_z     	 11.8610 	  0.0080
+		      2MASS_J       	 10.9110 	  0.0260
+		      2MASS_H       	 10.6020 	  0.0220
+		      2MASS_Ks      	 10.4810 	  0.0230
+		    WISE_RSR_W1     	 10.4360 	  0.0230
+		    WISE_RSR_W2     	 10.4940 	  0.0200
 ```
 **Note:**  **ARIADNE** automatically prints and saves the used magnitudes and
 filters to a file.
@@ -243,23 +244,57 @@ filters to a file.
 The way the photometry retrieval works is that Gaia DR2 crossmatch catalogs are
 queried for the Gaia ID, these crossmatch catalogs exist for ALL-WISE, APASS,
 Pan-STARRS1, SDSS, 2MASS and Tycho-2, so finding photometry relies on these
-crossmatches. In the case of NGTS-6, there are also Pan-STARRS1 photometry which
-**ARIADNE** couldn't find due to the Pan-STARRS1 source not being identified in
-the Gaia DR2 crossmatch, in this case if you wanted to add that photometry
-manually, you can do so by using the `add_mag` method from Star, for example, if
-you wanted to add the PS1_r mag to our `Star` object you would do:
+crossmatches. For example, if we were to analyze NGTS-6, there are Pan-STARRS1
+photometry which **ARIADNE** couldn't find due to the Pan-STARRS1 source not
+being identified in the Gaia DR2 crossmatch, in this case if you wanted to add
+that photometry manually, you can do so by using the `add_mag` method from
+Star, for example, if you wanted to add the PS1_r mag to our `Star` object 
+you would do:
 
 ```python
 s.add_mag(13.751, 0.032, 'PS1_r')
 ```
 
-If for whatever reason **ARIADNE** found a bad photometry point and you needed
-to remove it, you can invoke the `remove_mag` method. For example you wanted
+If for whatever reason **ARIADNE** found a bad photometry point, and you needed
+to remove it, you can invoke the `remove_mag` method. For example, you wanted
 to remove the TESS magnitude due to it being from a blended source, you can just
 run
 
 ```python
 s.remove_mag('NGTS')
+```
+
+In the specific example of WASP-19, we see that GROUND_JOHNSON_B and GROUND_JOHNSON_V
+are likely not the correct photometry. Instead the correct ones are 13.054 and 12.248,
+respectively.
+We can correct this mistake:
+```python
+s.remove_mag('GROUND_JOHNSON_B')
+s.remove_mag('GROUND_JOHNSON_V')
+s.add_mag(13.054, 0.048, 'GROUND_JOHNSON_B')
+s.add_mag(12.248, 0.069, 'GROUND_JOHNSON_V')
+```
+
+And a new call to `s.print_mags()` would yield:
+```
+		       Filter       	Magnitude	Uncertainty
+		--------------------	---------	-----------
+		    SkyMapper_u     	 14.1050 	  0.0070
+		    SkyMapper_v     	 13.7370 	  0.0060
+		  GROUND_JOHNSON_B  	 13.0540 	  0.0480
+		    SkyMapper_g     	 12.4320 	  0.0030
+		    GaiaDR2v2_BP    	 12.5227 	  0.0017
+		  GROUND_JOHNSON_V  	 12.2480 	  0.0690
+		    SkyMapper_r     	 12.0630 	  0.0050
+		    GaiaDR2v2_G     	 12.1088 	  0.0005
+		    SkyMapper_i     	 11.8740 	  0.0050
+		    GaiaDR2v2_RP    	 11.5532 	  0.0014
+		    SkyMapper_z     	 11.8610 	  0.0080
+		      2MASS_J       	 10.9110 	  0.0260
+		      2MASS_H       	 10.6020 	  0.0220
+		      2MASS_Ks      	 10.4810 	  0.0230
+		    WISE_RSR_W1     	 10.4360 	  0.0230
+		    WISE_RSR_W2     	 10.4940 	  0.0200
 ```
 
 A list of allowed filters can be found
@@ -280,10 +315,10 @@ changing the dustmap used. We provide following dustmaps:
 - [Lenz, Hensley & Doré (2017)](https://arxiv.org/abs/1706.00011)
 - [Bayestar (2019)](https://ui.adsabs.harvard.edu/abs/2019ApJ...887...93G)
 
-These maps are all implemented through the
+**These maps are all implemented through the
 [dustmaps](https://dustmaps.readthedocs.io/en/latest/index.html) package and
 need to be downloaded. Instructions to download the dustmaps can be found in
-its documentation.
+its documentation.**
 
 To change the dustmap you need to provide the `dustmap` parameter to the `Star` constructor, for example:
 
@@ -417,6 +452,19 @@ f.prior_setup = {
 	'rad': ('default'),
 	'Av': ('fixed', 0)
 }
+```
+Though leaving everything at default usually works well enough.
+
+```python
+f.prior_setup = {
+    'teff': ('default'),
+    'logg': ('default'),
+    'z': ('default'),
+    'dist': ('default'),
+    'rad': ('default'),
+    'Av': ('default')
+}
+
 ```
 
 After having set up everything we can finally initialize the fitter and start
