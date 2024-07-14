@@ -404,7 +404,7 @@ class SEDPlotter:
         # Create plot layout
 
         f = plt.figure(figsize=self.figsize)
-        gs = GridSpec(2, 1, height_ratios=[3, 0.5], hspace=0.05)
+        gs = GridSpec(2, 1, height_ratios=[3, 0.75], hspace=0.05)
 
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
@@ -442,7 +442,7 @@ class SEDPlotter:
         ax_r.axhline(y=0, lw=2, ls='--', c='k', alpha=.7)
 
         ax_r.errorbar(self.wave, norm_res, zorder=3,
-                      xerr=self.bandpass, yerr=self.flux_er,
+                      xerr=self.bandpass, yerr=np.array(self.flux_er) / errors,
                       fmt=',', ecolor=self.error_color, marker=None)
         ax_r.scatter(self.wave, norm_res, zorder=3,
                      edgecolors='black', marker=self.marker,
