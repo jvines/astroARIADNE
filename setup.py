@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-try:
-    from setuptools import (setup, find_packages)
-except ImportError:
-    from distutils.core import (setup, find_packages)
+from setuptools import (setup, find_namespace_packages)
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
@@ -21,7 +18,7 @@ setup(
     long_description_content_type="text/markdown",
     license="MIT",
     url="https://github.com/jvines/astroARIADNE",
-    packages=find_packages(),
+    packages=find_namespace_packages(),
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         'Intended Audience :: Science/Research',
