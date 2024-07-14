@@ -44,7 +44,10 @@ except ModuleNotFoundError:
         '(py)MultiNest installation (or libmultinest.dylib) not detected.'
     )
 
-set_start_method('fork')
+if sys.platform == 'darwin':
+    set_start_method('spawn', force=True)
+else:
+    set_start_method('fork', force=True)
 
 
 class Fitter:
