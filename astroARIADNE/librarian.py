@@ -610,8 +610,9 @@ class Librarian:
 
     def _get_apass(self, cat):
         print('Checking catalog APASS')
-        mask = cat['recno'] == int(self.ids['APASS'])
-        self._retrieve_from_cat(cat[mask], 'APASS')
+        CatalogWarning('APASS', 5).warn()
+        # mask = cat['recno'] == int(self.ids['APASS'])
+        # self._retrieve_from_cat(cat[mask], 'APASS')
 
     def _get_wise(self, cat):
         print('Checking catalog All-WISE')
