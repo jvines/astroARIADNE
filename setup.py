@@ -8,7 +8,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="astroARIADNE",
-    version="1.1.1",
+    version="1.1.2",
     author="Jose Vines",
     author_email="jose.vines@ug.uchile.cl",
     maintainer="Jose Vines",
