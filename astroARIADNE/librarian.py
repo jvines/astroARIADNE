@@ -37,8 +37,10 @@ class Librarian:
     filter_names = filter_names
 
     # Catalogs magnitude names
-    __apass_mags = ['Vmag', 'Bmag', 'g_mag', 'r_mag', 'i_mag']
-    __apass_errs = ['e_Vmag', 'e_Bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
+    __apass_mags = ['Vmag', 'Bmag', "g'mag", "r'mag", "i'mag"]
+    #__apass_mags = ['Vmag', 'Bmag', 'g_mag', 'r_mag', 'i_mag']
+    __apass_errs = ['e_Vmag', 'e_Bmag', "e_g'mag", "e_r'mag", "e_i'mag"]
+    #__apass_errs = ['e_Vmag', 'e_Bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
     __apass_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
                        'SDSS_g', 'SDSS_r', 'SDSS_i']
     __ascc_mags = ['Vmag', 'Bmag']  # , 'Jmag', 'Hmag', 'Kmag']
@@ -608,11 +610,20 @@ class Librarian:
         else:
             self._retrieve_from_stromgren(cat[mask])
 
-    def _get_apass(self, cat):
-        print('Checking catalog APASS')
-        CatalogWarning('APASS', 5).warn()
+    # def _get_apass(self, cat):
+    #     print('Checking catalog APASS')
+    #     CatalogWarning('APASS', 5).warn()
         # mask = cat['recno'] == int(self.ids['APASS'])
         # self._retrieve_from_cat(cat[mask], 'APASS')
+
+    def _get_apass(self, cat):
+        print('Checking catalog APASS')
+        cat.sort("_r")
+
+        if len(cat) == 0:
+            CatalogWarning('APASS', 5).warn()
+            return
+        self._retrieve_from_cat(cat[0:1], 'APASS')
 
     def _get_wise(self, cat):
         print('Checking catalog All-WISE')
