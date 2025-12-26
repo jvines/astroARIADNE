@@ -3,13 +3,14 @@ import inspect
 import os
 import numpy as np
 
-from pkg_resources import resource_filename
+from importlib.resources import files
 
 __ROOT__ = '/'.join(os.path.abspath(inspect.getfile(inspect.currentframe())
                                     ).split('/')[:-1])
-gridsdir = resource_filename('astroARIADNE', 'Datafiles/model_grids')
-priorsdir = resource_filename('astroARIADNE', 'Datafiles/prior')
-filesdir = resource_filename('astroARIADNE', 'Datafiles')
+_datafiles = files('astroARIADNE').joinpath('Datafiles')
+gridsdir = str(_datafiles.joinpath('model_grids'))
+priorsdir = str(_datafiles.joinpath('prior'))
+filesdir = str(_datafiles)
 
 try:
     modelsdir = os.environ['ARIADNE_MODELS']

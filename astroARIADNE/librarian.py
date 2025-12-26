@@ -631,11 +631,28 @@ class Librarian:
         except TypeError:
             CatalogWarning(name, 5).warn()
             return
+
+        # Try multiple possible column names for robustness against Vizier schema changes
+        # Changed 2024-12: Vizier renamed '_2MASS' to '2MASS' (removed underscore)
+        possible_columns = ['2MASS', '_2MASS', '_2M', 'Designation']
+        column_to_use = None
+
+        for col in possible_columns:
+            if col in cat.colnames:
+                column_to_use = col
+                break
+
+        if column_to_use is None:
+            warning_msg = f"No 2MASS identifier column found in Vizier results. "
+            warning_msg += f"Available columns: {cat.colnames}"
+            CatalogWarning(name, 6, warning_msg).warn()
+            return
+
         if name == '2MASS':
-            mask = cat['_2MASS'] == self.ids['2MASS']
+            mask = cat[column_to_use] == self.ids['2MASS']
             self._retrieve_from_2mass(cat[mask], '2MASS')
         else:
-            mask = cat['_2MASS'] == self.ids['2MASS']
+            mask = cat[column_to_use] == self.ids['2MASS']
             self._retrieve_from_cat(cat[mask], 'GLIMPSE')
 
     def _get_sdss(self, cat):
@@ -748,7 +765,7 @@ class Librarian:
     @staticmethod
     def _get_gaia_id(ra, dec, radius):
         c = SkyCoord(ra, dec, unit=(u.deg, u.deg), frame='icrs')
-        j = Gaia.cone_search_async(c, radius, table_name='gaiadr3.gaia_source')
+        j = Gaia.cone_search_async(c, radius=radius, table_name='gaiadr3.gaia_source')
         res = j.get_results()
         return res['source_id'][0]
 
