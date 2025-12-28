@@ -223,15 +223,28 @@ class Librarian:
             """
         j = Gaia.launch_job_async(query)
         res = j.get_results()
-        if len(res) > 1:
-            res = Table.from_pandas(res.to_pandas().dropna())
-        self.dr2_id = res['source_id'][0]
-        self.plx, self.plx_e = self._get_parallax(res)
-        self.temp, self.temp_e = self._get_teff(res)
-        self.rad, self.rad_e = self._get_radius(res)
-        self.lum, self.lum_e = self._get_lum(res)
-        self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
-                                                    self.radius, self.g_id)
+
+        # Check if star exists in DR2 (some DR3 stars have no DR2 counterpart)
+        if len(res) == 0:
+            print(f"Star {self.g_id} exists in Gaia DR3 but not in DR2.")
+            print("Using DR3 data only. Some parameters may be unavailable.")
+            self.dr2_id = None
+            self.plx, self.plx_e = 0, 0
+            self.temp, self.temp_e = 0, 0
+            self.rad, self.rad_e = 0, 0
+            self.lum, self.lum_e = 0, 0
+            self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
+                                                        self.radius, self.g_id)
+        else:
+            if len(res) > 1:
+                res = Table.from_pandas(res.to_pandas().dropna())
+            self.dr2_id = res['source_id'][0]
+            self.plx, self.plx_e = self._get_parallax(res)
+            self.temp, self.temp_e = self._get_teff(res)
+            self.rad, self.rad_e = self._get_radius(res)
+            self.lum, self.lum_e = self._get_lum(res)
+            self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
+                                                        self.radius, self.g_id)
         pass
 
     def gaia_query(self):
@@ -249,6 +262,20 @@ class Librarian:
             'Gaia': self.g_id,
             'SkyMapper': self.g_id,
         }
+
+        # Skip DR2 catalog crossmatches if star has no DR2 counterpart
+        if self.dr2_id is None:
+            print("Skipping DR2 catalog crossmatches (star has no DR2 counterpart)")
+            for cat in ['TYCHO2', 'APASS', '2MASS', 'Pan-STARRS', 'SDSS', 'Wise']:
+                IDS[cat] = 'skipped'
+            IDS['GALEX'] = ''
+            IDS['TESS'] = ''
+            IDS['MERMILLIOD'] = ''
+            IDS['STROMGREN_PAUNZ'] = ''
+            IDS['STROMGREN_HAUCK'] = ''
+            self.ids = IDS
+            return
+
         for c, n in zip(cats, names):
             if c == 'apassdr9':
                 cat = 'APASS'
@@ -430,6 +457,9 @@ class Librarian:
 
     def _retrieve_from_mermilliod(self, cat):
         print('Checking catalog Mermilliod')
+        if self.dr2_id is None:
+            CatalogWarning('MERMILLIOD', 5).warn()
+            return
         mask = cat['source_id'] == self.dr2_id
         cat = cat[mask][0]
         v = cat['Vmag']
@@ -465,6 +495,9 @@ class Librarian:
 
     def _retrieve_from_stromgren(self, cat, n):
         print('Checking catalog ' + n)
+        if self.dr2_id is None:
+            CatalogWarning(n, 5).warn()
+            return
         mask = cat['source_id'] == self.dr2_id
         cat = cat[mask][0]
         y = cat['Vmag']
