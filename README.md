@@ -1,29 +1,37 @@
 # ARIADNE (spectrAl eneRgy dIstribution bAyesian moDel averagiNg fittEr)
 ## Characterize stellar atmospheres easily!
-**ARIADNE** Is a code written in python 3.7+ designed to fit broadband
+**ARIADNE** Is a code written in Python 3.11+ designed to fit broadband
 photometry to different stellar atmosphere models automatically using Nested
 Sampling algorithms.
 
 # Installation
 
-You can install **ARIADNE** with `pip install astroARIADNE`
+**ARIADNE** requires Python 3.11 or higher and uses modern Python packaging standards (PEP 517/518).
 
-Otherwise, you can clone this repository with
+## Quick Install (Recommended)
 
+Install the latest stable version from PyPI:
+
+```bash
+pip install astroariadne
 ```
+
+## Development Install
+
+To install from source for development or to use the latest unreleased features:
+
+```bash
 git clone https://github.com/jvines/astroARIADNE.git
 cd astroARIADNE
+pip install -e .
 ```
 
-And then run
+The `-e` flag installs in editable mode, allowing you to modify the source code.
 
-```
-python setupy.py install
-```
+## Dependencies
 
-But for the code to work, first you must install the necessary dependencies.
+All required dependencies are automatically installed via pip. The main packages include:
 
-## Dependencies:
 - Numpy (<https://numpy.org/>)
 - Scipy (<https://www.scipy.org/>)
 - Pandas (<https://pandas.pydata.org/>)
@@ -37,7 +45,7 @@ But for the code to work, first you must install the necessary dependencies.
 - matplotlib (<https://matplotlib.org/>)
 - termcolor (<https://pypi.org/project/termcolor/>)
 - extinction (<https://extinction.readthedocs.io/en/latest/>)
-- pyphot (<http://mfouesneau.github.io/docs/pyphot/>) [**MIGHT NEED MANUAL INSTALLATION DUE OT NOT BEING IN PYPI**]
+- pyphot (<http://mfouesneau.github.io/docs/pyphot/>)
 - dustmaps (<https://dustmaps.readthedocs.io/en/latest/>) [**NEEDS CONFIGURING AND DOWNLOADING OF DUSTMAPS**]
 - PyMultinest (<https://johannesbuchner.github.io/PyMultiNest/>) [**OPTIONAL**]
 - dynesty (<https://dynesty.readthedocs.io/en/latest/>)
@@ -46,12 +54,48 @@ But for the code to work, first you must install the necessary dependencies.
 **PyMultinest is an optional package and can be hard to install! If you're
 planning on doing BMA only then you can skip installing it!!**
 
-Most can be easily installed with pip or conda but some might have special
-instructions (like PyMultinest, **dustmaps** and **isochrones**!!)
+### Special Installations
 
-**ARIADNE** has been tested on OS X up to Catalina and Linux. It does **NOT**
-run on Windows because healpy, a dependency of dustmaps isn't available for
-Windows (see [https://github.com/healpy/healpy/issues/25#issue-2987102](https://github.com/healpy/healpy/issues/25#issue-2987102))
+#### dustmaps Configuration
+
+After installing ARIADNE, you must download and configure dustmaps:
+
+```python
+# Download SFD dust map
+import dustmaps.sfd
+dustmaps.sfd.fetch()
+
+# Download Bayestar dust map
+import dustmaps.bayestar
+dustmaps.bayestar.fetch()
+```
+
+See the [dustmaps documentation](https://dustmaps.readthedocs.io/en/latest/) for other available dust maps.
+
+#### isochrones Setup
+
+The isochrones package requires additional setup after installation:
+
+```bash
+# This downloads required stellar evolution models
+python -c "from isochrones import get_bc_grid; get_bc_grid('mist')"
+```
+
+Or run the test suite which handles setup automatically:
+```bash
+nosetests isochrones
+```
+
+## Platform Support
+
+**ARIADNE** has been tested on:
+- **Linux** (fully supported)
+- **macOS** (fully supported, tested up to Catalina and later)
+- **Windows** (limited support - healpy dependency may cause issues, see [healpy/healpy#25](https://github.com/healpy/healpy/issues/25))
+
+## Build System
+
+ARIADNE uses `pyproject.toml` for modern, declarative package configuration. Dependency installation and version management are handled automatically by pip/setuptools.
 
 ## In order to plot the models, you have to download them first:
 But note that plotting the SED model is optional. You can run the code without
@@ -534,8 +578,8 @@ method to clear opened figures with `artist.clean()`
 If you don't have the models in your computer, then the `plot_SED` method will
 fail, as it needs the complete model grid.
 
-An example usage file is provided in the repository called `test_bma.py` for the
-BMA approach and test.py for single model fitting.
+An example usage file is provided in the repository called `test_bma.py` demonstrating
+the recommended BMA (Bayesian Model Averaging) approach.
 
 ## OUTPUT FILES
 After **ARIADNE** has finished running, it will output a series of files and
