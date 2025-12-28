@@ -184,6 +184,8 @@ class Star:
                 self.g_id = lib.g_id
                 self.tic = lib.tic
                 self.kic = lib.kic
+                # Store RAVE parameters for use in priors
+                self.rave_params = lib.rave_params
             else:
                 print(
                     colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)
@@ -193,6 +195,7 @@ class Star:
                 lib = None
                 self.tic = False
                 self.kic = False
+                self.rave_params = None
 
             # [plx, plx_e, dist, dist_e, rad, rad_e, temp, temp_e, lum, lum_e]
             libouts = extract_from_lib(lib)

@@ -419,43 +419,84 @@ class Fitter:
     def _default_priors(self):
         global order
         defaults = dict()
-        # Logg prior setup.
-        if self.star.get_logg:
+
+        # Initialize prior source tracking
+        if not hasattr(self, 'prior_sources'):
+            self.prior_sources = {}
+
+        # Teff: RAVE DR6 star-specific or population prior
+        if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
+            teff_rave = self.star.rave_params['teff']
+            teff_err_rave = self.star.rave_params['teff_err']
+            defaults['teff'] = st.norm(loc=teff_rave, scale=teff_err_rave)
+            self.prior_sources['teff'] = 'rave_star'
+            print("Using RAVE DR6 Teff prior (star-specific)")
+        else:
+            with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
+                defaults['teff'] = pickle.load(jar)
+            self.prior_sources['teff'] = 'rave_population'
+            print("Using population Teff prior (no RAVE match)")
+
+        # logg: RAVE DR6, isochrone, or population prior
+        if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
+            logg_rave = self.star.rave_params['logg']
+            logg_err_rave = self.star.rave_params['logg_err']
+            defaults['logg'] = st.norm(loc=logg_rave, scale=logg_err_rave)
+            self.prior_sources['logg'] = 'rave_star'
+            print("Using RAVE DR6 logg prior (star-specific)")
+        elif self.star.get_logg:
             defaults['logg'] = st.norm(
                 loc=self.star.logg, scale=self.star.logg_e)
+            self.prior_sources['logg'] = 'isochrone'
+            print("Using isochrone logg estimate")
         else:
             # with open(priorsdir + '/logg_ppf.pkl', 'rb') as jar:
             #     defaults['logg'] = pickle.load(jar)
             defaults['logg'] = st.uniform(loc=3.5, scale=2.5)
-        # Teff prior from RAVE
-        with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
-            defaults['teff'] = pickle.load(jar)
-        # [Fe/H] prior setup.
-        defaults['z'] = st.norm(loc=-0.125, scale=0.234)
+            self.prior_sources['logg'] = 'uniform_default'
+            print("Using population logg prior")
+
+        # [Fe/H]: RAVE DR6 or population prior
+        if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
+            feh_rave = self.star.rave_params['feh']
+            feh_err_rave = self.star.rave_params['feh_err']
+            defaults['z'] = st.norm(loc=feh_rave, scale=feh_err_rave)
+            self.prior_sources['z'] = 'rave_star'
+            print("Using RAVE DR6 [Fe/H] prior (star-specific)")
+        else:
+            defaults['z'] = st.norm(loc=-0.125, scale=0.234)
+            self.prior_sources['z'] = 'population'
+            print("Using population [Fe/H] prior")
         # Distance prior setup.
         if not self._norm:
             if self.star.dist != -1:
                 defaults['dist'] = st.truncnorm(
                     a=0, b=1e100, loc=self.star.dist, scale=3 * self.star.dist_e
                 )
+                self.prior_sources['dist'] = 'gaia'
             else:
                 defaults['dist'] = st.uniform(loc=1, scale=3000)
+                self.prior_sources['dist'] = 'uniform_default'
             # Radius prior setup.
             defaults['rad'] = st.uniform(loc=0.05, scale=100)
+            self.prior_sources['rad'] = 'uniform_default'
         # Normalization prior setup.
         else:
             # up = 1 / 1e-30
             # defaults['norm'] = st.truncnorm(a=0, b=up, loc=1e-20, scale=1e-10)
             defaults['norm'] = st.uniform(loc=0, scale=1e-20)
+            self.prior_sources['norm'] = 'uniform_default'
         # Extinction prior setup.
         if self.star.Av == 0.:
             av_idx = 4 if self._norm else 5
             self.coordinator[av_idx] = 1
             self.fixed[av_idx] = 0
             defaults['Av'] = None
+            self.prior_sources['Av'] = 'fixed_zero'
         else:
             if self.star.Av_e is None:
                 defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
+                self.prior_sources['Av'] = 'dustmap_uniform'
             else:
                 mu = self.star.Av
                 sig = self.star.Av_e
@@ -463,6 +504,7 @@ class Fitter:
                 up = 100
                 b, a = (up - mu) / sig, (low - mu) / sig
                 defaults['Av'] = st.truncnorm(loc=mu, scale=sig, a=a, b=b)
+                self.prior_sources['Av'] = 'dustmap'
         # Noise model prior setup.
         mask = self.star.filter_mask
         flxs = self.star.flux[mask]
@@ -504,8 +546,11 @@ class Fitter:
                     if k == 'logg' or k == 'teff':
                         if k == 'teff':
                             PriorError('teff', 2).warn()
-                        with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
-                            prior_dict[k] = pickle.load(jar)
+                            with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
+                                prior_dict[k] = pickle.load(jar)
+                        else:  # k == 'logg'
+                            with open(priorsdir + '/logg_ppf.pkl', 'rb') as jar:
+                                prior_dict[k] = pickle.load(jar)
                         prior_out += k + '\tRAVE\n'
 
             else:
@@ -544,6 +589,162 @@ class Fitter:
         del ff
         self.priors = prior_dict
         pass
+
+    def show_priors(self, return_string=False):
+        """Display priors in statistical notation.
+
+        Parameters
+        ----------
+        return_string : bool, optional
+            If True, return the formatted string instead of printing.
+            Default: False
+
+        Returns
+        -------
+        str or None
+            Formatted prior information if return_string=True, else None
+        """
+        global order
+
+        # Physical parameters to display (skip noise priors)
+        physical_params = []
+        for param_name in self.priors.keys():
+            # Skip noise priors
+            if param_name.endswith('_noise'):
+                continue
+            physical_params.append(param_name)
+
+        # Calculate maximum widths for formatting
+        max_param_width = max(len(p) for p in physical_params)
+        max_prior_width = 0
+
+        # Format each prior
+        prior_strs = {}
+        for param_name in physical_params:
+            prior_obj = self.priors[param_name]
+
+            # Check if parameter is fixed
+            param_idx = np.where(order == param_name)[0]
+            if len(param_idx) > 0 and self.coordinator[param_idx[0]] == 1:
+                fixed_value = self.fixed[param_idx[0]]
+                prior_str = f"Fixed({fixed_value:.4f})"
+            else:
+                prior_str = self._format_prior_notation(param_name, prior_obj)
+
+            prior_strs[param_name] = prior_str
+            max_prior_width = max(max_prior_width, len(prior_str))
+
+        # Build table with box-drawing characters
+        # Add padding
+        param_col_width = max(max_param_width + 2, 12)  # Min width 12 for "Parameter"
+        prior_col_width = max(max_prior_width + 2, 30)  # Min width 30
+
+        # Table borders
+        top_border = '╔' + '═' * param_col_width + '╦' + '═' * prior_col_width + '╗'
+        header_sep = '╠' + '═' * param_col_width + '╬' + '═' * prior_col_width + '╣'
+        bottom_border = '╚' + '═' * param_col_width + '╩' + '═' * prior_col_width + '╝'
+
+        # Header
+        header = '║ ' + 'Parameter'.ljust(param_col_width - 2) + ' ║ ' + 'Prior'.ljust(prior_col_width - 2) + ' ║'
+
+        # Build output
+        lines = [top_border, header, header_sep]
+
+        # Sort parameters in logical order
+        param_order = ['teff', 'logg', 'z', 'dist', 'rad', 'norm', 'Av']
+        sorted_params = [p for p in param_order if p in physical_params]
+        # Add any remaining parameters not in the order list
+        sorted_params.extend([p for p in physical_params if p not in param_order])
+
+        for param_name in sorted_params:
+            param_cell = '║ ' + param_name.ljust(param_col_width - 2)
+            prior_cell = ' ║ ' + prior_strs[param_name].ljust(prior_col_width - 2) + ' ║'
+            lines.append(param_cell + prior_cell)
+
+        lines.append(bottom_border)
+
+        output = '\n'.join(lines)
+
+        if return_string:
+            return output
+        else:
+            print(output)
+            return None
+
+    def _format_prior_notation(self, param_name, prior_obj):
+        """Format scipy.stats distribution in statistical notation.
+
+        Parameters
+        ----------
+        param_name : str
+            Parameter name (e.g., 'teff', 'logg')
+        prior_obj : scipy.stats distribution
+            The prior distribution object
+
+        Returns
+        -------
+        str
+            Formatted statistical notation
+        """
+        # Check for RAVE population prior
+        if hasattr(self, 'prior_sources') and param_name in self.prior_sources:
+            if self.prior_sources[param_name] == 'rave_population':
+                return "RAVE (population)"
+
+        # Get distribution type name
+        dist_name = type(prior_obj).__name__
+
+        try:
+            if 'norm_gen' in dist_name:  # Normal distribution
+                mu = prior_obj.dist.loc
+                sigma = prior_obj.dist.scale
+                return f"N({mu:.2f}, {sigma:.2f})"
+
+            elif 'uniform_gen' in dist_name:  # Uniform distribution
+                a = prior_obj.dist.loc
+                b = prior_obj.dist.loc + prior_obj.dist.scale
+                # Format with appropriate precision
+                if b > 1000:
+                    return f"U({a:.1f}, {b:.0f})"
+                elif b < 1:
+                    return f"U({a:.4f}, {b:.4f})"
+                else:
+                    return f"U({a:.2f}, {b:.2f})"
+
+            elif 'truncnorm_gen' in dist_name:  # Truncated normal
+                mu = prior_obj.dist.loc
+                sigma = prior_obj.dist.scale
+                a_std = prior_obj.dist.a
+                b_std = prior_obj.dist.b
+
+                # Convert standardized bounds to actual bounds
+                a_actual = mu + a_std * sigma
+                b_actual = mu + b_std * sigma
+
+                # Format bounds with 'inf' for very large values
+                if abs(a_actual) < 1e-6:
+                    a_str = "0"
+                elif abs(a_std) > 1e10:
+                    a_str = "-inf" if a_std < 0 else "inf"
+                else:
+                    a_str = f"{a_actual:.2f}"
+
+                if abs(b_std) > 1e10:
+                    b_str = "inf"
+                elif b_actual > 1e10:
+                    b_str = "inf"
+                else:
+                    b_str = f"{b_actual:.2f}"
+
+                return f"TN({mu:.2f}, {sigma:.2f}, [{a_str}, {b_str}])"
+
+            else:
+                # Fallback for custom/unknown distributions
+                return f"{dist_name}"
+
+        except (AttributeError, TypeError) as e:
+            # Handle special cases or distributions without standard attributes
+            return f"{dist_name} (custom)"
 
     def fit(self):
         """Run fitting routine."""

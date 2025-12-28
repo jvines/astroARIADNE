@@ -143,7 +143,6 @@ class Librarian:
         self.tic = None
         self.kic = None
         self.ids = []
-        self.dr2_id = None
 
         self.used_filters = np.zeros(self.filter_names.shape[0])
         self.mags = np.zeros(self.filter_names.shape[0])
@@ -165,93 +164,138 @@ class Librarian:
         self.gaia_params()
         if mags:
             self.gaia_query()
+            self.rave_params = self.query_rave_params()
             self.get_magnitudes()
             idx = self.used_filters >= 1
             self.used_filters[idx] = 1
+        else:
+            self.rave_params = None
 
-        # self.close_logfile()
         pass
 
 
     def gaia_params(self):
-        """Retrieve parallax, radius, teff and lum from Gaia."""
-        # If gaia DR3 id is provided, query by id
+        """Query Gaia DR3 for stellar parameters."""
         query = f"""
-            SELECT
-                dr3.parallax, dr3.parallax_error,
-                dr3.pmra, dr3.pmra_error,
-                dr3.pmdec, dr3.pmdec_error,
-                dr3.radial_velocity, dr3.radial_velocity_error,
-                dr2.teff_val,
-                dr2.teff_percentile_lower,
-                dr2.teff_percentile_upper,
-                dr2.radius_val,
-                dr2.radius_percentile_lower,
-                dr2.radius_percentile_upper,
-                dr2.lum_val,
-                dr2.lum_percentile_lower,
-                dr2.lum_percentile_upper,
-                dr2.source_id2 AS source_id
-            FROM
-                gaiadr3.gaia_source AS dr3
-            JOIN
-                (SELECT
-                    n.dr3_source_id AS source_id,
-                    n.dr2_source_id AS source_id2,
-                    dr2.teff_val,
-                    dr2.teff_percentile_lower,
-                    dr2.teff_percentile_upper,
-                    dr2.radius_val,
-                    dr2.radius_percentile_lower,
-                    dr2.radius_percentile_upper,
-                    dr2.lum_val,
-                    dr2.lum_percentile_lower,
-                    dr2.lum_percentile_upper
-                FROM
-                    gaiadr3.dr2_neighbourhood AS n
-                JOIN
-                    gaiadr2.gaia_source AS dr2
-                ON
-                    n.dr2_source_id = dr2.source_id
-                WHERE
-                    n.dr3_source_id = {self.g_id}
-                ) AS dr2
-            ON
-                dr3.source_id = dr2.source_id
-            WHERE
-                dr3.source_id = {self.g_id}
-            """
+        SELECT
+            dr3.source_id,
+            dr3.parallax,
+            dr3.parallax_error,
+            dr3.pmra,
+            dr3.pmra_error,
+            dr3.pmdec,
+            dr3.pmdec_error,
+            dr3.radial_velocity,
+            dr3.radial_velocity_error,
+            dr3.teff_gspphot,
+            dr3.teff_gspphot_lower,
+            dr3.teff_gspphot_upper,
+            ap.radius_flame,
+            ap.radius_flame_lower,
+            ap.radius_flame_upper,
+            ap.lum_flame,
+            ap.lum_flame_lower,
+            ap.lum_flame_upper,
+            ap.mass_flame,
+            ap.mass_flame_lower,
+            ap.mass_flame_upper,
+            ap.age_flame,
+            ap.age_flame_lower,
+            ap.age_flame_upper
+        FROM
+            gaiadr3.gaia_source AS dr3
+        LEFT JOIN
+            gaiadr3.astrophysical_parameters AS ap
+        ON
+            dr3.source_id = ap.source_id
+        WHERE
+            dr3.source_id = {self.g_id}
+        """
+
         j = Gaia.launch_job_async(query)
         res = j.get_results()
 
-        # Check if star exists in DR2 (some DR3 stars have no DR2 counterpart)
         if len(res) == 0:
-            print(f"Star {self.g_id} exists in Gaia DR3 but not in DR2.")
-            print("Using DR3 data only. Some parameters may be unavailable.")
-            self.dr2_id = None
-            self.plx, self.plx_e = 0, 0
-            self.temp, self.temp_e = 0, 0
-            self.rad, self.rad_e = 0, 0
-            self.lum, self.lum_e = 0, 0
-            self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
-                                                        self.radius, self.g_id)
-        else:
-            if len(res) > 1:
-                res = Table.from_pandas(res.to_pandas().dropna())
-            self.dr2_id = res['source_id'][0]
-            self.plx, self.plx_e = self._get_parallax(res)
-            self.temp, self.temp_e = self._get_teff(res)
-            self.rad, self.rad_e = self._get_radius(res)
-            self.lum, self.lum_e = self._get_lum(res)
-            self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
-                                                        self.radius, self.g_id)
+            raise ValueError(f"Star {self.g_id} not found in Gaia DR3")
+
+        # Extract stellar parameters from DR3
+        self.plx, self.plx_e = self._get_parallax(res)
+        self.temp, self.temp_e = self._get_teff(res)
+        self.rad, self.rad_e = self._get_radius(res)
+        self.lum, self.lum_e = self._get_lum(res)
+        self.mass, self.mass_e = self._get_mass(res)
+        self.age, self.age_e = self._get_age(res)
+        self.dist, self.dist_e = self._get_distance(self.ra, self.dec,
+                                                    self.radius, self.g_id)
         pass
 
-    def gaia_query(self):
-        """Query Gaia to get different catalog IDs."""
-        cats = ['tycho2', 'panstarrs1', 'sdssdr9',
-                'allwise', 'tmass', 'apassdr9']
-        names = ['tycho', 'ps', 'sdss', 'allwise', 'tmass', 'apass']
+    def query_rave_params(self):
+        """Query RAVE DR6 for star-specific stellar parameters.
+
+        Returns dict with teff, logg, feh and their errors, or None if not found.
+        """
+        # Check if RAVE ID was found in crossmatch
+        if 'RAVE' not in self.ids or not self.ids['RAVE'] or self.ids['RAVE'] == 'skipped':
+            return None
+
+        rave_id = self.ids['RAVE']
+
+        try:
+            # Query RAVE DR6 catalog via Vizier using the ID
+            #  MADERA (MAtisse and DEgas used in RAve) stellar parameters
+            cat = Vizier.query_constraints(
+                catalog='III/283/madera',
+                ObsID=rave_id
+            )
+
+            if len(cat) == 0:
+                return None
+
+            rave_cat = cat[0]
+            if len(rave_cat) == 0:
+                return None
+
+            row = rave_cat[0]
+
+            if row['Qual'] == 1:
+                return None
+
+            rave_data = {
+                'teff': float(row['TeffmC']),
+                'teff_err': float(row['e_Teffm']),
+                'logg': float(row['loggmC']),
+                'logg_err': float(row['e_loggm']),
+                'feh': float(row['[m/H]mC']),
+                'feh_err': float(row['e_[m/H]m'])
+            }
+
+            print("RAVE DR6 parameters: ")
+            print(f"Teff={rave_data['teff']:.0f}±{rave_data['teff_err']:.0f}K")
+            print(f"logg={rave_data['logg']:.2f}±{rave_data['logg_err']:.2f}")
+            print(f"[Fe/H]={rave_data['feh']:.2f}±{rave_data['feh_err']:.2f}")
+
+            return rave_data
+
+        except Exception as e:
+            print(f"RAVE DR6 query failed: {e}")
+
+        return None
+
+
+    def _query_gaia_catalogs(self):
+        """Query Gaia DR3 for catalog crossmatches."""
+        # Table mappings DR2→DR3
+        catalog_map = {
+            'tycho2tdsc_merge': 'TYCHO2',
+            'panstarrs1': 'Pan-STARRS',
+            'sdssdr13': 'SDSS',
+            'allwise': 'Wise',
+            'tmass_psc_xsc': '2MASS',
+            'apassdr9': 'APASS',
+            'ravedr6': 'RAVE',
+            'skymapperdr2': 'SkyMapper'
+        }
+
         IDS = {
             'TYCHO2': '',
             'APASS': '',
@@ -260,64 +304,46 @@ class Librarian:
             'SDSS': '',
             'Wise': '',
             'Gaia': self.g_id,
-            'SkyMapper': self.g_id,
+            'SkyMapper': '',
+            'RAVE': '',
         }
 
-        # Skip DR2 catalog crossmatches if star has no DR2 counterpart
-        if self.dr2_id is None:
-            print("Skipping DR2 catalog crossmatches (star has no DR2 counterpart)")
-            for cat in ['TYCHO2', 'APASS', '2MASS', 'Pan-STARRS', 'SDSS', 'Wise']:
-                IDS[cat] = 'skipped'
-            IDS['GALEX'] = ''
-            IDS['TESS'] = ''
-            IDS['MERMILLIOD'] = ''
-            IDS['STROMGREN_PAUNZ'] = ''
-            IDS['STROMGREN_HAUCK'] = ''
-            self.ids = IDS
-            return
-
-        for c, n in zip(cats, names):
-            if c == 'apassdr9':
-                cat = 'APASS'
-            elif c == 'tmass':
-                cat = '2MASS'
-                c = 'tmass'
-            elif c == 'panstarrs1':
-                cat = 'Pan-STARRS'
-            elif c == 'sdssdr9':
-                cat = 'SDSS'
-            elif c == 'allwise':
-                cat = 'Wise'
-            elif c == 'tycho2':
-                cat = 'TYCHO2'
-            if cat in self.ignore:
-                IDS[cat] = 'skipped'
-                CatalogWarning(cat, 7).warn()
+        for table_name, catalog_name in catalog_map.items():
+            if catalog_name in self.ignore:
+                IDS[catalog_name] = 'skipped'
+                CatalogWarning(catalog_name, 7).warn()
                 continue
+
             query = f"""
-            SELECT
-                {n}.original_ext_source_id
-            FROM
-                gaiadr2.gaia_source AS gaia
-            JOIN
-                gaiadr2.{c}_best_neighbour AS {n}
-            ON gaia.source_id={n}.source_id
-            WHERE
-                gaia.source_id={self.dr2_id}
+                SELECT xmatch.original_ext_source_id
+                FROM gaiadr3.{table_name}_best_neighbour AS xmatch
+                WHERE xmatch.source_id = {self.g_id}
             """
-            j = Gaia.launch_job_async(query)
-            r = j.get_results()
-            if len(r):
-                IDS[cat] = r[0][0]
-            else:
-                IDS[cat] = 'skipped'
-                print('Star not found in catalog ' + cat, end='.\n')
+
+            try:
+                j = Gaia.launch_job_async(query)
+                r = j.get_results()
+                if len(r):
+                    IDS[catalog_name] = r[0][0]
+                else:
+                    IDS[catalog_name] = 'skipped'
+                    print(f'Star not found in catalog {catalog_name}', end='.\n')
+            except Exception as e:
+                IDS[catalog_name] = 'skipped'
+                print(f'Error querying {catalog_name}: {e}')
+
         IDS['GALEX'] = ''
         IDS['TESS'] = ''
         IDS['MERMILLIOD'] = ''
         IDS['STROMGREN_PAUNZ'] = ''
         IDS['STROMGREN_HAUCK'] = ''
-        self.ids = IDS
+        return IDS
+
+    def gaia_query(self):
+        """Query Gaia DR3 (with DR2 fallback) for catalog IDs."""
+        print("Querying Gaia DR3 for catalog crossmatches...")
+        self.ids = self._query_gaia_catalogs()
+        return
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -339,8 +365,11 @@ class Librarian:
                 CatalogWarning(c, 7).warn()
                 continue
 
+            # Skip if ID was not found (XMatch fallback already attempted in _query_gaia_catalogs)
             if self.ids[c] == 'skipped':
                 continue
+
+            # Load catalog from Vizier results (except for special cases handled below)
             if c != 'TESS':
                 try:
                     current_cat = cats[self.catalogs[c][0]]
@@ -351,6 +380,8 @@ class Librarian:
             else:
                 self._retrieve_from_tess()
                 continue
+
+            # Handle specific catalog types
             if c == 'APASS':
                 self._get_apass(current_cat)
                 continue
@@ -457,10 +488,10 @@ class Librarian:
 
     def _retrieve_from_mermilliod(self, cat):
         print('Checking catalog Mermilliod')
-        if self.dr2_id is None:
+        if self.g_id is None:
             CatalogWarning('MERMILLIOD', 5).warn()
             return
-        mask = cat['source_id'] == self.dr2_id
+        mask = cat['Source'] == self.g_id
         cat = cat[mask][0]
         v = cat['Vmag']
         v_e = cat['e_Vmag']
@@ -495,10 +526,10 @@ class Librarian:
 
     def _retrieve_from_stromgren(self, cat, n):
         print('Checking catalog ' + n)
-        if self.dr2_id is None:
+        if self.g_id is None:
             CatalogWarning(n, 5).warn()
             return
-        mask = cat['source_id'] == self.dr2_id
+        mask = cat['Source'] == self.g_id
         cat = cat[mask][0]
         y = cat['Vmag']
         y_e = cat['e_Vmag']
@@ -531,7 +562,10 @@ class Librarian:
 
     def _retrieve_from_galex(self, cat, name):
         print('Checking catalog GALEX')
-        mask = cat['source_id'] == self.dr2_id
+        mask = cat['Source'] == self.g_id
+        if mask.sum() == 0:
+            CatalogWarning('GALEX', 0).warn()
+            return
         cat = cat[mask][0]
         Fexf = cat['Fexf']
         Nexf = cat['Nexf']
@@ -716,17 +750,19 @@ class Librarian:
 
     def _get_skymapper(self, cat):
         print('Checking catalog SkyMapper DR1.1')
-        mask = cat['Gaiadr2Id1'] == self.ids['Gaia']
-        is_good_quality = cat[mask]['flags'] == 0
-        if is_good_quality:
-            self._retrieve_from_cat(cat[mask], 'SkyMapper')
-        else:
-            CatalogWarning('SkyMapper', 8).warn()
+        # Use SkyMapper ID from crossmatch
+        mask = cat['ObjectId'] == self.ids['SkyMapper']
+        if mask.sum() > 0:
+            is_good_quality = cat[mask]['flags'] == 0
+            if is_good_quality:
+                self._retrieve_from_cat(cat[mask], 'SkyMapper')
+            else:
+                CatalogWarning('SkyMapper', 8).warn()
 
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
         """Retrieve Bailer-Jones EDR3 distance."""
-        tries = [0.5, 0.25, 0.1, 1, 2, 3, 4][::-1]
+        tries = [0.1, 0.25, 0.5, 1][::-1]
         for t in tries:
             try:
                 failed = False
@@ -754,46 +790,77 @@ class Librarian:
 
     @staticmethod
     def _get_parallax(res):
+        """Extract parallax from DR3 results."""
+        if np.ma.is_masked(res['parallax'][0]):
+            CatalogWarning(0, 0).warn()
+            return -1, -1
         plx = res['parallax'][0]
         if plx <= 0:
             CatalogWarning(0, 0).warn()
             return -1, -1
         plx_e = res['parallax_error'][0]
-        # Parallax correction −52.8 ± 2.4 µas from Zinn+19
-        return plx + 0.0528, np.sqrt(plx_e ** 2 + 0.0024 ** 2)
+        # Parallax correction 37.0 ± 20 µas from Lindegren+21
+        return plx + 0.037, np.sqrt(plx_e ** 2 + 0.02 ** 2)
 
     @staticmethod
     def _get_radius(res):
-        rad = res['radius_val'][0]
+        """Extract radius from DR3 FLAME results."""
+        rad = res['radius_flame'][0]
         if np.ma.is_masked(rad):
             CatalogWarning('radius', 1).warn()
             return 0, 0
-        lo = res['radius_percentile_lower'][0]
-        up = res['radius_percentile_upper'][0]
+        lo = res['radius_flame_lower'][0]
+        up = res['radius_flame_upper'][0]
         rad_e = max([rad - lo, up - rad])
         return rad, 5 * rad_e
 
     @staticmethod
     def _get_teff(res):
-        teff = res['teff_val'][0]
+        """Extract Teff from DR3 GSP-Phot results."""
+        teff = res['teff_gspphot'][0]
         if np.ma.is_masked(teff):
             CatalogWarning('teff', 1).warn()
             return 0, 0
-        lo = res['teff_percentile_lower'][0]
-        up = res['teff_percentile_upper'][0]
+        lo = res['teff_gspphot_lower'][0]
+        up = res['teff_gspphot_upper'][0]
         teff_e = max([teff - lo, up - teff])
         return teff, teff_e
 
     @staticmethod
     def _get_lum(res):
-        lum = res['lum_val'][0]
+        """Extract luminosity from DR3 FLAME results."""
+        lum = res['lum_flame'][0]
         if np.ma.is_masked(lum):
             CatalogWarning('lum', 1).warn()
             return 0, 0
-        lo = res['lum_percentile_lower'][0]
-        up = res['lum_percentile_upper'][0]
+        lo = res['lum_flame_lower'][0]
+        up = res['lum_flame_upper'][0]
         lum_e = max([lum - lo, up - lum])
         return lum, lum_e
+
+    @staticmethod
+    def _get_mass(res):
+        """Extract mass from DR3 FLAME results."""
+        mass = res['mass_flame'][0]
+        if np.ma.is_masked(mass):
+            CatalogWarning('mass', 1).warn()
+            return 0, 0
+        lo = res['mass_flame_lower'][0]
+        up = res['mass_flame_upper'][0]
+        mass_e = max([mass - lo, up - mass])
+        return mass, mass_e
+
+    @staticmethod
+    def _get_age(res):
+        """Extract age from DR3 FLAME results."""
+        age = res['age_flame'][0]
+        if np.ma.is_masked(age):
+            CatalogWarning('age', 1).warn()
+            return 0, 0
+        lo = res['age_flame_lower'][0]
+        up = res['age_flame_upper'][0]
+        age_e = max([age - lo, up - age])
+        return age, age_e
 
     @staticmethod
     def _get_gaia_id(ra, dec, radius):
@@ -805,7 +872,7 @@ class Librarian:
     @staticmethod
     def get_catalogs(ra, dec, radius, catalogs):
         """Retrieve available catalogs for a star from Vizier."""
-        tries = [0.5, 0.25, 0.1, 1, 2, 3, 4][::-1]
+        tries = [0.1, 0.25, 0.5, 1][::-1]
         for t in tries:
             cats = Vizier.query_region(
                 SkyCoord(
@@ -848,7 +915,7 @@ class Librarian:
         coord = SkyCoord(ra=ra * u.deg,
                          dec=dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=radius)
-        xm = XMatch.query(cat1='vizier:I/345/gaia2', cat2=galex,
+        xm = XMatch.query(cat1='vizier:I/355/gaiadr3', cat2=galex,
                           colRA2='RAJ2000', colDec2='DEJ2000',
                           area=region, max_distance=radius)
         xm.sort('angDist')
@@ -858,11 +925,11 @@ class Librarian:
     def _gaia_mermilliod_xmatch(ra, dec, radius):
         coord = SkyCoord(ra=ra * u.deg,
                          dec=dec * u.deg, frame='icrs')
-        region = CircleSkyRegion(coord, radius=radius)
-        xm = XMatch.query(cat1='vizier:I/345/gaia2',
+        region = CircleSkyRegion(coord, radius=5 * u.arcmin)
+        xm = XMatch.query(cat1='vizier:I/355/gaiadr3',
                           cat2='vizier:II/168/ubvmeans',
                           colRA2='_RA', colDec2='_DE',
-                          area=region, max_distance=radius)
+                          area=region, max_distance=3 * u.arcmin)
         xm.sort('angDist')
         return xm
 
@@ -871,10 +938,10 @@ class Librarian:
         coord = SkyCoord(ra=ra * u.deg,
                          dec=dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=radius)
-        xm = XMatch.query(cat1='vizier:I/345/gaia2',
+        xm = XMatch.query(cat1='vizier:I/355/gaiadr3',
                           cat2='vizier:J/A+A/580/A23/catalog',
                           colRA2='RAICRS', colDec2='DEICRS',
-                          area=region, max_distance=radius)
+                          area=region, max_distance=3 * u.arcmin)
         xm.sort('angDist')
         return xm
 
@@ -883,7 +950,7 @@ class Librarian:
         coord = SkyCoord(ra=ra * u.deg,
                          dec=dec * u.deg, frame='icrs')
         region = CircleSkyRegion(coord, radius=radius)
-        xm = XMatch.query(cat1='vizier:I/345/gaia2',
+        xm = XMatch.query(cat1='vizier:I/355/gaiadr3',
                           cat2='vizier:II/215/catalog',
                           colRA2='_RA.icrs', colDec2='_DE.icrs',
                           area=region, max_distance=radius)
