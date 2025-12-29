@@ -1170,8 +1170,8 @@ class SEDPlotter:
                 ax = axes[yi, xi]
                 if xi == 0:
                     for tick in ax.yaxis.get_major_ticks():
-                        tick.label.set_fontsize(self.corner_tick_fontsize)
-                        tick.label.set_fontname(self.fontname)
+                        tick.label1.set_fontsize(self.corner_tick_fontsize)
+                        tick.label1.set_fontname(self.fontname)
                         ax.set_ylabel(
                             labels[yi],
                             labelpad=self.corner_labelpad,
@@ -1180,8 +1180,8 @@ class SEDPlotter:
                         )
                 if yi == theta.shape[0] - 1:
                     for tick in ax.xaxis.get_major_ticks():
-                        tick.label.set_fontsize(self.corner_tick_fontsize)
-                        tick.label.set_fontname(self.fontname)
+                        tick.label1.set_fontsize(self.corner_tick_fontsize)
+                        tick.label1.set_fontname(self.fontname)
                         ax.set_xlabel(
                             labels[xi],
                             labelpad=self.corner_labelpad,
@@ -1200,8 +1200,8 @@ class SEDPlotter:
                 fontname=self.fontname
             )
             for tick in axes[-1, -1].xaxis.get_major_ticks():
-                tick.label.set_fontsize(self.corner_tick_fontsize)
-                tick.label.set_fontname(self.fontname)
+                tick.label1.set_fontsize(self.corner_tick_fontsize)
+                tick.label1.set_fontname(self.fontname)
 
             if self.pdf:
                 plt.savefig(f'{self.out_folder}/CORNER.pdf',
