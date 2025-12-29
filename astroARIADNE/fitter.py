@@ -545,7 +545,6 @@ class Fitter:
                     # the default for [Fe/H]
                     if k == 'logg' or k == 'teff':
                         if k == 'teff':
-                            PriorError('teff', 2).warn()
                             with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
                                 prior_dict[k] = pickle.load(jar)
                         else:  # k == 'logg'

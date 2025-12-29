@@ -37,8 +37,8 @@ class Librarian:
     filter_names = filter_names
 
     # Catalogs magnitude names
-    __apass_mags = ['Vmag', 'Bmag', 'g_mag', 'r_mag', 'i_mag']
-    __apass_errs = ['e_Vmag', 'e_Bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
+    __apass_mags = ['vmag', 'bmag', 'g_mag', 'r_mag', 'i_mag']
+    __apass_errs = ['e_vmag', 'e_bmag', 'e_g_mag', 'e_r_mag', 'e_i_mag']
     __apass_filters = ['GROUND_JOHNSON_V', 'GROUND_JOHNSON_B',
                        'SDSS_g', 'SDSS_r', 'SDSS_i']
     __ascc_mags = ['Vmag', 'Bmag']  # , 'Jmag', 'Hmag', 'Kmag']
@@ -75,17 +75,17 @@ class Librarian:
     __tess_mags = ['Tmag']
     __tess_errs = ['e_Tmag']
     __tess_filters = ['TESS']
-    __skymapper_mags = ['uPSF', 'vPSF', 'gPSF', 'rPSF', 'iPSF', 'zPSF']
-    __skymapper_errs = ['e_uPSF', 'e_vPSF', 'e_gPSF',
-                        'e_rPSF', 'e_iPSF', 'e_zPSF']
+    __skymapper_mags = ['u_psf', 'v_psf', 'g_psf', 'r_psf', 'i_psf', 'z_psf']
+    __skymapper_errs = ['e_u_psf', 'e_v_psf', 'e_g_psf',
+                        'e_r_psf', 'e_i_psf', 'e_z_psf']
     __skymapper_filters = ['SkyMapper_u', 'SkyMapper_v', 'SkyMapper_g',
                            'SkyMapper_r', 'SkyMapper_i', 'SkyMapper_z']
 
     # APASS DR9, WISE, PAN-STARRS DR1, GAIA DR2, 2MASS, SDSS DR9
     catalogs = {
         'APASS': [
-            'II/336/apass9', list(zip(__apass_mags, __apass_errs,
-                                      __apass_filters))
+            None, list(zip(__apass_mags, __apass_errs,
+                          __apass_filters))
         ],
         'Wise': [
             'II/328/allwise', list(zip(__wise_mags, __wise_errs,
@@ -120,8 +120,8 @@ class Librarian:
             'TIC', list(zip(__tess_mags, __tess_errs, __tess_filters))
         ],
         'SkyMapper': [
-            'II/358/smss', list(zip(__skymapper_mags, __skymapper_errs,
-                                    __skymapper_filters))
+            None, list(zip(__skymapper_mags, __skymapper_errs,
+                          __skymapper_filters))
         ],
         'STROMGREN_PAUNZ': [
             'J/A+A/580/A23/catalog', -1
@@ -354,7 +354,7 @@ class Librarian:
         """
         print('Looking online for archival magnitudes for star', end=' ')
         print(self.starname)
-        catalogs = [c[1][0] for c in self.catalogs.items()]
+        catalogs = [c[1][0] for c in self.catalogs.items() if c[1][0] is not None]
         cats = self.get_catalogs(self.ra, self.dec, self.radius, catalogs)
         skips = ['ASCC', 'GLIMPSE']
 
@@ -370,22 +370,25 @@ class Librarian:
                 continue
 
             # Load catalog from Vizier results (except for special cases handled below)
-            if c != 'TESS':
+            if c not in ['TESS', 'APASS', 'SkyMapper']:
                 try:
                     current_cat = cats[self.catalogs[c][0]]
                     current_cat.sort('_r')
                 except TypeError:
                     CatalogWarning(c, 5).warn()
                     continue
-            else:
+            elif c == 'TESS':
                 self._retrieve_from_tess()
+                continue
+            elif c == 'APASS':
+                self._get_apass_from_gaia()
+                continue
+            elif c == 'SkyMapper':
+                self._get_skymapper_from_tap()
                 continue
 
             # Handle specific catalog types
-            if c == 'APASS':
-                self._get_apass(current_cat)
-                continue
-            elif c == 'Wise':
+            if c == 'Wise':
                 self._get_wise(current_cat)
                 continue
             elif c == 'TYCHO2':
@@ -413,8 +416,6 @@ class Librarian:
                     continue
                 self._retrieve_from_galex(current_cat, c)
                 continue
-            elif c == 'SkyMapper':
-                self._get_skymapper(current_cat)
             elif c == 'MERMILLIOD':
                 current_cat = self._gaia_mermilliod_xmatch(self.ra, self.dec,
                                                            self.radius)
@@ -675,11 +676,82 @@ class Librarian:
         else:
             self._retrieve_from_stromgren(cat[mask])
 
-    def _get_apass(self, cat):
+    def _get_apass_from_gaia(self):
+        """Query APASS photometry directly from Gaia external.apassdr9 table.
+
+        This method queries Gaia's external catalog tables directly via TAP,
+        avoiding the broken Vizier recno matching.
+        """
         print('Checking catalog APASS')
-        CatalogWarning('APASS', 5).warn()
-        # mask = cat['recno'] == int(self.ids['APASS'])
-        # self._retrieve_from_cat(cat[mask], 'APASS')
+
+        # Skip if APASS ID not found in crossmatch
+        if self.ids.get('APASS') == 'skipped' or not self.ids.get('APASS'):
+            CatalogWarning('APASS', 5).warn()
+            return
+
+        # Query external.apassdr9 table via Gaia TAP with JOIN
+        query = f"""
+            SELECT
+                apass.recno,
+                apass.vmag,
+                apass.e_vmag,
+                apass.u_e_vmag,
+                apass.bmag,
+                apass.e_bmag,
+                apass.u_e_bmag,
+                apass.g_mag,
+                apass.e_g_mag,
+                apass.u_e_g_mag,
+                apass.r_mag,
+                apass.e_r_mag,
+                apass.u_e_r_mag,
+                apass.i_mag,
+                apass.e_i_mag,
+                apass.u_e_i_mag
+            FROM
+                external.apassdr9 AS apass
+            INNER JOIN
+                gaiadr3.apassdr9_best_neighbour AS xmatch
+            ON
+                apass.recno = xmatch.original_ext_source_id
+            WHERE
+                xmatch.source_id = {self.g_id}
+        """
+
+        try:
+            job = Gaia.launch_job_async(query)
+            result = job.get_results()
+
+            if len(result) == 0:
+                CatalogWarning('APASS', 5).warn()
+                return
+
+            # Extract first row (should be only one match)
+            row = result[0]
+
+            # Process each magnitude/error pair
+            for mag_col, err_col, filt in self.catalogs['APASS'][1]:
+                filt_idx = np.where(filt == self.filter_names)[0]
+
+                # Check if magnitude already retrieved
+                if self.used_filters[filt_idx] == 1:
+                    CatalogWarning(filt, 6).warn()
+                    continue
+
+                # Get magnitude and error from result
+                mag = row[mag_col]
+                err = row[err_col]
+
+                # Quality check the magnitude
+                if not self._qc_mags(mag, err, mag_col):
+                    continue
+
+                # Add magnitude to arrays
+                self._add_mags(mag, err, filt)
+
+        except Exception as e:
+            print(f'Error querying APASS from Gaia: {e}')
+            CatalogWarning('APASS', 5).warn()
 
     def _get_wise(self, cat):
         print('Checking catalog All-WISE')
@@ -748,16 +820,90 @@ class Librarian:
         mask = cat['DR3Name'] == f'Gaia DR3 {self.ids["Gaia"]}'
         self._retrieve_from_cat(cat[mask], 'Gaia')
 
-    def _get_skymapper(self, cat):
-        print('Checking catalog SkyMapper DR1.1')
-        # Use SkyMapper ID from crossmatch
-        mask = cat['ObjectId'] == self.ids['SkyMapper']
-        if mask.sum() > 0:
-            is_good_quality = cat[mask]['flags'] == 0
-            if is_good_quality:
-                self._retrieve_from_cat(cat[mask], 'SkyMapper')
-            else:
+    def _get_skymapper_from_tap(self):
+        """Query SkyMapper DR2 photometry directly from SkyMapper TAP service.
+
+        SkyMapper DR2 is not available in Vizier, so we query their TAP service directly.
+        """
+        print('Checking catalog SkyMapper DR2')
+
+        # Skip if SkyMapper ID not found in crossmatch
+        if self.ids.get('SkyMapper') == 'skipped' or not self.ids.get('SkyMapper'):
+            CatalogWarning('SkyMapper', 5).warn()
+            return
+
+        # Query SkyMapper DR2 via TAP service
+        from astroquery.utils.tap.core import TapPlus
+
+        tap_url = 'https://api.skymapper.nci.org.au/public/tap/'
+        skymapper_tap = TapPlus(url=tap_url)
+
+        query = f"""
+            SELECT
+                sm.object_id,
+                sm.raj2000,
+                sm.dej2000,
+                sm.u_psf,
+                sm.e_u_psf,
+                sm.v_psf,
+                sm.e_v_psf,
+                sm.g_psf,
+                sm.e_g_psf,
+                sm.r_psf,
+                sm.e_r_psf,
+                sm.i_psf,
+                sm.e_i_psf,
+                sm.z_psf,
+                sm.e_z_psf,
+                sm.flags
+            FROM
+                dr2.master AS sm
+            WHERE
+                sm.object_id = {self.ids['SkyMapper']}
+        """
+
+        try:
+            job = skymapper_tap.launch_job_async(query)
+            result = job.get_results()
+
+            if len(result) == 0:
+                CatalogWarning('SkyMapper', 5).warn()
+                return
+
+            # Extract first row
+            row = result[0]
+
+            # Check quality flags (0 = good)
+            if row['flags'] != 0:
                 CatalogWarning('SkyMapper', 8).warn()
+                return
+
+            # Process each magnitude/error pair
+            for mag_col, err_col, filt in self.catalogs['SkyMapper'][1]:
+                filt_idx = np.where(filt == self.filter_names)[0]
+
+                # Check if magnitude already retrieved
+                if self.used_filters[filt_idx] == 1:
+                    CatalogWarning(filt, 6).warn()
+                    continue
+
+                # Get magnitude and error from result
+                mag = row[mag_col]
+                err = row[err_col]
+
+                # Quality check the magnitude
+                if not self._qc_mags(mag, err, mag_col):
+                    continue
+
+                # Add magnitude to arrays
+                self._add_mags(mag, err, filt)
+
+        except Exception as e:
+            print(f'Error querying SkyMapper from TAP: {e}')
+            CatalogWarning('SkyMapper', 5).warn()
+
+    # Removed: Old _get_skymapper() method - replaced by _get_skymapper_from_tap()
+    # which queries SkyMapper DR2 directly via TAP service
 
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
