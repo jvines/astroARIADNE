@@ -5,6 +5,28 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-03-02
+
+### Added
+- Automatic fallback to VizieR XMatch / cone search when the Gaia TAP service is
+  unavailable (503, 502, 500, or timeout). Affected catalogs: 2MASS, WISE, Pan-STARRS,
+  SDSS, TYCHO2, APASS, RAVE, SkyMapper.
+
+### Changed
+- Migrated all `print()` / direct console output to Python's `logging` module across
+  `error.py`, `fitter.py`, and `plotter.py`, allowing host applications to control
+  verbosity via standard log configuration.
+- `gaia_params()` now uses VizieR cone search instead of a direct Gaia TAP query,
+  removing the dependency on Gaia TAP for basic stellar parameter lookup.
+- Distance query (`_get_distance()`) rewritten to use direct VizieR constraints on
+  the Bailer-Jones EDR3 catalog — simpler and more reliable.
+- Gaia ID retrieval (`_get_gaia_id()`) switched from async Gaia cone search to VizieR
+  cone search.
+
+### Fixed
+- Parallax error messages now distinguish between a masked value (no astrometric
+  solution) and a non-positive measured parallax.
+
 ## [1.3.1] - 2025-12-28
 
 ### Fixed

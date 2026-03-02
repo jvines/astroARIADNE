@@ -3,9 +3,12 @@
 
 __all__ = ['Librarian']
 
+import logging
 import os
 import sys
 import warnings
+
+logger = logging.getLogger(__name__)
 
 import astropy.units as u
 import numpy as np
@@ -175,50 +178,67 @@ class Librarian:
 
 
     def gaia_params(self):
-        """Query Gaia DR3 for stellar parameters."""
-        query = f"""
-        SELECT
-            dr3.source_id,
-            dr3.parallax,
-            dr3.parallax_error,
-            dr3.pmra,
-            dr3.pmra_error,
-            dr3.pmdec,
-            dr3.pmdec_error,
-            dr3.radial_velocity,
-            dr3.radial_velocity_error,
-            dr3.teff_gspphot,
-            dr3.teff_gspphot_lower,
-            dr3.teff_gspphot_upper,
-            ap.radius_flame,
-            ap.radius_flame_lower,
-            ap.radius_flame_upper,
-            ap.lum_flame,
-            ap.lum_flame_lower,
-            ap.lum_flame_upper,
-            ap.mass_flame,
-            ap.mass_flame_lower,
-            ap.mass_flame_upper,
-            ap.age_flame,
-            ap.age_flame_lower,
-            ap.age_flame_upper
-        FROM
-            gaiadr3.gaia_source AS dr3
-        LEFT JOIN
-            gaiadr3.astrophysical_parameters AS ap
-        ON
-            dr3.source_id = ap.source_id
-        WHERE
-            dr3.source_id = {self.g_id}
-        """
+        """Query Gaia DR3 for stellar parameters via Vizier (no Gaia TAP required)."""
+        import numpy.ma as ma
+        from astropy.table import Table
 
-        j = Gaia.launch_job_async(query)
-        res = j.get_results()
+        v = Vizier(columns=['all'])
 
-        if len(res) == 0:
+        # Query main source table for astrometry and GSP-Phot Teff
+        main_cats = v.query_constraints(
+            catalog='I/355/gaiadr3', Source=str(self.g_id)
+        )
+        if not main_cats or len(main_cats[0]) == 0:
             raise ValueError(f"Star {self.g_id} not found in Gaia DR3")
+        main = main_cats[0][0]
 
-        # Extract stellar parameters from DR3
+        # Query astrophysical parameters table for FLAME results
+        ap_cats = v.query_constraints(
+            catalog='I/355/paramp', Source=str(self.g_id)
+        )
+        ap = ap_cats[0][0] if ap_cats and len(ap_cats[0]) > 0 else None
+
+        def _col(row, col):
+            """Return (float_value, is_masked) for a column from a Vizier row."""
+            if row is None:
+                return float('nan'), True
+            try:
+                val = row[col]
+            except (KeyError, IndexError):
+                return float('nan'), True
+            if ma.is_masked(val):
+                return float('nan'), True
+            return float(val), False
+
+        # Map (tap_column_name, vizier_row, vizier_column_name)
+        col_map = [
+            ('parallax',           main, 'Plx'),
+            ('parallax_error',     main, 'e_Plx'),
+            ('teff_gspphot',       main, 'Teff'),
+            ('teff_gspphot_lower', main, 'b_Teff'),
+            ('teff_gspphot_upper', main, 'B_Teff'),
+            ('radius_flame',       ap,   'Rad-Flame'),
+            ('radius_flame_lower', ap,   'b_Rad-Flame'),
+            ('radius_flame_upper', ap,   'B_Rad-Flame'),
+            ('lum_flame',          ap,   'Lum-Flame'),
+            ('lum_flame_lower',    ap,   'b_Lum-Flame'),
+            ('lum_flame_upper',    ap,   'B_Lum-Flame'),
+            ('mass_flame',         ap,   'Mass-Flame'),
+            ('mass_flame_lower',   ap,   'b_Mass-Flame'),
+            ('mass_flame_upper',   ap,   'B_Mass-Flame'),
+            ('age_flame',          ap,   'Age-Flame'),
+            ('age_flame_lower',    ap,   'b_Age-Flame'),
+            ('age_flame_upper',    ap,   'B_Age-Flame'),
+        ]
+
+        data = {}
+        for tap_name, row, viz_col in col_map:
+            val, is_masked = _col(row, viz_col)
+            data[tap_name] = ma.array([val], mask=[is_masked])
+
+        res = Table(data)
+
+        # Extract stellar parameters using existing helper methods
         self.plx, self.plx_e = self._get_parallax(res)
         self.temp, self.temp_e = self._get_teff(res)
         self.rad, self.rad_e = self._get_radius(res)
@@ -277,7 +297,7 @@ class Librarian:
             return rave_data
 
         except Exception as e:
-            print(f"RAVE DR6 query failed: {e}")
+            logger.warning('RAVE DR6 query failed: %s', e)
 
         return None
 
@@ -308,10 +328,17 @@ class Librarian:
             'RAVE': '',
         }
 
+        gaia_tap_down = False
+        xmatch_needed = []
+
         for table_name, catalog_name in catalog_map.items():
             if catalog_name in self.ignore:
                 IDS[catalog_name] = 'skipped'
                 CatalogWarning(catalog_name, 7).warn()
+                continue
+
+            if gaia_tap_down:
+                xmatch_needed.append(catalog_name)
                 continue
 
             query = f"""
@@ -329,8 +356,20 @@ class Librarian:
                     IDS[catalog_name] = 'skipped'
                     print(f'Star not found in catalog {catalog_name}', end='.\n')
             except Exception as e:
+                err_str = str(e).lower()
+                is_service_error = any(s in err_str for s in [
+                    'service unavailable', 'bad gateway', '503', '502', '500',
+                    'connection', 'timeout', 'unavailable',
+                ])
+                if is_service_error:
+                    gaia_tap_down = True
+                    xmatch_needed.append(catalog_name)
                 IDS[catalog_name] = 'skipped'
-                print(f'Error querying {catalog_name}: {e}')
+                logger.warning('Error querying %s: %s', catalog_name, e)
+
+        if xmatch_needed:
+            logger.warning('Gaia TAP down, trying VizieR XMatch for: %s', xmatch_needed)
+            self._xmatch_fallback(IDS, xmatch_needed)
 
         IDS['GALEX'] = ''
         IDS['TESS'] = ''
@@ -344,6 +383,139 @@ class Librarian:
         print("Querying Gaia DR3 for catalog crossmatches...")
         self.ids = self._query_gaia_catalogs()
         return
+
+    def _xmatch_fallback(self, IDS, catalogs_needed):
+        """Use VizieR XMatch to recover catalog IDs when Gaia TAP is down.
+
+        Pattern A catalogs: extract the catalog ID so the normal get_magnitudes()
+        path can fetch photometry from the Vizier cone search results.
+        Pattern B (APASS): pull magnitudes directly from the XMatch row because
+        _get_apass_from_gaia() would hit Gaia TAP again on its own.
+        """
+        coord = SkyCoord(ra=self.ra * u.deg, dec=self.dec * u.deg, frame='icrs')
+        region = CircleSkyRegion(coord, radius=self.radius)
+
+        # Catalogs not available on XMatch server -- use VizieR cone search instead
+        CONE_ONLY = {
+            'RAVE':      ('III/283/madera', 'ObsID'),
+            'SkyMapper': ('II/379',         ['ObjectId', 'object_id']),
+        }
+
+        # (vizier_catalog, id_columns_to_try)  -- None means special handling
+        xmatch_config = {
+            '2MASS':      ('vizier:II/246/out',      ['_2MASS', '2MASS', '_2M']),
+            'Wise':       ('vizier:II/328/allwise',  ['AllWISE']),
+            'Pan-STARRS': ('vizier:II/349/ps1',      ['objID']),
+            'SDSS':       ('vizier:V/147/sdss12',    ['objID']),
+            'TYCHO2':     ('vizier:I/259/tyc2',      None),   # composite TYC1-TYC2-TYC3
+            'APASS':      ('vizier:II/336/apass9',   None),   # Pattern B: extract mags
+        }
+
+        for catalog_name in catalogs_needed:
+            # Cone-search-only catalogs (not available via XMatch)
+            if catalog_name in CONE_ONLY:
+                viz_cat, id_col = CONE_ONLY[catalog_name]
+                try:
+                    result = Vizier.query_region(
+                        SkyCoord(ra=self.ra * u.deg, dec=self.dec * u.deg, frame='icrs'),
+                        radius=self.radius,
+                        catalog=viz_cat,
+                    )
+                    if not result or len(result[0]) == 0:
+                        print('VizieR cone: no match for {}'.format(catalog_name))
+                        IDS[catalog_name] = 'skipped'
+                        continue
+                    result[0].sort('_r')
+                    row = result[0][0]
+                    cols = [id_col] if isinstance(id_col, str) else id_col
+                    found_id = next((row[c] for c in cols if c in result[0].colnames), None)
+                    if found_id is None:
+                        logger.warning('VizieR cone: no ID column found for %s', catalog_name)
+                        IDS[catalog_name] = 'skipped'
+                    else:
+                        IDS[catalog_name] = found_id
+                        print('VizieR cone: {} ID = {}'.format(catalog_name, found_id))
+                except Exception as e:
+                    logger.warning('VizieR cone fallback failed for %s: %s', catalog_name, e)
+                    IDS[catalog_name] = 'skipped'
+                continue
+
+            if catalog_name not in xmatch_config:
+                continue
+            vizier_cat, id_cols = xmatch_config[catalog_name]
+
+            try:
+                xm = XMatch.query(
+                    cat1='vizier:I/355/gaiadr3',
+                    cat2=vizier_cat,
+                    max_distance=self.radius,
+                    area=region,
+                )
+                if xm is None or len(xm) == 0:
+                    print('VizieR XMatch fallback: no match for {}'.format(catalog_name))
+                    IDS[catalog_name] = 'skipped'
+                    continue
+
+                xm.sort('angDist')
+
+                # Prefer the row that matches our exact Gaia source ID
+                row = xm[0]
+                if 'Source' in xm.colnames:
+                    mask = xm['Source'] == self.g_id
+                    if mask.sum() > 0:
+                        row = xm[mask][0]
+
+                # Pattern B: APASS -- extract magnitudes directly
+                if catalog_name == 'APASS':
+                    IDS['APASS'] = 'xmatch_done'
+                    added = False
+                    for mag_col, err_col, filt in self.catalogs['APASS'][1]:
+                        filt_idx = np.where(filt == self.filter_names)[0]
+                        if self.used_filters[filt_idx] == 1:
+                            CatalogWarning(filt, 6).warn()
+                            continue
+                        try:
+                            mag = row[mag_col]
+                            err = row[err_col]
+                        except (KeyError, IndexError):
+                            continue
+                        if not self._qc_mags(mag, err, mag_col):
+                            continue
+                        self._add_mags(mag, err, filt)
+                        added = True
+                    if added:
+                        print('VizieR XMatch fallback: APASS mags added')
+                    continue
+
+                # Pattern A: TYCHO2 -- compose hyphen-separated ID
+                if catalog_name == 'TYCHO2':
+                    try:
+                        tyc_id = ('{}-{}-{}'.format(int(row['TYC1']),
+                                                    int(row['TYC2']),
+                                                    int(row['TYC3'])))
+                        IDS['TYCHO2'] = tyc_id
+                        print('VizieR XMatch fallback: TYCHO2 ID = {}'.format(tyc_id))
+                    except (KeyError, ValueError):
+                        IDS['TYCHO2'] = 'skipped'
+                    continue
+
+                # Pattern A: generic -- take first matching ID column
+                found_id = None
+                for col in id_cols:
+                    if col in xm.colnames:
+                        found_id = row[col]
+                        break
+
+                if found_id is None:
+                    logger.warning('VizieR XMatch fallback: no ID column for %s', catalog_name)
+                    IDS[catalog_name] = 'skipped'
+                else:
+                    IDS[catalog_name] = found_id
+                    print('VizieR XMatch fallback: {} ID = {}'.format(catalog_name, found_id))
+
+            except Exception as e:
+                logger.warning('VizieR XMatch fallback failed for %s: %s', catalog_name, e)
+                IDS[catalog_name] = 'skipped'
 
     def get_magnitudes(self):
         """Retrieve the magnitudes of the star.
@@ -685,7 +857,7 @@ class Librarian:
         print('Checking catalog APASS')
 
         # Skip if APASS ID not found in crossmatch
-        if self.ids.get('APASS') == 'skipped' or not self.ids.get('APASS'):
+        if self.ids.get('APASS') in ('skipped', 'xmatch_done') or not self.ids.get('APASS'):
             CatalogWarning('APASS', 5).warn()
             return
 
@@ -750,7 +922,7 @@ class Librarian:
                 self._add_mags(mag, err, filt)
 
         except Exception as e:
-            print(f'Error querying APASS from Gaia: {e}')
+            logger.warning('Error querying APASS from Gaia: %s', e)
             CatalogWarning('APASS', 5).warn()
 
     def _get_wise(self, cat):
@@ -899,7 +1071,7 @@ class Librarian:
                 self._add_mags(mag, err, filt)
 
         except Exception as e:
-            print(f'Error querying SkyMapper from TAP: {e}')
+            logger.warning('Error querying SkyMapper from TAP: %s', e)
             CatalogWarning('SkyMapper', 5).warn()
 
     # Removed: Old _get_skymapper() method - replaced by _get_skymapper_from_tap()
@@ -908,41 +1080,32 @@ class Librarian:
     @staticmethod
     def _get_distance(ra, dec, radius, g_id):
         """Retrieve Bailer-Jones EDR3 distance."""
-        tries = [0.1, 0.25, 0.5, 1][::-1]
-        for t in tries:
-            try:
-                failed = False
-                cat = Vizier.query_region(
-                    SkyCoord(
-                        ra=ra, dec=dec, unit=(u.deg, u.deg), frame='icrs'),
-                    radius=radius / t,
-                    catalog='I/352/gedr3dis')['I/352/gedr3dis']
-                break
-            except TypeError:
-                failed = True
-                continue
-        if failed:
-            CatalogWarning(-1, 9).warn()
-            return -999, -999
-        cat.sort('_r')
-        idx = np.where(cat['Source'] == g_id)[0]
-        if len(idx) == 0:
-            # Raise exception, for now do nothing
+        print('Querying Bailer-Jones EDR3 distance for source {}...'.format(g_id))
+        try:
+            res = Vizier.query_constraints(
+                catalog='I/352/gedr3dis', Source=str(g_id))
+            if not res or len(res[0]) == 0:
+                logger.warning('Bailer-Jones: source %s not found in catalog', g_id)
+                return -1, -1
+            row = res[0][0]
+            dist = row['rgeo']
+            lo = dist - row['b_rgeo']
+            hi = row['B_rgeo'] - dist
+            print('Bailer-Jones distance: {:.1f} pc'.format(dist))
+            return dist, max(lo, hi)
+        except Exception as e:
+            logger.warning('Bailer-Jones query failed: %s', e)
             return -1, -1
-        dist = cat[idx]['rgeo'][0]
-        lo = dist - cat[idx]['b_rgeo'][0]
-        hi = cat[idx]['B_rgeo'][0] - dist
-        return dist, max(lo, hi)
 
     @staticmethod
     def _get_parallax(res):
         """Extract parallax from DR3 results."""
         if np.ma.is_masked(res['parallax'][0]):
-            CatalogWarning(0, 0).warn()
+            CatalogWarning('masked', 0).warn()
             return -1, -1
         plx = res['parallax'][0]
         if plx <= 0:
-            CatalogWarning(0, 0).warn()
+            CatalogWarning('{:.6f} mas'.format(float(plx)), 0).warn()
             return -1, -1
         plx_e = res['parallax_error'][0]
         # Parallax correction 37.0 ± 20 µas from Lindegren+21
@@ -1010,10 +1173,15 @@ class Librarian:
 
     @staticmethod
     def _get_gaia_id(ra, dec, radius):
+        """Find the nearest Gaia DR3 source ID via Vizier cone search (no Gaia TAP)."""
         c = SkyCoord(ra, dec, unit=(u.deg, u.deg), frame='icrs')
-        j = Gaia.cone_search_async(c, radius=radius, table_name='gaiadr3.gaia_source')
-        res = j.get_results()
-        return res['source_id'][0]
+        cats = Vizier(columns=['Source']).query_region(
+            c, radius=radius, catalog='I/355/gaiadr3'
+        )
+        if not cats or len(cats[0]) == 0:
+            raise IndexError(f"No Gaia DR3 source found within {radius} of RA={ra}, Dec={dec}")
+        cats[0].sort('_r')
+        return int(cats[0]['Source'][0])
 
     @staticmethod
     def get_catalogs(ra, dec, radius, catalogs):

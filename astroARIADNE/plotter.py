@@ -3,8 +3,11 @@
 __all__ = ['SEDPlotter']
 
 import glob
+import logging
 import pickle
 from random import choice
+
+logger = logging.getLogger(__name__)
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -368,7 +371,7 @@ class SEDPlotter:
     def plot_SED(self):
         """Create the plot of the SED."""
         if self.moddir is None:
-            print('Models directory not provided, skipping SED plot.')
+            logger.warning('Models directory not provided, skipping SED plot')
             return
         print('Plotting SED')
         # Get plot ylims.

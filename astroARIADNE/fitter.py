@@ -3,9 +3,12 @@
 __all__ = ['Fitter', 'dynesty_log_like', 'dynesty_loglike_bma', 'pt_dynesty',
            'pt_multinest']
 
+import logging
 import pickle
 import time
 import warnings
+
+logger = logging.getLogger(__name__)
 from multiprocessing import (Pool, set_start_method)
 from tqdm import tqdm
 
@@ -369,7 +372,7 @@ class Fitter:
 
         # warnings
         if len(self._setup) == 1:
-            print('USING DEFAULT SETUP VALUES.')
+            logger.warning('Using default setup values')
 
         # BMA settings
         # if BMA is used, load all interpolators requested.
@@ -430,12 +433,12 @@ class Fitter:
             teff_err_rave = self.star.rave_params['teff_err']
             defaults['teff'] = st.norm(loc=teff_rave, scale=teff_err_rave)
             self.prior_sources['teff'] = 'rave_star'
-            print("Using RAVE DR6 Teff prior (star-specific)")
+            logger.info('Using RAVE DR6 Teff prior (star-specific)')
         else:
             with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
                 defaults['teff'] = pickle.load(jar)
             self.prior_sources['teff'] = 'rave_population'
-            print("Using population Teff prior (no RAVE match)")
+            logger.info('Using population Teff prior (no RAVE match)')
 
         # logg: RAVE DR6, isochrone, or population prior
         if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
@@ -443,18 +446,18 @@ class Fitter:
             logg_err_rave = self.star.rave_params['logg_err']
             defaults['logg'] = st.norm(loc=logg_rave, scale=logg_err_rave)
             self.prior_sources['logg'] = 'rave_star'
-            print("Using RAVE DR6 logg prior (star-specific)")
+            logger.info('Using RAVE DR6 logg prior (star-specific)')
         elif self.star.get_logg:
             defaults['logg'] = st.norm(
                 loc=self.star.logg, scale=self.star.logg_e)
             self.prior_sources['logg'] = 'isochrone'
-            print("Using isochrone logg estimate")
+            logger.info('Using isochrone logg estimate')
         else:
             # with open(priorsdir + '/logg_ppf.pkl', 'rb') as jar:
             #     defaults['logg'] = pickle.load(jar)
             defaults['logg'] = st.uniform(loc=3.5, scale=2.5)
             self.prior_sources['logg'] = 'uniform_default'
-            print("Using population logg prior")
+            logger.info('Using population logg prior')
 
         # [Fe/H]: RAVE DR6 or population prior
         if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
@@ -462,11 +465,11 @@ class Fitter:
             feh_err_rave = self.star.rave_params['feh_err']
             defaults['z'] = st.norm(loc=feh_rave, scale=feh_err_rave)
             self.prior_sources['z'] = 'rave_star'
-            print("Using RAVE DR6 [Fe/H] prior (star-specific)")
+            logger.info('Using RAVE DR6 [Fe/H] prior (star-specific)')
         else:
             defaults['z'] = st.norm(loc=-0.125, scale=0.234)
             self.prior_sources['z'] = 'population'
-            print("Using population [Fe/H] prior")
+            logger.info('Using population [Fe/H] prior')
         # Distance prior setup.
         if not self._norm:
             if self.star.dist != -1:
