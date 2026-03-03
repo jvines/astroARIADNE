@@ -895,21 +895,28 @@ class Fitter:
         if self._dynamic:
             if self._threads > 1:
                 with Pool(self._threads) as executor:
-                    self.sampler = dynesty.DynamicNestedSampler(
+                    self.sampler = dynesty.NestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
-                        bound=self._bound, sample=self._sample,
+                        nlive=self._nlive, bound=self._bound,
+                        sample=self._sample,
                         pool=executor, walks=25,
-                        queue_size=self._threads - 1
+                        queue_size=self._threads - 1,
+                        logl_args=(flux, flux_er, filts, coordinator, fixed, use_norm, wave, interpolator, av_law), 
+                        ptform_args=(flux, flux_er, filts, prior_dict, coordinator, use_norm), 
                     )
                     self.sampler.run_nested(dlogz_init=self._dlogz,
                                             nlive_init=self._nlive,
                                             wt_kwargs={'pfrac': 1})
             else:
-                self.sampler = dynesty.DynamicNestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim, walks=25,
-                    bound=self._bound, sample=self._sample
-
-                )
+                self.sampler = dynesty.NestedSampler(
+                        dynesty_log_like, pt_dynesty, self.ndim,
+                        nlive=self._nlive, bound=self._bound,
+                        sample=self._sample,
+                        pool=executor, walks=25,
+                        queue_size=self._threads - 1,
+                        logl_args=(flux, flux_er, filts, coordinator, fixed, use_norm, wave, interpolator, av_law), 
+                        ptform_args=(flux, flux_er, filts, prior_dict, coordinator, use_norm), 
+                    )
                 self.sampler.run_nested(dlogz_init=self._dlogz,
                                         nlive_init=self._nlive,
                                         wt_kwargs={'pfrac': 1})
@@ -922,14 +929,20 @@ class Fitter:
                         sample=self._sample,
                         pool=executor, walks=25,
                         queue_size=self._threads - 1,
+                        logl_args=(flux, flux_er, filts, coordinator, fixed, use_norm, wave, interpolator, av_law), 
+                        ptform_args=(flux, flux_er, filts, prior_dict, coordinator, use_norm), 
                     )
                     self.sampler.run_nested(dlogz=self._dlogz)
             else:
                 self.sampler = dynesty.NestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim, walks=25,
-                    nlive=self._nlive, bound=self._bound,
-                    sample=self._sample
-                )
+                        dynesty_log_like, pt_dynesty, self.ndim,
+                        nlive=self._nlive, bound=self._bound,
+                        sample=self._sample,
+                        pool=executor, walks=25,
+                        queue_size=self._threads - 1,
+                        logl_args=(flux, flux_er, filts, coordinator, fixed, use_norm, wave, interpolator, av_law), 
+                        ptform_args=(flux, flux_er, filts, prior_dict, coordinator, use_norm), 
+                    )
                 self.sampler.run_nested(dlogz=self._dlogz)
         results = self.sampler.results
         if out_file is None:
@@ -1675,16 +1688,13 @@ def dynesty_loglike_bma(cube, interpolator):
     return log_likelihood(theta, star, interpolator, use_norm, av_law)
 
 
-def dynesty_log_like(cube):
+def dynesty_log_like(cube, flux, flux_er, filts, coordinator, fixed, use_norm, wave, interpolator, av_law):
     """Dynesty log likelihood wrapper."""
-    theta = build_params(
-        cube, flux, flux_er, filts, coordinator, fixed, use_norm
-    )
-    return log_likelihood(theta, flux, flux_er, wave,
-                          filts, interpolator, use_norm, av_law)
+    theta = build_params(cube, flux, flux_er, filts, coordinator, fixed, use_norm)
+    return log_likelihood(theta, flux, flux_er, wave, filts, interpolator, use_norm, av_law)
 
 
-def pt_dynesty(cube):
+def pt_dynesty(cube, flux, flux_er, filts, prior_dict, coordinator, use_norm):
     """Dynesty prior transform."""
     return prior_transform_dynesty(cube, flux, flux_er, filts, prior_dict,
                                    coordinator, use_norm)
