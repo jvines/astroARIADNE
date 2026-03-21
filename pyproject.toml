@@ -55,3 +55,6 @@ packages = ["astroARIADNE"]
 
 [tool.setuptools.package-data]
 astroARIADNE = ["Datafiles/**/*"]
+
+[tool.setuptools.exclude-package-data]
+astroARIADNE = ["Datafiles/spectra_cache.h5"]
