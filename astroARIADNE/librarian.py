@@ -665,7 +665,11 @@ class Librarian:
             CatalogWarning('MERMILLIOD', 5).warn()
             return
         mask = cat['Source'] == self.g_id
-        cat = cat[mask][0]
+        matched = cat[mask]
+        if len(matched) == 0:
+            CatalogWarning('MERMILLIOD', 1).warn()
+            return
+        cat = matched[0]
         v = cat['Vmag']
         v_e = cat['e_Vmag']
         bv = cat['B-V']
@@ -703,7 +707,11 @@ class Librarian:
             CatalogWarning(n, 5).warn()
             return
         mask = cat['Source'] == self.g_id
-        cat = cat[mask][0]
+        matched = cat[mask]
+        if len(matched) == 0:
+            CatalogWarning(n, 1).warn()
+            return
+        cat = matched[0]
         y = cat['Vmag']
         y_e = cat['e_Vmag']
         if not self._qc_mags(y, y_e, 'ymag'):

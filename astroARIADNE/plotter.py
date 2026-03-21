@@ -27,7 +27,7 @@ from scipy.stats import gaussian_kde, norm
 import corner
 from dynesty import plotting as dyplot
 
-from .config import (filesdir, gridsdir, modelsdir)
+from .config import (filesdir, gridsdir, modelsdir, spectra_cache)
 from .isochrone import get_isochrone
 from .phot_utils import *
 from .sed_library import *
@@ -290,6 +290,37 @@ class SEDPlotter:
         self.irx_wave = np.array(self.irx_wave)
         self.irx_bandpass = np.array(self.irx_bandpass).T
 
+    def _load_from_cache(self, model_key):
+        """Return (wavelength, flux) from pre-computed HDF5 cache, or None."""
+        if not spectra_cache:
+            return None
+        import h5py
+        import os as _os
+        if not _os.path.isfile(spectra_cache):
+            return None
+        teff = self.theta[0]
+        logg = self.theta[1]
+        z = self.theta[2]
+        try:
+            with h5py.File(spectra_cache, 'r') as f:
+                if model_key not in f:
+                    return None
+                g = f[model_key]
+                teffs = g['teff'][:]
+                loggs = g['logg'][:]
+                zs = g['z'][:]
+                t_val = np.unique(teffs)[np.argmin(np.abs(np.unique(teffs) - teff))]
+                l_val = np.unique(loggs)[np.argmin(np.abs(np.unique(loggs) - logg))]
+                z_val = np.unique(zs)[np.argmin(np.abs(np.unique(zs) - z))]
+                mask = (teffs == t_val) & (loggs == l_val) & (zs == z_val)
+                idx = np.where(mask)[0][0]
+                wave = g['wavelength'][:]
+                flux = g['flux'][idx]
+            return wave.astype(float), flux.astype(float)
+        except Exception as e:
+            logger.warning(f'Failed to load spectra cache for {model_key}: {e}')
+            return None
+
     def plot_SED_no_model(self, s=None):
         """Plot raw photometry."""
         if self.star is None:
@@ -370,8 +401,8 @@ class SEDPlotter:
 
     def plot_SED(self):
         """Create the plot of the SED."""
-        if self.moddir is None:
-            logger.warning('Models directory not provided, skipping SED plot')
+        if self.moddir is None and not spectra_cache:
+            logger.warning('Models directory not provided and no spectra cache set, skipping SED plot')
             return
         print('Plotting SED')
         # Get plot ylims.
@@ -565,140 +596,144 @@ class SEDPlotter:
 
         # SED plot.
         if self.grid == 'phoenix':
-            wave = fits.open(self.moddir + self.__wav_file)[0].data
-            wave *= u.angstrom.to(u.um)
-
-            lower_lim = 0.125 < wave
-            upper_lim = wave < 4.629296073126975
-            if self.irx:
-                upper_lim = wave < wave[-1]
-
-            flux = self.fetch_Phoenix()
-
-            new_w = wave[lower_lim * upper_lim]
-
-            new_ww = np.linspace(new_w[0], new_w[-1], len(new_w))
-
+            cached = self._load_from_cache('phoenix')
+            if cached is not None and not self.irx:
+                new_w, brf = cached
+            else:
+                wave = fits.open(self.moddir + self.__wav_file)[0].data
+                wave *= u.angstrom.to(u.um)
+                lower_lim = 0.125 < wave
+                upper_lim = wave < 4.629296073126975
+                if self.irx:
+                    upper_lim = wave < wave[-1]
+                flux = self.fetch_Phoenix()
+                new_w = wave[lower_lim * upper_lim]
+                new_ww = np.linspace(new_w[0], new_w[-1], len(new_w))
+                brf, _ = pyasl.instrBroadGaussFast(
+                    new_ww, flux, 1500,
+                    edgeHandling="firstlast",
+                    fullout=True, maxsig=8
+                )
+                brf = brf[lower_lim * upper_lim]
             ext = self.av_law(new_w * 1e4, Av, Rv)
-
-            brf, _ = pyasl.instrBroadGaussFast(
-                new_ww, flux, 1500,
-                edgeHandling="firstlast",
-                fullout=True, maxsig=8
-            )
-            brf = brf[lower_lim * upper_lim]
             brf = apply(ext, brf)
             flx = brf * norm * new_w
-            ax.plot(new_w[:-1000], flx[:-1000], lw=1.25, color=self.model_color,
+            ax.plot(new_w, flx, lw=1.25, color=self.model_color,
                     zorder=0)
 
         elif self.grid == 'btsettl':
-            wave, flux = self.fetch_btsettl()
-
-            lower_lim = 0.125 < wave
-            upper_lim = wave < 4.629296073126975
-            if self.irx:
-                upper_lim = wave < wave[-1]
-
-            wave = wave[lower_lim * upper_lim]
-            flux = flux[lower_lim * upper_lim]
+            cached = self._load_from_cache('btsettl')
+            if cached is not None and not self.irx:
+                wave, brf = cached
+            else:
+                wave, flux = self.fetch_btsettl()
+                lower_lim = 0.125 < wave
+                upper_lim = wave < 4.629296073126975
+                if self.irx:
+                    upper_lim = wave < wave[-1]
+                wave = wave[lower_lim * upper_lim]
+                flux = flux[lower_lim * upper_lim]
+                new_w = np.linspace(wave[0], wave[-1], len(wave))
+                brf, _ = pyasl.instrBroadGaussFast(
+                    new_w, flux, 1500,
+                    edgeHandling="firstlast",
+                    fullout=True, maxsig=8
+                )
             ext = self.av_law(wave * 1e4, Av, Rv)
-
-            new_w = np.linspace(wave[0], wave[-1], len(wave))
-
-            brf, _ = pyasl.instrBroadGaussFast(
-                new_w, flux, 1500,
-                edgeHandling="firstlast",
-                fullout=True, maxsig=8
-            )
             flx = apply(ext, brf)
             flx *= wave * norm
             ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'btnextgen':
-            wave, flux = self.fetch_btnextgen()
-
-            lower_lim = 0.125 < wave
-            upper_lim = wave < 4.629296073126975
-            if self.irx:
-                upper_lim = wave < wave[-1]
-
-            wave = wave[lower_lim * upper_lim]
-            flux = flux[lower_lim * upper_lim]
+            cached = self._load_from_cache('btnextgen')
+            if cached is not None and not self.irx:
+                wave, brf = cached
+            else:
+                wave, flux = self.fetch_btnextgen()
+                lower_lim = 0.125 < wave
+                upper_lim = wave < 4.629296073126975
+                if self.irx:
+                    upper_lim = wave < wave[-1]
+                wave = wave[lower_lim * upper_lim]
+                flux = flux[lower_lim * upper_lim]
+                new_w = np.linspace(wave[0], wave[-1], len(wave))
+                brf, _ = pyasl.instrBroadGaussFast(
+                    new_w, flux, 1500,
+                    edgeHandling="firstlast",
+                    fullout=True, maxsig=8
+                )
             ext = self.av_law(wave * 1e4, Av, Rv)
-
-            new_w = np.linspace(wave[0], wave[-1], len(wave))
-
-            brf, _ = pyasl.instrBroadGaussFast(
-                new_w, flux, 1500,
-                edgeHandling="firstlast",
-                fullout=True, maxsig=8
-            )
             flx = apply(ext, brf)
             flx *= wave * norm
             ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'btcond':
-            wave, flux = self.fetch_btcond()
-
-            lower_lim = 0.125 < wave
-            upper_lim = wave < 4.629296073126975
-            if self.irx:
-                upper_lim = wave < wave[-1]
-
-            wave = wave[lower_lim * upper_lim]
-            flux = flux[lower_lim * upper_lim]
+            cached = self._load_from_cache('btcond')
+            if cached is not None and not self.irx:
+                wave, brf = cached
+            else:
+                wave, flux = self.fetch_btcond()
+                lower_lim = 0.125 < wave
+                upper_lim = wave < 4.629296073126975
+                if self.irx:
+                    upper_lim = wave < wave[-1]
+                wave = wave[lower_lim * upper_lim]
+                flux = flux[lower_lim * upper_lim]
+                new_w = np.linspace(wave[0], wave[-1], len(wave))
+                brf, _ = pyasl.instrBroadGaussFast(
+                    new_w, flux, 1500,
+                    edgeHandling="firstlast",
+                    fullout=True, maxsig=8
+                )
             ext = self.av_law(wave * 1e4, Av, Rv)
-
-            new_w = np.linspace(wave[0], wave[-1], len(wave))
-
-            brf, _ = pyasl.instrBroadGaussFast(
-                new_w, flux, 1500,
-                edgeHandling="firstlast",
-                fullout=True, maxsig=8
-            )
             flx = apply(ext, brf)
             flx *= wave * norm
             ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'ck04':
-            wave, flux = self.fetch_ck04()
-
-            lower_lim = 0.125 < wave
-            upper_lim = wave < 4.629296073126975
-            if self.irx:
-                upper_lim = wave < wave[-1]
-
-            wave = wave[lower_lim * upper_lim]
-            flux = flux[lower_lim * upper_lim]
+            cached = self._load_from_cache('ck04')
+            if cached is not None and not self.irx:
+                wave, flux = cached
+            else:
+                wave, flux = self.fetch_ck04()
+                lower_lim = 0.125 < wave
+                upper_lim = wave < 4.629296073126975
+                if self.irx:
+                    upper_lim = wave < wave[-1]
+                wave = wave[lower_lim * upper_lim]
+                flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
             flux *= wave * norm
             ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'kurucz':
-            wave, flux = self.fetch_kurucz()
-
-            lower_lim = 0.15 < wave
-            upper_lim = wave < 4.629296073126975
-            if self.irx:
-                upper_lim = wave < wave[-1]
-
-            wave = wave[lower_lim * upper_lim]
-            flux = flux[lower_lim * upper_lim]
+            cached = self._load_from_cache('kurucz')
+            if cached is not None and not self.irx:
+                wave, flux = cached
+            else:
+                wave, flux = self.fetch_kurucz()
+                lower_lim = 0.15 < wave
+                upper_lim = wave < 4.629296073126975
+                if self.irx:
+                    upper_lim = wave < wave[-1]
+                wave = wave[lower_lim * upper_lim]
+                flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
             flux *= wave * norm
             ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
 
         elif self.grid == 'coelho':
-            wave, flux = self.fetch_coelho()
-
-            lower_lim = 0.15 < wave
-            upper_lim = wave < 4.629296073126975
-
-            wave = wave[lower_lim * upper_lim]
-            flux = flux[lower_lim * upper_lim]
+            cached = self._load_from_cache('coelho')
+            if cached is not None:
+                wave, flux = cached
+            else:
+                wave, flux = self.fetch_coelho()
+                lower_lim = 0.15 < wave
+                upper_lim = wave < 4.629296073126975
+                wave = wave[lower_lim * upper_lim]
+                flux = flux[lower_lim * upper_lim]
             ext = self.av_law(wave * 1e4, Av, Rv)
             flux = apply(ext, flux)
             flux *= wave * norm
@@ -1417,7 +1452,7 @@ class SEDPlotter:
         if sel_z > 0:
             metal_add = 'p' + str(sel_z).replace('.', '')
         name = 'ck' + metal_add
-        lgg = 'g{:.0f}'.format(sel_logg * 10)
+        lgg = 'g{:02.0f}'.format(sel_logg * 10)
         selected_SED = self.moddir + 'Castelli_Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
@@ -1457,7 +1492,7 @@ class SEDPlotter:
         if sel_z > 0:
             metal_add = 'p' + str(sel_z).replace('.', '')
         name = 'k' + metal_add
-        lgg = 'g{:.0f}'.format(sel_logg * 10)
+        lgg = 'g{:02.0f}'.format(sel_logg * 10)
         selected_SED = self.moddir + 'Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)

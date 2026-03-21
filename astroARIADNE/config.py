@@ -17,6 +17,11 @@ try:
 except KeyError:
     modelsdir = None
 
+# Auto-discover pre-computed spectra cache from package data.
+# Download with: python -c "from astroARIADNE.fetch import fetch_spectra_cache; fetch_spectra_cache()"
+_spectra_cache_path = os.path.join(filesdir, 'spectra_cache.h5')
+spectra_cache = _spectra_cache_path if os.path.isfile(_spectra_cache_path) else None
+
 # pyphot filter names.
 filter_names = np.array([
        'GALEX_FUV', 'GALEX_NUV', 'STROMGREN_u', 'SkyMapper_u', 'SDSS_u',

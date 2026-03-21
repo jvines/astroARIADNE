@@ -97,9 +97,36 @@ nosetests isochrones
 
 ARIADNE uses `pyproject.toml` for modern, declarative package configuration. Dependency installation and version management are handled automatically by pip/setuptools.
 
-## In order to plot the models, you have to download them first:
-But note that plotting the SED model is optional. You can run the code without
-them!
+## Model Spectra for SED Plotting
+
+Plotting the SED model is optional — you can run the fitting code without any
+model spectra. If you want SED plots, there are two options:
+
+### Spectra Cache (Recommended)
+
+Download the pre-computed spectra cache (~2.6 GB) from Zenodo. This contains
+all 7 model grids (Phoenix v2, BT-Settl, BT-NextGen, BT-Cond, Castelli &
+Kurucz, Kurucz, Coelho) broadened to R=1500 and resampled to a common
+wavelength grid. This is all you need for `plot_SED()`.
+
+```python
+from astroARIADNE.fetch import fetch_spectra_cache
+fetch_spectra_cache()
+```
+
+Or from the command line:
+
+```bash
+python -c "from astroARIADNE.fetch import fetch_spectra_cache; fetch_spectra_cache()"
+```
+
+No environment variables or additional setup required.
+
+### Full Model Grids (Optional)
+
+If you need the raw high-resolution model spectra (e.g. for custom broadening
+or direct spectral analysis), you can download the full grids. Note that these
+total several hundred GB.
 
 | Model        | Link           |
 | ------------- |:-------------:|
@@ -112,16 +139,25 @@ them!
 The wavelength file for the Phoenix model has to be placed in the root folder
 of the PHOENIXv2 models.
 
-For the code to find these models, you have to place them somewhere in your
-computer as follows:
+To tell **ARIADNE** where to find the models, set the `ARIADNE_MODELS`
+environment variable:
+
+```bash
+export ARIADNE_MODELS='/path/to/Models_Dir/'
+```
+
+You can add this to your `.bash_profile` or `.bashrc` so you don't have to
+export every time.
+
+The directory structure should look like this:
 
 ```
-Models_Dir  
+Models_Dir
 │
 └───BTCond
 │   │
 │   └───CIFIST2011
-│   
+│
 └───BTNextGen
 │	 │
 │	 └───AGSS2009
@@ -196,7 +232,7 @@ Models_Dir
 	 └───Z+1.0
 ```
 
-### Notes:
+#### Notes:
 - The Phoenix v2 models with alpha enhancements are unused
 - BT-models are BT-Settl, BT-Cond, and BT-NextGen
 
@@ -535,16 +571,14 @@ The setup for the plotter is already made for you, but if you really want to
 change them, instructions on how to change it can be found
 [here](https://github.com/jvines/astroARIADNE/blob/master/customization.md)
 
-Before we plot the SEDs we need to tell **ARIADNE** where to find our models.
-This step isn't necessary if you don't want or need SED plots and are happy with
-the HR diagram, histograms, cornerplot and RAW SED. This is done with an
-environmental variable called ARIADNE_MODELS, to set it up you just need to run
-`export ARIADNE_MODELS='/path/to/Models_Dir/'` in your terminal. You can also
-add that instruction to your `.bash_profile` or `.bashrc` and the run
-`source ~/.bash_profile` so you don't have to export everytime.
+If you want SED model plots, make sure you have either the spectra cache
+(recommended) or the full model grids installed — see
+[Model Spectra for SED Plotting](#model-spectra-for-sed-plotting) above.
+The spectra cache is used automatically if present; the full model grids
+are used via the `ARIADNE_MODELS` environment variable as a fallback.
 
-Now that **ARIADNE** knows where to find the models we only need to specify
-the results file location and the output folder for the plots!
+Now we only need to specify the results file location and the output folder
+for the plots!
 
 ```python
 in_file = out_folder + 'BMA_out.pkl'
@@ -575,8 +609,8 @@ plot, drawn randomly from the posterior distribution.
 If you're iterating through lots of stars you can call the SEDPlotter `clean`
 method to clear opened figures with `artist.clean()`
 
-If you don't have the models in your computer, then the `plot_SED` method will
-fail, as it needs the complete model grid.
+If you don't have either the spectra cache or the full model grids, then the
+`plot_SED` method will be skipped.
 
 An example usage file is provided in the repository called `test_bma.py` demonstrating
 the recommended BMA (Bayesian Model Averaging) approach.

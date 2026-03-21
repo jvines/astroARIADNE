@@ -1,1 +1,2 @@
 include LICENSE README.md astroARIADNE/Datafiles/*.dat astroARIADNE/Datafiles/model_grids/* astroARIADNE/Datafiles/prior/*
+include astroARIADNE/Datafiles/spectra_cache.h5

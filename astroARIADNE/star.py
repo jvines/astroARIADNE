@@ -3,6 +3,7 @@
 __all__ = ['Star']
 
 import random
+import warnings
 
 import astropy.units as u
 import numpy as np
@@ -13,12 +14,16 @@ from dustmaps.lenz2017 import Lenz2017Query
 from dustmaps.bayestar import BayestarQuery
 from termcolor import colored
 
+from scipy.constants import h as _h, c as _c, k as _k
+
 from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands)
 from .isochrone import estimate
 from .librarian import Librarian
 from .error import StarWarning
 from .phot_utils import *
 from .utils import (display_star_fin, display_star_init)
+
+_GAIA_PREFIXES = ('GaiaDR2', 'GaiaDR3', 'GAIA')
 
 
 def extract_from_lib(lib):
@@ -309,11 +314,17 @@ class Star:
         for i, f in zip(self.filter_mask[upper], flx):
             self.flux_er[i] = mx_rel_er * f
 
+        # --- All retrieved photometry (pre-clip) ---
+        c = random.choice(self.colors)
+        print(colored('\t\t--- Retrieved photometry (pre-clip) ---', c))
+        self.print_mags(c)
+
+        # --- Photometry QC (warn only — no filters are removed) ---
+        self.clip_outlier_magnitudes(sigma=5.0, err_floor=0.05, warn_only=True)
+
         # self.calculate_distance()
         c = random.choice(self.colors)
         display_star_fin(self, c)
-        c = random.choice(self.colors)
-        self.print_mags(c)
 
     def __repr__(self):
         """Repr overload."""
@@ -480,6 +491,111 @@ class Star:
         self.__reload_fluxes()
         print(colored(f'\t\t\tRemoved {filt}!!', 'yellow'))
         pass
+
+    def clip_outlier_magnitudes(self, sigma=5.0, err_floor=0.05, warn_only=False):
+        """Iterative SED outlier rejection using a blackbody consensus model.
+
+        Seeds the trusted set from Gaia anchors (BP/G/RP), then iteratively
+        promotes the best-fitting untrusted filter if its blackbody residual
+        is within *sigma*. Filters never promoted are removed from the SED.
+
+        Falls back to iterative worst-outlier removal when no Gaia filters
+        are present.
+
+        Parameters
+        ----------
+        sigma : float
+            Rejection threshold in units of max(photometric_error, err_floor).
+        err_floor : float
+            Minimum assumed error (mag) to avoid over-rejecting precise points.
+
+        Returns
+        -------
+        list[str]
+            Names of removed filters.
+        """
+        def _planck_mag(lam_m, T):
+            x = _h * _c / (lam_m * _k * np.maximum(T, 1.0))
+            flux = 1.0 / (lam_m ** 3 * (np.exp(np.clip(x, 0, 500)) - 1.0))
+            return -2.5 * np.log10(np.maximum(flux, 1e-300))
+
+        def _residuals(fit_idx):
+            if len(fit_idx) < 2:
+                return np.full(len(mags), np.inf)
+            best_resid = np.full(len(mags), np.inf)
+            best_rss = np.inf
+            for T in np.linspace(2000, 60000, 300):
+                model_mag = _planck_mag(lam_m, T)
+                offset = np.mean(mags[fit_idx] - model_mag[fit_idx])
+                resid = np.abs(mags - (model_mag + offset))
+                rss = np.sum(resid[fit_idx] ** 2)
+                if rss < best_rss:
+                    best_rss = rss
+                    best_resid = resid
+            return best_resid
+
+        mask = self.filter_mask
+        if len(mask) < 4:
+            return []
+
+        filt_names = self.filter_names[mask]
+        mags = self.mags[mask].copy()
+        errs = self.mag_errs[mask].copy()
+
+        try:
+            lam_m = np.array([get_effective_wavelength(f) for f in filt_names]) * 1e-6
+        except Exception:
+            return []
+
+        scale = np.maximum(errs, err_floor)
+        gaia_mask = np.array([any(f.startswith(p) for p in _GAIA_PREFIXES)
+                               for f in filt_names])
+
+        if np.any(gaia_mask):
+            trusted = gaia_mask.copy()
+            while True:
+                untrusted_idx = np.where(~trusted)[0]
+                if len(untrusted_idx) == 0:
+                    break
+                resid = _residuals(np.where(trusted)[0])
+                z = resid / scale
+                best = untrusted_idx[np.argmin(z[untrusted_idx])]
+                if z[best] < sigma:
+                    trusted[best] = True
+                else:
+                    break
+            outlier_idx = np.where(~trusted)[0]
+        else:
+            active = np.ones(len(filt_names), dtype=bool)
+            while True:
+                active_idx = np.where(active)[0]
+                if len(active_idx) < 4:
+                    break
+                resid = _residuals(active_idx)
+                z = resid / scale
+                worst = active_idx[np.argmax(z[active_idx])]
+                if z[worst] >= sigma:
+                    active[worst] = False
+                else:
+                    break
+            outlier_idx = np.where(~active)[0]
+
+        removed = []
+        for i in outlier_idx:
+            filt = filt_names[i]
+            if warn_only:
+                warnings.warn(
+                    f"Filter '{filt}' looks like a poor-quality measurement "
+                    f"(blackbody residual > {sigma}σ). It has NOT been removed "
+                    f"because you supplied it directly.",
+                    UserWarning, stacklevel=3
+                )
+                print(colored(f'\t\t\tWARNING: {filt} is potentially problematic '
+                              f'(>{sigma}σ from blackbody fit) — not removed', 'yellow'))
+            else:
+                self.remove_mag(filt)
+            removed.append(filt)
+        return removed
 
     def __reload_fluxes(self):
         # Get the wavelength and fluxes of the retrieved magnitudes.
