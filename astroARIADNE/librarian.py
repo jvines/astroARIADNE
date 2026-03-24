@@ -1183,7 +1183,7 @@ class Librarian:
     def _get_gaia_id(ra, dec, radius):
         """Find the nearest Gaia DR3 source ID via Vizier cone search (no Gaia TAP)."""
         c = SkyCoord(ra, dec, unit=(u.deg, u.deg), frame='icrs')
-        cats = Vizier(columns=['Source']).query_region(
+        cats = Vizier(columns=['Source', '+_r']).query_region(
             c, radius=radius, catalog='I/355/gaiadr3'
         )
         if not cats or len(cats[0]) == 0:

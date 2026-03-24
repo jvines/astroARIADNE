@@ -5,6 +5,21 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-03-24
+
+### Fixed
+- `_get_gaia_id()` Vizier query excluded the `_r` (angular distance) column
+  when restricting to `columns=['Source']`, causing `ValueError` on sort.
+  Added `'+_r'` to the column list so the nearest-source lookup works correctly.
+
+## [1.3.3] - 2026-03-15
+
+### Added
+- Precomputed spectra cache download from Zenodo for faster first-run setup.
+
+### Fixed
+- Excluded `spectra_cache.h5` from package distribution to keep PyPI package small.
+
 ## [1.3.2] - 2026-03-02
 
 ### Added
