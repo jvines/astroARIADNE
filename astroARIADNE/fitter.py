@@ -1664,6 +1664,146 @@ class Fitter:
 
         return age_samp, mass_samp, eep_samp
 
+    def to_dict(self):
+        """Return BMA results as a structured dict matching the ecosystem spec.
+
+        Returns a dictionary with keys ``posterior``, ``observed_data``, and
+        ``sample_stats``, each containing numpy arrays ready for conversion to
+        ``arviz.InferenceData``.
+
+        Raises
+        ------
+        RuntimeError
+            If the fitter has not been run yet (``self.out`` is not populated).
+        """
+        if not hasattr(self, 'out') or self.out is None:
+            raise RuntimeError(
+                'No results available. Run the fitter before calling to_dict().'
+            )
+        out = self.out
+        ws = out.get('weighted_samples', {})
+
+        # Determine number of draws from any free parameter
+        n_draws = None
+        for v in ws.values():
+            if hasattr(v, '__len__') and len(v) > 1:
+                n_draws = len(v)
+                break
+        if n_draws is None:
+            n_draws = 100_000  # fallback
+
+        def _to_chain(arr_or_scalar):
+            """Reshape to (1, n_draws) for single-chain arviz convention."""
+            if hasattr(arr_or_scalar, '__len__') and len(arr_or_scalar) > 1:
+                return np.array(arr_or_scalar).reshape(1, -1)
+            return np.full((1, n_draws), float(arr_or_scalar))
+
+        # Map internal names → ecosystem spec names
+        param_map = {
+            'teff': 'Teff',
+            'logg': 'logg',
+            'z': 'feh',
+            'rad': 'radius',
+            'lum': 'luminosity',
+            'dist': 'distance',
+            'Av': 'Av',
+        }
+
+        posterior = {}
+        for internal, spec in param_map.items():
+            if internal in ws:
+                posterior[spec] = _to_chain(ws[internal])
+
+        # Observed photometry
+        mask = self.star.filter_mask
+        observed_data = {
+            'wavelength': self.star.wave[mask],  # already in micron
+            'flux': self.star.flux[mask],
+            'flux_err': self.star.flux_er[mask],
+        }
+
+        # Model evidence and weights
+        weights = out.get('weights', {})
+        lnZ = out.get('lnZ', {})
+
+        model_names = list(weights.keys())
+        weight_vals = np.array([weights[m] for m in model_names])
+        lnZ_vals = np.array([lnZ.get(m, 0.0) for m in model_names])
+        bma_log_evidence = float(np.sum(weight_vals * lnZ_vals))
+
+        sample_stats = {
+            'log_evidence': bma_log_evidence,
+            'model_names': model_names,
+            'model_weights': weight_vals,
+        }
+
+        # Per-model posteriors from originals
+        originals = out.get('originals', {})
+        model_posteriors = {}
+        for model_name, model_samples in originals.items():
+            n_model = None
+            for v in model_samples.values():
+                if hasattr(v, '__len__') and len(v) > 1:
+                    n_model = len(v)
+                    break
+            if n_model is None:
+                continue
+
+            def _to_model_chain(a, nd=n_model):
+                if hasattr(a, '__len__') and len(a) > 1:
+                    return np.array(a).reshape(1, -1)
+                return np.full((1, nd), float(a))
+
+            mp = {}
+            for internal, spec in param_map.items():
+                if internal in model_samples:
+                    mp[spec] = _to_model_chain(model_samples[internal])
+            if 'loglike' in model_samples:
+                mp['log_likelihood'] = _to_model_chain(
+                    model_samples['loglike'])
+            model_posteriors[model_name] = mp
+
+        return {
+            'posterior': posterior,
+            'observed_data': observed_data,
+            'sample_stats': sample_stats,
+            'model_posteriors': model_posteriors,
+        }
+
+    def to_netcdf(self, path):
+        """Export BMA results as arviz DataTree in netCDF4 format.
+
+        Produces an ``arviz.InferenceData``-compatible ``.nc`` file
+        following the ecosystem output spec.
+
+        Parameters
+        ----------
+        path : str
+            Output file path (e.g. ``'ariadne_result.nc'``).
+        """
+        import arviz as az
+
+        d = self.to_dict()
+
+        ss = d['sample_stats']
+        data = {
+            'posterior': d['posterior'],
+            'observed_data': d['observed_data'],
+            'constant_data': {
+                'log_evidence': np.array(ss['log_evidence']),
+                'model_weights': ss['model_weights'],
+                'model_names': np.array(ss['model_names']),
+            },
+        }
+
+        # Add per-model posteriors as separate groups
+        for model_name, mp in d.get('model_posteriors', {}).items():
+            data[f'posterior_{model_name}'] = mp
+
+        dt = az.from_dict(data)
+        dt.to_netcdf(path)
+        logger.info(f'Wrote InferenceData to {path}')
+
 
 #####################
 # Dynesty and multinest wrappers

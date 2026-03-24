@@ -12,7 +12,7 @@ try:
     from importlib.metadata import version
     __version__ = version('astroARIADNE')
 except Exception:
-    __version__ = "1.3.4"
+    __version__ = "1.4.0"
 
 from .fitter import Fitter
 from .star import Star

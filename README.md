@@ -644,6 +644,98 @@ Examples of those figures:
 ![Histogram example](https://github.com/jvines/astroARIADNE/blob/master/img/rad.png)
 
 
+## NetCDF Export (Ecosystem Interop)
+
+As of version 1.4.0, ARIADNE can export its results as an
+[arviz](https://python.arviz.org/) DataTree in netCDF4 format. This is the
+canonical inter-tool format for passing full posterior distributions to
+downstream tools (LACHESIS, PROTEUS, etc.) without reducing to point estimates.
+
+### Exporting
+
+After a BMA fit completes, call `to_netcdf` on the `Fitter` object:
+
+```python
+f.fit()             # run the fit as usual
+f.to_netcdf('ariadne_result.nc')
+```
+
+Or get the raw dictionary (useful for programmatic access without writing a
+file):
+
+```python
+result = f.to_dict()
+teff_samples = result['posterior']['Teff']      # shape (1, n_draws)
+model_weights = result['sample_stats']['model_weights']
+```
+
+### Reading the output
+
+```python
+import arviz as az
+
+dt = az.from_netcdf('ariadne_result.nc')
+
+# BMA-weighted posterior (combined across all models)
+teff = dt['posterior'].ds.Teff          # shape (chain=1, draw=100000)
+print(f"Teff = {float(teff.median()):.0f} K")
+
+# Observed photometry used in the fit
+obs = dt['observed_data'].ds
+print(obs.wavelength.values)            # micron
+print(obs.flux.values)                  # erg/s/cm^2/micron
+
+# Model evidence and BMA weights
+cd = dt['constant_data'].ds
+print(cd.model_names.values)            # e.g. ['phoenix', 'kurucz', 'btsettl']
+print(cd.model_weights.values)          # e.g. [0.08, 0.26, 0.66]
+print(float(cd.log_evidence))           # BMA-weighted log evidence
+
+# Per-model posteriors (individual model fits before averaging)
+phoenix = dt['posterior_phoenix'].ds
+print(f"Phoenix Teff = {float(phoenix.Teff.median()):.0f} K")
+print(f"Phoenix log-likelihood median = {float(phoenix.log_likelihood.median()):.2f}")
+
+# Construct a KDE prior for downstream tools
+from scipy.stats import gaussian_kde
+kde = gaussian_kde(teff.values.flatten())
+```
+
+### File structure
+
+```
+/
+├── posterior/                          BMA-weighted combined posterior
+│   ├── Teff          (chain, draw)    K
+│   ├── logg          (chain, draw)    dex
+│   ├── feh           (chain, draw)    dex
+│   ├── radius        (chain, draw)    R_sun
+│   ├── luminosity    (chain, draw)    L_sun
+│   ├── distance      (chain, draw)    pc
+│   └── Av            (chain, draw)    mag
+│
+├── posterior_{model}/                  One group per stellar model used
+│   ├── Teff          (chain, draw)    K
+│   ├── ...
+│   └── log_likelihood (chain, draw)   Per-sample log-likelihood
+│
+├── observed_data/                     Photometry used in the fit
+│   ├── wavelength    (band,)          micron
+│   ├── flux          (band,)          erg/s/cm^2/micron
+│   └── flux_err      (band,)          erg/s/cm^2/micron
+│
+└── constant_data/                     Scalar metadata
+    ├── log_evidence                   BMA-weighted log evidence
+    ├── model_weights (n_models,)      BMA posterior model probabilities
+    └── model_names   (n_models,)      Model grid names
+```
+
+Each model's posterior group (e.g. `posterior_phoenix`, `posterior_kurucz`) has
+its own draw count reflecting the nested sampling output for that grid. The
+top-level `posterior/` group contains the BMA-weighted resampled draws across
+all models.
+
+
 ## Infrared Excess
 
 As of version 1.0, **ARIADNE** now allows for Infrared Excess visualization!
