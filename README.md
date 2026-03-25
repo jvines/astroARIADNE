@@ -646,7 +646,7 @@ Examples of those figures:
 
 ## NetCDF Export (Ecosystem Interop)
 
-As of version 1.4.0, ARIADNE can export its results as an
+As of version 1.4.0 (extended in 1.4.1), ARIADNE can export its results as an
 [arviz](https://python.arviz.org/) DataTree in netCDF4 format. This is the
 canonical inter-tool format for passing full posterior distributions to
 downstream tools (LACHESIS, PROTEUS, etc.) without reducing to point estimates.
@@ -701,6 +701,18 @@ from scipy.stats import gaussian_kde
 kde = gaussian_kde(teff.values.flatten())
 ```
 
+As of 1.4.1, the host application can inject the best-fit model SED before
+exporting so the `.nc` file is fully self-contained for visualization:
+
+```python
+# Assuming `artist` is an SEDPlotter that has been initialized
+f.out['model_sed'] = {
+    'model_flux': artist.model,    # f_λ at filter wavelengths
+    'wavelengths': artist.wave,
+}
+f.to_netcdf('ariadne_result.nc')
+```
+
 ### File structure
 
 ```
@@ -712,7 +724,10 @@ kde = gaussian_kde(teff.values.flatten())
 │   ├── radius        (chain, draw)    R_sun
 │   ├── luminosity    (chain, draw)    L_sun
 │   ├── distance      (chain, draw)    pc
-│   └── Av            (chain, draw)    mag
+│   ├── Av            (chain, draw)    mag
+│   ├── age           (chain, draw)    Gyr          [1.4.1+, from MIST]
+│   ├── iso_mass      (chain, draw)    M_sun        [1.4.1+, from MIST]
+│   └── eep           (chain, draw)                 [1.4.1+, from MIST]
 │
 ├── posterior_{model}/                  One group per stellar model used
 │   ├── Teff          (chain, draw)    K
@@ -722,18 +737,26 @@ kde = gaussian_kde(teff.values.flatten())
 ├── observed_data/                     Photometry used in the fit
 │   ├── wavelength    (band,)          micron
 │   ├── flux          (band,)          erg/s/cm^2/micron
-│   └── flux_err      (band,)          erg/s/cm^2/micron
+│   ├── flux_err      (band,)          erg/s/cm^2/micron
+│   ├── filter_names  (band,)          str           [1.4.1+]
+│   ├── bandwidths    (band,)          micron         [1.4.1+]
+│   └── model_flux    (band,)          erg/s/cm^2/micron  [1.4.1+, if injected]
 │
-└── constant_data/                     Scalar metadata
-    ├── log_evidence                   BMA-weighted log evidence
-    ├── model_weights (n_models,)      BMA posterior model probabilities
-    └── model_names   (n_models,)      Model grid names
+├── constant_data/                     Scalar metadata
+│   ├── log_evidence                   BMA-weighted log evidence
+│   ├── model_weights (n_models,)      BMA posterior model probabilities
+│   ├── model_names   (n_models,)      Model grid names
+│   ├── best_fit_averaged__{param}     Summary stats  [1.4.1+]
+│   ├── uncertainties_averaged__{param}               [1.4.1+]
+│   └── confidence_interval_averaged__{param}         [1.4.1+]
+│
 ```
 
 Each model's posterior group (e.g. `posterior_phoenix`, `posterior_kurucz`) has
 its own draw count reflecting the nested sampling output for that grid. The
 top-level `posterior/` group contains the BMA-weighted resampled draws across
-all models.
+all models, including MIST isochrone-derived parameters (age, mass, EEP) when
+available.
 
 
 ## Infrared Excess

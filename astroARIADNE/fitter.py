@@ -1763,11 +1763,49 @@ class Fitter:
                     model_samples['loglike'])
             model_posteriors[model_name] = mp
 
+        # MIST isochrone samples
+        mist = out.get('mist_samples', {})
+        mist_posterior = {}
+        for k in ('age', 'iso_mass', 'eep'):
+            if k in mist and hasattr(mist[k], '__len__') and len(mist[k]) > 1:
+                mist_posterior[k] = _to_chain(mist[k])
+
+        # Filter names and bandwidths for SED reconstruction
+        observed_data['filter_names'] = np.array(
+            self.star.filter_names[mask].tolist()
+            if hasattr(self.star.filter_names[mask], 'tolist')
+            else list(self.star.filter_names[mask])
+        )
+        observed_data['bandwidths'] = self.star.bandpass[mask]
+
+        # Model SED fluxes (injected by worker from SEDPlotter)
+        model_sed = {}
+        if 'model_sed' in out:
+            ms = out['model_sed']
+            if 'model_flux' in ms:
+                model_sed['model_flux'] = np.array(ms['model_flux'])
+
+        # Summary statistics for quick display
+        summary = {}
+        for src_key in ('best_fit_averaged', 'uncertainties_averaged',
+                        'confidence_interval_averaged'):
+            if src_key in out:
+                summary[src_key] = {}
+                for k, v in out[src_key].items():
+                    if hasattr(v, '__len__'):
+                        summary[src_key][k] = np.array(
+                            [float(x) for x in v])
+                    else:
+                        summary[src_key][k] = float(v)
+
         return {
             'posterior': posterior,
             'observed_data': observed_data,
             'sample_stats': sample_stats,
             'model_posteriors': model_posteriors,
+            'mist_posterior': mist_posterior,
+            'model_sed': model_sed,
+            'summary': summary,
         }
 
     def to_netcdf(self, path):
@@ -1799,6 +1837,22 @@ class Fitter:
         # Add per-model posteriors as separate groups
         for model_name, mp in d.get('model_posteriors', {}).items():
             data[f'posterior_{model_name}'] = mp
+
+        # Add MIST isochrone posteriors
+        if d.get('mist_posterior'):
+            data['posterior'].update(d['mist_posterior'])
+
+        # Add model SED fluxes to observed_data
+        if d.get('model_sed') and 'model_flux' in d['model_sed']:
+            data['observed_data']['model_flux'] = d['model_sed']['model_flux']
+
+        # Add summary stats to constant_data
+        for stat_key in ('best_fit_averaged', 'uncertainties_averaged',
+                         'confidence_interval_averaged'):
+            if stat_key in d.get('summary', {}):
+                for param, val in d['summary'][stat_key].items():
+                    key = f'{stat_key}__{param}'
+                    data['constant_data'][key] = np.array(val)
 
         dt = az.from_dict(data)
         dt.to_netcdf(path)

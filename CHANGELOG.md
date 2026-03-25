@@ -5,6 +5,18 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-03-25
+
+### Changed
+- `to_dict()` / `to_netcdf()` now include MIST isochrone posterior samples
+  (age, iso_mass, eep), filter names, filter bandwidths, best-fit model SED
+  fluxes, and summary statistics (best_fit_averaged, uncertainties_averaged,
+  confidence_interval_averaged). The `.nc` file is now a fully self-contained
+  data product for both downstream tools and frontend visualization.
+- Model SED fluxes can be injected via `fitter.out['model_sed']` before
+  calling `to_netcdf()`, allowing the host application to include the
+  best-fit model evaluated at observed filter wavelengths.
+
 ## [1.4.0] - 2026-03-24
 
 ### Added
