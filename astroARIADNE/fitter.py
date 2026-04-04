@@ -110,6 +110,7 @@ class Fitter:
         self.norm = False
         self.grid = 'phoenix'
         self.estimate_logg = False
+        self.estimate_age = True
         self.av_law = 'fitzpatrick'
         self.n_samples = None
         self.bma = False
@@ -1323,51 +1324,54 @@ class Fitter:
         # Add estimated age to best fit dictionary. This is done with the wider
         # sampled distribution instead of the averaged one in order to save time
 
-        age_samp, mass_samp, eep_samp = self.estimate_age(
-            out['best_fit_samples'],
-            out['uncertainties_samples'],
-            c=choice(self.colors)
-        )
-        # Create new thingy for MIST samples. Sadly now everything done before
-        # this update will be incompatible :(
-        out['mist_samples'] = dict()
-        out['mist_samples']['age'] = age_samp
-        out['mist_samples']['iso_mass'] = mass_samp
-        out['mist_samples']['eep'] = eep_samp
-        logdat_samples = out_filler(age_samp, logdat_samples, 'age', 'age', out,
-                                    method='samples')
-        logdat_samples = out_filler(mass_samp, logdat_samples, 'iso_mass',
-                                    'iso_mass', out, method='samples')
-        logdat_samples = out_filler(eep_samp, logdat_samples, 'eep', 'eep', out,
-                                    method='samples')
-        # Ugly... but faster than doing the kde 2x times...
-        age = out['best_fit_samples']['age']
-        age_unc = out['uncertainties_samples']['age']
-        age_ci = out['confidence_interval_samples']['age']
-        iso_mass = out['best_fit_samples']['iso_mass']
-        iso_mass_unc = out['uncertainties_samples']['iso_mass']
-        iso_mass_ci = out['confidence_interval_samples']['iso_mass']
-        eep = out['best_fit_samples']['eep']
-        eep_unc = out['uncertainties_samples']['eep']
-        eep_ci = out['confidence_interval_samples']['eep']
-        out['best_fit_averaged']['age'] = age
-        out['best_fit_averaged']['iso_mass'] = iso_mass
-        out['best_fit_averaged']['eep'] = eep
-        out['uncertainties_averaged']['age'] = age_unc
-        out['uncertainties_averaged']['iso_mass'] = iso_mass_unc
-        out['uncertainties_averaged']['eep'] = eep_unc
-        out['confidence_interval_averaged']['age'] = age_ci
-        out['confidence_interval_averaged']['iso_mass'] = iso_mass_ci
-        out['confidence_interval_averaged']['eep'] = eep_ci
-        logdat_average += f'age\t{age:.4f}\t'
-        logdat_average += f'{age_unc[1]:.4f}\t{age_unc[0]:.4f}\t'
-        logdat_average += f'{age_ci[0]:.4f}\t{age_ci[1]}\n'
-        logdat_average += f'iso_mas\t{iso_mass:.4f}\t'
-        logdat_average += f'{iso_mass_unc[1]:.4f}\t{iso_mass_unc[0]:.4f}\t'
-        logdat_average += f'{iso_mass_ci[0]:.4f}\t{iso_mass_ci[1]}\n'
-        logdat_average += f'eep\t{eep:.4f}\t'
-        logdat_average += f'{eep_unc[1]:.4f}\t{eep_unc[0]:.4f}\t'
-        logdat_average += f'{eep_ci[0]:.4f}\t{eep_ci[1]}\n'
+        if self.estimate_age:
+            age_samp, mass_samp, eep_samp = self._run_estimate_age(
+                out['best_fit_samples'],
+                out['uncertainties_samples'],
+                c=choice(self.colors)
+            )
+            # Create new thingy for MIST samples. Sadly now everything done before
+            # this update will be incompatible :(
+            out['mist_samples'] = dict()
+            out['mist_samples']['age'] = age_samp
+            out['mist_samples']['iso_mass'] = mass_samp
+            out['mist_samples']['eep'] = eep_samp
+            logdat_samples = out_filler(age_samp, logdat_samples, 'age', 'age', out,
+                                        method='samples')
+            logdat_samples = out_filler(mass_samp, logdat_samples, 'iso_mass',
+                                        'iso_mass', out, method='samples')
+            logdat_samples = out_filler(eep_samp, logdat_samples, 'eep', 'eep', out,
+                                        method='samples')
+            # Ugly... but faster than doing the kde 2x times...
+            age = out['best_fit_samples']['age']
+            age_unc = out['uncertainties_samples']['age']
+            age_ci = out['confidence_interval_samples']['age']
+            iso_mass = out['best_fit_samples']['iso_mass']
+            iso_mass_unc = out['uncertainties_samples']['iso_mass']
+            iso_mass_ci = out['confidence_interval_samples']['iso_mass']
+            eep = out['best_fit_samples']['eep']
+            eep_unc = out['uncertainties_samples']['eep']
+            eep_ci = out['confidence_interval_samples']['eep']
+            out['best_fit_averaged']['age'] = age
+            out['best_fit_averaged']['iso_mass'] = iso_mass
+            out['best_fit_averaged']['eep'] = eep
+            out['uncertainties_averaged']['age'] = age_unc
+            out['uncertainties_averaged']['iso_mass'] = iso_mass_unc
+            out['uncertainties_averaged']['eep'] = eep_unc
+            out['confidence_interval_averaged']['age'] = age_ci
+            out['confidence_interval_averaged']['iso_mass'] = iso_mass_ci
+            out['confidence_interval_averaged']['eep'] = eep_ci
+            logdat_average += f'age\t{age:.4f}\t'
+            logdat_average += f'{age_unc[1]:.4f}\t{age_unc[0]:.4f}\t'
+            logdat_average += f'{age_ci[0]:.4f}\t{age_ci[1]}\n'
+            logdat_average += f'iso_mas\t{iso_mass:.4f}\t'
+            logdat_average += f'{iso_mass_unc[1]:.4f}\t{iso_mass_unc[0]:.4f}\t'
+            logdat_average += f'{iso_mass_ci[0]:.4f}\t{iso_mass_ci[1]}\n'
+            logdat_average += f'eep\t{eep:.4f}\t'
+            logdat_average += f'{eep_unc[1]:.4f}\t{eep_unc[0]:.4f}\t'
+            logdat_average += f'{eep_ci[0]:.4f}\t{eep_ci[1]}\n'
+        else:
+            out['mist_samples'] = {}
         ###
         probdat = ''
 
@@ -1607,7 +1611,7 @@ class Fitter:
                 df = DFInterpolator(pd.read_pickle(intp))
         return df
 
-    def estimate_age(self, bf, unc, c='white'):
+    def _run_estimate_age(self, bf, unc, c='white'):
         """Estimate age using MIST isochrones.
 
         Parameters

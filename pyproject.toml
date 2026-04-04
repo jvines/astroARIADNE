@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astroARIADNE"
-version = "1.4.1"
+version = "1.4.2"
 description = "Bayesian Model Averaging SED fitter"
 readme = "README.md"
 requires-python = ">=3.11"
