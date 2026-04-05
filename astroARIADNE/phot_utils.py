@@ -12,6 +12,8 @@ import astropy.units as u
 import pyphot
 import numpy as np
 
+_PYPHOT_LIB = pyphot.get_library()
+
 
 def extract_info(magnitudes, errors, filters):
     """Extract the flux information for a Star."""
@@ -101,27 +103,27 @@ def flux_to_mag(flux, flux_err, band):
 def get_zero_flux(band):
     """Look for the filter information in the pyphot library of filters."""
     # Load photometry filter library
-    filt = pyphot.get_library()[band]
+    filt = _PYPHOT_LIB[band]
     # Get Vega zero flux in erg / cm2 / s / um
-    f0 = filt.Vega_zero_flux.to('erg/(um * cm ** 2 * s)').magnitude
+    f0 = filt.Vega_zero_flux.to('erg/(um * cm ** 2 * s)').value
     return f0
 
 
 def get_effective_wavelength(band):
     """Get central wavelength of a specific filter in um."""
     # Load photometry filter library
-    filt = pyphot.get_library()[band]
+    filt = _PYPHOT_LIB[band]
     # Get central wavelength in um
-    leff = filt.cl.to('um').magnitude
+    leff = filt.cl.to('um').value
     return leff
 
 
 def get_bandpass(band):
     """Get the bandpass of a specific filter in um."""
     # Load photometry filter library
-    filt = pyphot.get_library()[band]
+    filt = _PYPHOT_LIB[band]
     # Get lower and upper bandpass in um
-    width = filt.width.to('um').magnitude
+    width = filt.width.to('um').value
     bp = width
     return bp / 2
 

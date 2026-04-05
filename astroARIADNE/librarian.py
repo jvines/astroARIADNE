@@ -167,12 +167,20 @@ class Librarian:
         self.gaia_params()
         if mags:
             self.gaia_query()
-            self.rave_params = self.query_rave_params()
+            self.spectroscopic_params = self.query_spectroscopic_params()
+            # Backward compat: rave_params points to spectroscopic_params
+            # only when the source is RAVE, otherwise None
+            if (self.spectroscopic_params is not None
+                    and self.spectroscopic_params.get('source') == 'RAVE_DR6'):
+                self.rave_params = self.spectroscopic_params
+            else:
+                self.rave_params = None
             self.get_magnitudes()
             idx = self.used_filters >= 1
             self.used_filters[idx] = 1
         else:
             self.rave_params = None
+            self.spectroscopic_params = None
 
         pass
 
@@ -301,6 +309,310 @@ class Librarian:
 
         return None
 
+    def query_apogee_params(self):
+        """Query APOGEE DR17 for stellar parameters.
+
+        Returns dict with teff, logg, feh and their errors, or None if not found.
+        """
+        import numpy.ma as ma
+
+        # Prefer 2MASS ID from crossmatch; fall back to Gaia EDR3 source_id
+        tmass_id = None
+        if isinstance(self.ids, dict) and '2MASS' in self.ids:
+            tid = self.ids['2MASS']
+            if tid and tid != 'skipped':
+                tmass_id = str(tid)
+
+        try:
+            v = Vizier(columns=['**'], row_limit=5)
+            if tmass_id is not None:
+                cat = v.query_constraints(catalog='III/286/allstar',
+                                          APOGEE=tmass_id)
+            else:
+                # Try Gaia EDR3 source_id
+                cat = v.query_constraints(catalog='III/286/allstar',
+                                          GaiaEDR3=str(self.g_id))
+
+            if not cat or len(cat) == 0 or len(cat[0]) == 0:
+                return None
+
+            row = cat[0][0]
+
+            # Quality: skip if ASPCAPFLAG has STAR_BAD (bit 23)
+            aflag = row['AFlag']
+            if not ma.is_masked(aflag) and int(aflag) & (1 << 23):
+                print('APOGEE DR17: STAR_BAD flag set, skipping.')
+                return None
+
+            teff = row['Teff']
+            e_teff = row['e_Teff']
+            logg_val = row['logg']
+            e_logg = row['e_logg']
+            mh = row['[M/H]']
+            e_mh = row['e_[M/H]']
+
+            # Check for masked values
+            for val in [teff, e_teff, logg_val, e_logg, mh, e_mh]:
+                if ma.is_masked(val):
+                    return None
+
+            data = {
+                'teff': float(teff),
+                'teff_err': float(e_teff),
+                'logg': float(logg_val),
+                'logg_err': float(e_logg),
+                'feh': float(mh),
+                'feh_err': float(e_mh),
+            }
+
+            print('APOGEE DR17 parameters:')
+            print(f"Teff={data['teff']:.0f}+/-{data['teff_err']:.0f}K")
+            print(f"logg={data['logg']:.2f}+/-{data['logg_err']:.2f}")
+            print(f"[M/H]={data['feh']:.2f}+/-{data['feh_err']:.2f}")
+
+            return data
+
+        except Exception as e:
+            logger.warning('APOGEE DR17 query failed: %s', e)
+
+        return None
+
+    def query_galah_params(self):
+        """Query GALAH DR3 for stellar parameters.
+
+        Returns dict with teff, logg, feh and their errors, or None if not found.
+        """
+        import numpy.ma as ma
+
+        try:
+            v = Vizier(columns=['**'], row_limit=5)
+            cat = v.query_constraints(
+                catalog='J/MNRAS/506/150/catalog',
+                GaiaEDR3=str(self.g_id)
+            )
+
+            if not cat or len(cat) == 0 or len(cat[0]) == 0:
+                return None
+
+            row = cat[0][0]
+
+            # Quality: flag_sp must be 0
+            flag_sp = row['Flagsp']
+            if not ma.is_masked(flag_sp) and int(flag_sp) != 0:
+                print('GALAH DR3: flag_sp != 0, skipping.')
+                return None
+
+            teff = row['Teff']
+            e_teff = row['e_Teff']
+            logg_val = row['logg']
+            e_logg = row['e_logg']
+            feh = row['[Fe/H]']
+            e_feh = row['e_[Fe/H]']
+
+            for val in [teff, e_teff, logg_val, e_logg, feh, e_feh]:
+                if ma.is_masked(val):
+                    return None
+
+            data = {
+                'teff': float(teff),
+                'teff_err': float(e_teff),
+                'logg': float(logg_val),
+                'logg_err': float(e_logg),
+                'feh': float(feh),
+                'feh_err': float(e_feh),
+            }
+
+            print('GALAH DR3 parameters:')
+            print(f"Teff={data['teff']:.0f}+/-{data['teff_err']:.0f}K")
+            print(f"logg={data['logg']:.2f}+/-{data['logg_err']:.2f}")
+            print(f"[Fe/H]={data['feh']:.2f}+/-{data['feh_err']:.2f}")
+
+            return data
+
+        except Exception as e:
+            logger.warning('GALAH DR3 query failed: %s', e)
+
+        return None
+
+    def query_lamost_params(self):
+        """Query LAMOST DR5 stellar parameter catalog (AFGK stars).
+
+        Returns dict with teff, logg, feh and their errors, or None if not found.
+        """
+        import numpy.ma as ma
+
+        try:
+            coord = SkyCoord(ra=self.ra * u.deg, dec=self.dec * u.deg,
+                             frame='icrs')
+            v = Vizier(columns=['**'], row_limit=10)
+            # V/164/stellar5 = LAMOST DR5 AFGK stellar parameters
+            cat = v.query_region(coord, radius=5 * u.arcsec,
+                                 catalog='V/164/stellar5')
+
+            if not cat or len(cat) == 0 or len(cat[0]) == 0:
+                return None
+
+            tab = cat[0]
+            tab.sort('_r')
+
+            # Filter by SNR in g-band > 30
+            for row in tab:
+                snrg = row['snrg']
+                if ma.is_masked(snrg) or float(snrg) < 30:
+                    continue
+
+                teff = row['Teff']
+                e_teff = row['e_Teff']
+                logg_val = row['logg']
+                e_logg = row['e_logg']
+                feh = row['[Fe/H]']
+                e_feh = row['e_[Fe/H]']
+
+                has_masked = False
+                for val in [teff, e_teff, logg_val, e_logg, feh, e_feh]:
+                    if ma.is_masked(val):
+                        has_masked = True
+                        break
+                if has_masked:
+                    continue
+
+                data = {
+                    'teff': float(teff),
+                    'teff_err': float(e_teff),
+                    'logg': float(logg_val),
+                    'logg_err': float(e_logg),
+                    'feh': float(feh),
+                    'feh_err': float(e_feh),
+                }
+
+                print('LAMOST DR5 parameters:')
+                print(f"Teff={data['teff']:.0f}+/-{data['teff_err']:.0f}K")
+                print(f"logg={data['logg']:.2f}+/-{data['logg_err']:.2f}")
+                print(f"[Fe/H]={data['feh']:.2f}+/-{data['feh_err']:.2f}")
+
+                return data
+
+        except Exception as e:
+            logger.warning('LAMOST DR5 query failed: %s', e)
+
+        return None
+
+    def query_pastel_params(self):
+        """Query PASTEL catalog for stellar parameters.
+
+        PASTEL compiles literature Teff/logg/[Fe/H] determinations.
+        Returns dict with teff, logg, feh and their errors, or None if not found.
+        Errors may be absent in PASTEL; in that case conservative defaults
+        are assigned.
+        """
+        import numpy.ma as ma
+
+        try:
+            coord = SkyCoord(ra=self.ra * u.deg, dec=self.dec * u.deg,
+                             frame='icrs')
+            v = Vizier(columns=['**'], row_limit=50)
+            cat = v.query_region(coord, radius=5 * u.arcsec,
+                                 catalog='B/pastel/pastel')
+
+            if not cat or len(cat) == 0 or len(cat[0]) == 0:
+                return None
+
+            tab = cat[0]
+
+            # PASTEL has multiple entries per star (one per literature source).
+            # Keep only rows with Teff present, then take the median.
+            teffs, loggs, fehs = [], [], []
+            e_teffs, e_loggs, e_fehs = [], [], []
+
+            for row in tab:
+                t = row['Teff']
+                if ma.is_masked(t):
+                    continue
+                teffs.append(float(t))
+                et = row['e_Teff']
+                e_teffs.append(float(et) if not ma.is_masked(et) else np.nan)
+
+                lg = row['logg']
+                if not ma.is_masked(lg):
+                    loggs.append(float(lg))
+                    elg = row['e_logg']
+                    e_loggs.append(
+                        float(elg) if not ma.is_masked(elg) else np.nan)
+
+                fe = row['[Fe/H]']
+                if not ma.is_masked(fe):
+                    fehs.append(float(fe))
+                    efe = row['e_[Fe/H]']
+                    e_fehs.append(
+                        float(efe) if not ma.is_masked(efe) else np.nan)
+
+            if len(teffs) == 0:
+                return None
+
+            teff_med = float(np.median(teffs))
+            # Use reported error if available, else scatter, else 100 K default
+            e_teff_vals = [v for v in e_teffs if not np.isnan(v)]
+            teff_err = (float(np.median(e_teff_vals)) if e_teff_vals
+                        else (float(np.std(teffs)) if len(teffs) > 1
+                              else 100.0))
+
+            logg_med = float(np.median(loggs)) if loggs else np.nan
+            e_logg_vals = [v for v in e_loggs if not np.isnan(v)]
+            logg_err = (float(np.median(e_logg_vals)) if e_logg_vals
+                        else (float(np.std(loggs)) if len(loggs) > 1
+                              else 0.2))
+
+            feh_med = float(np.median(fehs)) if fehs else np.nan
+            e_feh_vals = [v for v in e_fehs if not np.isnan(v)]
+            feh_err = (float(np.median(e_feh_vals)) if e_feh_vals
+                       else (float(np.std(fehs)) if len(fehs) > 1
+                             else 0.1))
+
+            if np.isnan(logg_med) or np.isnan(feh_med):
+                return None
+
+            data = {
+                'teff': teff_med,
+                'teff_err': max(teff_err, 50.0),  # floor at 50 K
+                'logg': logg_med,
+                'logg_err': max(logg_err, 0.05),  # floor at 0.05 dex
+                'feh': feh_med,
+                'feh_err': max(feh_err, 0.05),  # floor at 0.05 dex
+            }
+
+            print(f'PASTEL parameters (median of {len(teffs)} entries):')
+            print(f"Teff={data['teff']:.0f}+/-{data['teff_err']:.0f}K")
+            print(f"logg={data['logg']:.2f}+/-{data['logg_err']:.2f}")
+            print(f"[Fe/H]={data['feh']:.2f}+/-{data['feh_err']:.2f}")
+
+            return data
+
+        except Exception as e:
+            logger.warning('PASTEL query failed: %s', e)
+
+        return None
+
+    def query_spectroscopic_params(self):
+        """Query multiple spectroscopic catalogs in priority order.
+
+        Priority: APOGEE > GALAH > RAVE > LAMOST > PASTEL.
+        Returns dict with teff, logg, feh + errors + source, or None.
+        """
+        for method, source in [
+            (self.query_apogee_params, 'APOGEE_DR17'),
+            (self.query_galah_params, 'GALAH_DR3'),
+            (self.query_rave_params, 'RAVE_DR6'),
+            (self.query_lamost_params, 'LAMOST_DR5'),
+            (self.query_pastel_params, 'PASTEL'),
+        ]:
+            try:
+                result = method()
+                if result is not None:
+                    result['source'] = source
+                    return result
+            except Exception as e:
+                logger.warning('%s query failed: %s', source, e)
+        return None
 
     def _query_gaia_catalogs(self):
         """Query Gaia DR3 for catalog crossmatches."""

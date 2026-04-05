@@ -189,8 +189,9 @@ class Star:
                 self.g_id = lib.g_id
                 self.tic = lib.tic
                 self.kic = lib.kic
-                # Store RAVE parameters for use in priors
+                # Store spectroscopic parameters for use in priors
                 self.rave_params = lib.rave_params
+                self.spectroscopic_params = lib.spectroscopic_params
             else:
                 print(
                     colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)
@@ -201,6 +202,7 @@ class Star:
                 self.tic = False
                 self.kic = False
                 self.rave_params = None
+                self.spectroscopic_params = None
 
             # [plx, plx_e, dist, dist_e, rad, rad_e, temp, temp_e, lum, lum_e]
             libouts = extract_from_lib(lib)
@@ -314,9 +316,9 @@ class Star:
         for i, f in zip(self.filter_mask[upper], flx):
             self.flux_er[i] = mx_rel_er * f
 
-        # --- All retrieved photometry (pre-clip) ---
+        # --- All retrieved photometry ---
         c = random.choice(self.colors)
-        print(colored('\t\t--- Retrieved photometry (pre-clip) ---', c))
+        print(colored('\t\t--- Retrieved photometry ---', c))
         self.print_mags(c)
 
         # --- Photometry QC (warn only — no filters are removed) ---

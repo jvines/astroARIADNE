@@ -5,6 +5,25 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-04-04
+
+### Added
+- Spectroscopic prior support from APOGEE DR17, GALAH DR3, and LAMOST DR5,
+  with automatic survey priority cascade (APOGEE > GALAH > LAMOST > RAVE).
+- `save_bma` now automatically writes `ariadne_result.nc` (arviz InferenceData)
+  to the output folder alongside the existing pickle and `.dat` files.
+
+### Fixed
+- Multiprocessing crash on macOS with Python 3.12+ caused by `spawn` start
+  method breaking the module-level globals that dynesty callbacks depend on.
+  Forced `fork` unconditionally.
+- `to_netcdf()` was never called and `self.out` was never populated by
+  `save_bma`, making the netCDF export path dead code since 1.4.0.
+- `pyphot` compatibility: replaced `.magnitude` (pint API) with `.value`
+  (astropy API) in `phot_utils.py` to match current pyphot releases.
+- Cached `pyphot.get_library()` at module level to avoid redundant HDF5 reads
+  (~3 per filter per star).
+
 ## [1.4.1] - 2026-03-25
 
 ### Changed

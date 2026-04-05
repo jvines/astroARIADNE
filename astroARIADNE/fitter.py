@@ -47,10 +47,7 @@ except ModuleNotFoundError:
         '(py)MultiNest installation (or libmultinest.dylib) not detected.'
     )
 
-if sys.platform == 'darwin':
-    set_start_method('spawn', force=True)
-else:
-    set_start_method('fork', force=True)
+set_start_method('fork', force=True)
 
 
 class Fitter:
@@ -428,45 +425,46 @@ class Fitter:
         if not hasattr(self, 'prior_sources'):
             self.prior_sources = {}
 
-        # Teff: RAVE DR6 star-specific or population prior
-        if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
-            teff_rave = self.star.rave_params['teff']
-            teff_err_rave = self.star.rave_params['teff_err']
-            defaults['teff'] = st.norm(loc=teff_rave, scale=teff_err_rave)
-            self.prior_sources['teff'] = 'rave_star'
-            logger.info('Using RAVE DR6 Teff prior (star-specific)')
+        # Resolve spectroscopic parameters: prefer spectroscopic_params,
+        # fall back to rave_params for backward compatibility.
+        spec = getattr(self.star, 'spectroscopic_params', None)
+        if spec is None:
+            spec = getattr(self.star, 'rave_params', None)
+        spec_source = spec.get('source', 'spectroscopic') if spec else None
+
+        # Teff: spectroscopic star-specific or population prior
+        if spec is not None:
+            defaults['teff'] = st.norm(loc=spec['teff'],
+                                       scale=spec['teff_err'])
+            self.prior_sources['teff'] = spec_source
+            logger.info('Using %s Teff prior (star-specific)', spec_source)
         else:
             with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
                 defaults['teff'] = pickle.load(jar)
             self.prior_sources['teff'] = 'rave_population'
-            logger.info('Using population Teff prior (no RAVE match)')
+            logger.info('Using population Teff prior (no spectroscopic match)')
 
-        # logg: RAVE DR6, isochrone, or population prior
-        if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
-            logg_rave = self.star.rave_params['logg']
-            logg_err_rave = self.star.rave_params['logg_err']
-            defaults['logg'] = st.norm(loc=logg_rave, scale=logg_err_rave)
-            self.prior_sources['logg'] = 'rave_star'
-            logger.info('Using RAVE DR6 logg prior (star-specific)')
+        # logg: spectroscopic, isochrone, or population prior
+        if spec is not None:
+            defaults['logg'] = st.norm(loc=spec['logg'],
+                                       scale=spec['logg_err'])
+            self.prior_sources['logg'] = spec_source
+            logger.info('Using %s logg prior (star-specific)', spec_source)
         elif self.star.get_logg:
             defaults['logg'] = st.norm(
                 loc=self.star.logg, scale=self.star.logg_e)
             self.prior_sources['logg'] = 'isochrone'
             logger.info('Using isochrone logg estimate')
         else:
-            # with open(priorsdir + '/logg_ppf.pkl', 'rb') as jar:
-            #     defaults['logg'] = pickle.load(jar)
             defaults['logg'] = st.uniform(loc=3.5, scale=2.5)
             self.prior_sources['logg'] = 'uniform_default'
             logger.info('Using population logg prior')
 
-        # [Fe/H]: RAVE DR6 or population prior
-        if hasattr(self.star, 'rave_params') and self.star.rave_params is not None:
-            feh_rave = self.star.rave_params['feh']
-            feh_err_rave = self.star.rave_params['feh_err']
-            defaults['z'] = st.norm(loc=feh_rave, scale=feh_err_rave)
-            self.prior_sources['z'] = 'rave_star'
-            logger.info('Using RAVE DR6 [Fe/H] prior (star-specific)')
+        # [Fe/H]: spectroscopic or population prior
+        if spec is not None:
+            defaults['z'] = st.norm(loc=spec['feh'], scale=spec['feh_err'])
+            self.prior_sources['z'] = spec_source
+            logger.info('Using %s [Fe/H] prior (star-specific)', spec_source)
         else:
             defaults['z'] = st.norm(loc=-0.125, scale=0.234)
             self.prior_sources['z'] = 'population'
@@ -1442,7 +1440,9 @@ class Fitter:
         with open(synth_out, 'w') as logfile:
             logfile.write(synthdat)
         pickle.dump(out, open(out_file, 'wb'))
-        pass
+        self.out = out
+        nc_file = f'{self.out_folder}/ariadne_result.nc'
+        self.to_netcdf(nc_file)
 
     @staticmethod
     def bayesian_model_average(outputs, grids, norm, nsamples, c='white'):
