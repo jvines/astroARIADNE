@@ -321,6 +321,130 @@ class SEDPlotter:
             logger.warning(f'Failed to load spectra cache for {model_key}: {e}')
             return None
 
+    def _get_raw_spectrum(self, model_key, teff, logg, z):
+        """Fetch broadened spectrum for given model and stellar params.
+
+        Returns (wave, flux) trimmed to the standard wavelength range and
+        instrumentally broadened where applicable, but NOT extincted or
+        normalized.  Returns None on failure.
+        """
+        orig_theta = self.theta.copy()
+        self.theta[0], self.theta[1], self.theta[2] = teff, logg, z
+        try:
+            cached = self._load_from_cache(model_key)
+            if cached is not None:
+                return cached
+
+            if self.moddir is None:
+                return None
+
+            if model_key == 'phoenix':
+                if not hasattr(self, '_phoenix_wave'):
+                    self._phoenix_wave = fits.open(
+                        self.moddir + self.__wav_file
+                    )[0].data * u.angstrom.to(u.um)
+                wave = self._phoenix_wave
+                mask = (0.125 < wave) & (wave < 4.629296073126975)
+                flux = self.fetch_Phoenix()
+                new_w = wave[mask]
+                new_ww = np.linspace(new_w[0], new_w[-1], len(new_w))
+                brf, _ = pyasl.instrBroadGaussFast(
+                    new_ww, flux, 1500,
+                    edgeHandling="firstlast", fullout=True, maxsig=8
+                )
+                return new_w, brf[mask]
+
+            elif model_key in ('btsettl', 'btnextgen', 'btcond'):
+                fetch = {
+                    'btsettl': self.fetch_btsettl,
+                    'btnextgen': self.fetch_btnextgen,
+                    'btcond': self.fetch_btcond,
+                }[model_key]
+                wave, flux = fetch()
+                mask = (0.125 < wave) & (wave < 4.629296073126975)
+                wave, flux = wave[mask], flux[mask]
+                new_w = np.linspace(wave[0], wave[-1], len(wave))
+                brf, _ = pyasl.instrBroadGaussFast(
+                    new_w, flux, 1500,
+                    edgeHandling="firstlast", fullout=True, maxsig=8
+                )
+                return wave, brf
+
+            elif model_key in ('ck04', 'kurucz', 'coelho'):
+                fetch = {
+                    'ck04': self.fetch_ck04,
+                    'kurucz': self.fetch_kurucz,
+                    'coelho': self.fetch_coelho,
+                }[model_key]
+                wave, flux = fetch()
+                lo = 0.15 if model_key in ('kurucz', 'coelho') else 0.125
+                mask = (lo < wave) & (wave < 4.629296073126975)
+                return wave[mask], flux[mask]
+
+        except Exception as e:
+            logger.warning(
+                f'Failed to get spectrum for {model_key} '
+                f'(Teff={teff}, logg={logg}, z={z}): {e}'
+            )
+            return None
+        finally:
+            self.theta[:] = orig_theta
+
+    def _plot_bma_gray_spectra(self, ax, n_samples=100):
+        """Draw gray sampled model spectra weighted by BMA weights."""
+        rng = np.random.default_rng()
+        Rv = 3.1
+
+        for model_name, weight in self.out['weights'].items():
+            if weight < 1e-4:
+                continue
+            n_model = max(1, round(weight * n_samples))
+            samples = self.out['originals'][model_name]
+            n_avail = len(samples['teff'])
+            indices = rng.choice(n_avail, size=n_model, replace=True)
+
+            self.star.load_grid(model_name)
+
+            # Snap samples to grid points and deduplicate
+            grouped = {}  # (teff_grid, logg_grid, z_grid) -> [(norm, Av)]
+            unique_teff = np.unique(self.star.teff)
+            unique_logg = np.unique(self.star.logg)
+            unique_z = np.unique(self.star.z)
+
+            for idx in indices:
+                t_snap = unique_teff[
+                    np.argmin(np.abs(unique_teff - samples['teff'][idx]))]
+                g_snap = unique_logg[
+                    np.argmin(np.abs(unique_logg - samples['logg'][idx]))]
+                z_snap = unique_z[
+                    np.argmin(np.abs(unique_z - samples['z'][idx]))]
+
+                if not self.norm:
+                    rad = samples['rad'][idx]
+                    dist = samples['dist'][idx] * u.pc.to(u.solRad)
+                    norm_val = (rad / dist) ** 2
+                    Av_val = samples['Av'][idx]
+                else:
+                    norm_val = samples['norm'][idx]
+                    Av_val = samples['Av'][idx]
+
+                key = (t_snap, g_snap, z_snap)
+                grouped.setdefault(key, []).append((norm_val, Av_val))
+
+            for (t, g, z_val), param_list in grouped.items():
+                result = self._get_raw_spectrum(model_name, t, g, z_val)
+                if result is None:
+                    continue
+                wave, flux_raw = result
+                for norm_val, Av in param_list:
+                    ext = self.av_law(wave * 1e4, Av, Rv)
+                    flx = apply(ext, flux_raw.copy()) * norm_val * wave
+                    ax.plot(wave, flx, color='gray', alpha=0.15,
+                            lw=0.5, zorder=-1)
+
+        # Restore winning model's grid
+        self.star.load_grid(self.grid)
+
     def plot_SED_no_model(self, s=None):
         """Plot raw photometry."""
         if self.star is None:
@@ -443,6 +567,8 @@ class SEDPlotter:
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
 
+        if self.bma:
+            self._plot_bma_gray_spectra(ax)
         self.SED(ax)
 
         # Model plot

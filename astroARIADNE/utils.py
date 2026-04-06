@@ -14,6 +14,8 @@ import random
 import time
 from contextlib import closing
 
+from .config import colors
+
 import numpy as np
 from scipy.special import erf
 from scipy.stats import (gaussian_kde, norm)
@@ -163,7 +165,6 @@ def display_star_fin(star, c):
     print(colored(f'{dist:.3f} +/- {dist_e:.3f}', c))
     print(colored('\t\t\tMaximum Av : ', c), end='')
     print(colored(f'{star.Av:.3f}', c))
-    print('')
     pass
 
 
@@ -192,10 +193,6 @@ def display_routine(engine, live_points, dlogz, ndim, bound=None, sample=None,
     Algorithm used (i.e. Multinest or Dynesty)
     Setup used (i.e. Live points, dlogz tolerance)
     """
-    colors = [
-        'red', 'green', 'blue', 'yellow',
-        'grey', 'magenta', 'cyan', 'white'
-    ]
     c = random.choice(colors)
     if engine == 'multinest':
         engine = 'MultiNest'
@@ -224,24 +221,15 @@ def display_routine(engine, live_points, dlogz, ndim, bound=None, sample=None,
 
 
 def end(coordinator, elapsed_time, out_folder, engine, use_norm):
-    """Display end of run information.
-
-    What is displayed is:
-    best fit parameters
-    elapsed time
-    Spectral type
-    """
-    colors = [
-        'red', 'green', 'blue', 'yellow',
-        'grey', 'magenta', 'cyan', 'white'
-    ]
+    """Display end of run information."""
     c = random.choice(colors)
+    _T = '\t\t\t'
+
     if use_norm:
         order = np.array(['teff', 'logg', 'z', 'norm', 'rad', 'Av'])
     else:
-        order = np.array(
-            ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
-        )
+        order = np.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av'])
+
     if engine == 'Bayesian Model Averaging':
         res_dir = f'{out_folder}/BMA.pkl'
     else:
@@ -251,117 +239,113 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
 
     star = out['star']
     mask = star.filter_mask
-    n = int(star.used_filters.sum())
     for filt in star.filter_names[mask]:
         p_ = get_noise_name(filt) + '_noise'
         order = np.append(order, p_)
 
-    theta = np.zeros(order.shape[0] - 1 + n)
-    for i, param in enumerate(order):
-        if param != 'loglike':
-            theta[i] = out['best_fit_averaged'][param]
-        if param == 'inflation':
-            for m, fi in enumerate(star.filter_names[mask]):
-                _p = get_noise_name(fi) + '_noise'
-                theta[i + m] = out['best_fit_averaged'][_p]
+    # Display name mapping
+    display_names = {
+        'teff': 'Teff (K)', 'logg': 'log(g) (dex)', 'z': '[Fe/H] (dex)',
+        'dist': 'Distance (pc)', 'rad': 'Radius (Rsun)', 'norm': '(R/D)^2',
+        'Av': 'Av (mag)', 'grav_mass': 'Grav. mass (Msun)',
+        'lum': 'Luminosity (Lsun)', 'AD': 'Ang. diameter (mas)',
+        'iso_mass': 'Iso. mass (Msun)', 'age': 'Age (Gyr)', 'eep': 'EEP',
+    }
 
-    if engine != 'Bayesian Model Averaging':
-        z, z_err = out['global_lnZ'], out['global_lnZerr']
+    def _fmt_row(name, med, unc=None, ci=None, fmt='g'):
+        """Format one table row."""
+        col_name = f'{name:24s}'
+        col_med = f'{med:>12.4{fmt}}'
+        if unc is None:
+            col_unc = f'{"fixed":>20s}'
+            col_ci = f'{"":>20s}'
+        else:
+            unlo, unhi = unc
+            lo, hi = ci
+            col_unc = f'+{unhi:.4{fmt}}  -{unlo:.4{fmt}}'
+            col_ci = f'[{lo:.4{fmt}}, {hi:.4{fmt}}]'
+        return f'{_T}{col_name}  {col_med}  {col_unc:>20s}  {col_ci:>20s}'
 
-    print('')
-    print(colored('\t\t\tFitting finished.', c))
-    print(colored('\t\t\tBest fit parameters are:', c))
-    fmt_str = ''
+    # Header
+    print()
+    print(colored(f'{_T}Fitting finished.', c))
+    print(colored(f'{_T}Best fit parameters are:', c))
+    print()
+    hdr = f'{_T}{"Parameter":24s}  {"Median":>12s}  {chr(0x00B1) + "1" + chr(0x03c3) + " CI":>20s}  {"3" + chr(0x03c3) + " CI":>20s}'
+    print(colored(hdr, c))
+    print(colored(f'{_T}{"-" * 82}', c))
+
+    # Physical parameters
     for i, p in enumerate(order):
-        p2 = p
         if 'noise' in p:
             continue
-        fmt_str += '\t\t\t'
-        fmt = 'f'
-        if p == 'norm':
-            p2 = '(R/D)^2'
-            fmt = 'e'
-        if p == 'z':
-            p2 = '[Fe/H]'
-        fmt_str += f'{p2} : {theta[i]:.4{fmt}} '
+        name = display_names.get(p, p)
+        med = out['best_fit_averaged'][p]
+        fmt = 'e' if p == 'norm' else 'g'
         if not coordinator[i]:
-            unlo, unhi = out['uncertainties_averaged'][p]
-            lo, up = out['confidence_interval_averaged'][p]
-            fmt_str += f'+ {unhi:.4{fmt}} - {unlo:.4{fmt}} '
-            fmt_str += f'[{lo:.4{fmt}}, {up:.4{fmt}}]\n'
+            unc = out['uncertainties_averaged'][p]
+            ci = out['confidence_interval_averaged'][p]
+            print(colored(_fmt_row(name, med, unc, ci, fmt), c))
         else:
-            fmt_str += 'fixed\n'
+            print(colored(_fmt_row(name, med, fmt=fmt), c))
 
+    # Derived parameters
+    derived = []
     if not use_norm:
-        ad = out['best_fit_averaged']['AD']
-        unlo, unhi = out['uncertainties_averaged']['AD']
-        lo, up = out['confidence_interval_averaged']['AD']
-        fmt_str += f'\t\t\tAngular Diameter : {ad:.4f} '
-        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
-
-    mass = out['best_fit_averaged']['grav_mass']
-    unlo, unhi = out['uncertainties_averaged']['grav_mass']
-    lo, up = out['confidence_interval_averaged']['grav_mass']
-    fmt_str += f'\t\t\tGrav mass : {mass:.4f} '
-    fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
-
-    lum = out['best_fit_averaged']['lum']
-    unlo, unhi = out['uncertainties_averaged']['lum']
-    lo, up = out['confidence_interval_averaged']['lum']
-    fmt_str += f'\t\t\tLuminosity : {lum:.4f} '
-    fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
-
+        derived.append('AD')
+    derived.extend(['grav_mass', 'lum'])
     if engine == 'Bayesian Model Averaging':
-        miso = out['best_fit_averaged']['iso_mass']
-        unlo, unhi = out['uncertainties_averaged']['iso_mass']
-        lo, up = out['confidence_interval_averaged']['iso_mass']
-        fmt_str += f'\t\t\tIso mass : {miso:.4f} '
-        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
+        derived.extend(['iso_mass', 'age', 'eep'])
 
-        age = out['best_fit_averaged']['age']
-        unlo, unhi = out['uncertainties_averaged']['age']
-        lo, up = out['confidence_interval_averaged']['age']
-        fmt_str += f'\t\t\tAge (Gyr) : {age:.4f} '
-        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
+    for p in derived:
+        if p not in out['best_fit_averaged']:
+            continue
+        name = display_names.get(p, p)
+        med = out['best_fit_averaged'][p]
+        unc = out['uncertainties_averaged'][p]
+        ci = out['confidence_interval_averaged'][p]
+        print(colored(_fmt_row(name, med, unc, ci), c))
 
-        eep = out['best_fit_averaged']['eep']
-        unlo, unhi = out['uncertainties_averaged']['eep']
-        lo, up = out['confidence_interval_averaged']['eep']
-        fmt_str += f'\t\t\tEEP : {eep:.4f} '
-        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
+    # Spectral type
+    spt = out['spectral_type']
+    print(colored(f'{_T}{"Spectral type":24s}  {spt:>12s}', c))
 
+    # Noise parameters
+    print()
+    print(colored(f'{_T}{"Excess noise":24s}  {"Median":>12s}  {chr(0x00B1) + "1" + chr(0x03c3) + " CI":>20s}  {"3" + chr(0x03c3) + " CI":>20s}', c))
+    print(colored(f'{_T}{"-" * 82}', c))
     for i, p in enumerate(order):
         if 'noise' not in p:
             continue
-        unlo, unhi = out['uncertainties_averaged'][p]
-        lo, up = out['confidence_interval_averaged'][p]
-        p_ = 'Excess '
         if 'SDSS' not in p and 'PS1' not in p:
             p1, p2 = p.split('_')
         else:
             p1, p2, p3 = p.split('_')
             p1 += '_' + p2
             p2 = p3
-        fmt_str += f'\t\t\t{p_ + p1} {p2} : {theta[i]:.4f} '
-        fmt_str += f'+ {unhi:.4f} - {unlo:.4f} [{lo:.4f}, {up:.4f}]\n'
-    print(colored(fmt_str, c), end='')
+        name = f'{p1} {p2}'
+        med = out['best_fit_averaged'][p]
+        unc = out['uncertainties_averaged'][p]
+        ci = out['confidence_interval_averaged'][p]
+        print(colored(_fmt_row(name, med, unc, ci), c))
 
-    spt = out['spectral_type']
-    print(colored('\t\t\tMamajek Spectral Type : ', c), end='')
-    print(colored(spt, c))
+    # Model weights / evidence
+    print()
     if engine != 'Bayesian Model Averaging':
-        print(colored('\t\t\tlog Bayesian evidence : ', c), end='')
-        print(colored(f'{z:.3f} +/-', c), end=' ')
-        print(colored(f'{z_err:.3f}', c))
+        z, z_err = out['global_lnZ'], out['global_lnZerr']
+        print(colored(f'{_T}log Bayesian evidence : {z:.3f} +/- {z_err:.3f}', c))
     else:
         probs = out['weights']
-        for k in probs.keys():
-            text = f'\t\t\t{k} probability : '
-            print(colored(text, c), end='')
-            print(colored(f'{probs[k]:.4f}', c))
-    print(colored('\t\t\tElapsed time : ', c), end='')
-    print(colored(elapsed_time, c))
-    pass
+        lnZ = out.get('lnZ', {})
+        wfmt = f'{_T}{"Grid":24s}  {"Probability":>12s}  {"log(Z)":>12s}'
+        print(colored(f'{_T}Model weights:', c))
+        print(colored(wfmt, c))
+        print(colored(f'{_T}{"-" * 52}', c))
+        for k in probs:
+            lz = lnZ.get(k, float('nan'))
+            print(colored(f'{_T}{k:24s}  {probs[k]:>12.4f}  {lz:>12.3f}', c))
+
+    print(colored(f'{_T}Elapsed time : {elapsed_time}', c))
 
 
 def create_dir(path):

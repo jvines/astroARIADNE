@@ -5,6 +5,34 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] - 2026-04-05
+
+### Added
+- BMA-weighted gray sampled spectra on SED plot: when running in Bayesian Model
+  Averaging mode, `plot_SED()` now draws 100 gray model spectra sampled from each
+  grid's posterior proportionally to its BMA weight, visualizing the combined
+  model + parameter uncertainty behind the best-fit spectrum.
+
+### Changed
+- Rewrote `end()` output in `utils.py` as a LACHESIS-style columnar table with
+  proper units (Teff (K), log(g) (dex), [Fe/H] (dex), etc.), column header,
+  separator rule, and a dedicated noise-parameter block.
+- Model weights now display as a proper table with probabilities **and** logZ
+  per grid, replacing the bare `phoenix probability : 0.0360` lines.
+- `show_priors()` restyled to match the new LACHESIS table format (no more
+  box-drawing characters) and is now called automatically from `initialize()`.
+
+### Fixed
+- `_format_prior_notation()` previously looked at
+  `type(prior_obj).__name__`, which always returns `rv_continuous_frozen`
+  for frozen scipy distributions. Switched to inspecting
+  `type(prior_obj.dist).__name__` and pulling parameters from `.kwds`/`.args`.
+- RAVE population priors (stored as `InterpolatedUnivariateSpline` from
+  `teff_ppf.pkl`) now display as `RAVE (population)` instead of the raw
+  scipy class name, even when using `create_priors_from_setup`.
+- Removed three redundant local `colors = [...]` lists in `utils.py` /
+  `fitter.py` that were shadowing the shared list imported from `config.py`.
+
 ## [1.4.3] - 2026-04-04
 
 ### Added

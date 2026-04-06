@@ -409,6 +409,7 @@ class Fitter:
         en = 'Bayesian Model Averaging' if self._bma else self._engine
         display_routine(en, self._nlive, self._dlogz, self.ndim, self._bound,
                         self._sample, thr, self._dynamic)
+        self.show_priors()
 
     def get_ndim(self):
         """Calculate number of dimensions."""
@@ -606,70 +607,47 @@ class Fitter:
             Formatted prior information if return_string=True, else None
         """
         global order
+        _T = '\t\t\t'
+        c = np.random.choice(colors)
 
         # Physical parameters to display (skip noise priors)
         physical_params = []
         for param_name in self.priors.keys():
-            # Skip noise priors
             if param_name.endswith('_noise'):
                 continue
             physical_params.append(param_name)
-
-        # Calculate maximum widths for formatting
-        max_param_width = max(len(p) for p in physical_params)
-        max_prior_width = 0
 
         # Format each prior
         prior_strs = {}
         for param_name in physical_params:
             prior_obj = self.priors[param_name]
-
-            # Check if parameter is fixed
             param_idx = np.where(order == param_name)[0]
             if len(param_idx) > 0 and self.coordinator[param_idx[0]] == 1:
                 fixed_value = self.fixed[param_idx[0]]
                 prior_str = f"Fixed({fixed_value:.4f})"
             else:
                 prior_str = self._format_prior_notation(param_name, prior_obj)
-
             prior_strs[param_name] = prior_str
-            max_prior_width = max(max_prior_width, len(prior_str))
-
-        # Build table with box-drawing characters
-        # Add padding
-        param_col_width = max(max_param_width + 2, 12)  # Min width 12 for "Parameter"
-        prior_col_width = max(max_prior_width + 2, 30)  # Min width 30
-
-        # Table borders
-        top_border = '╔' + '═' * param_col_width + '╦' + '═' * prior_col_width + '╗'
-        header_sep = '╠' + '═' * param_col_width + '╬' + '═' * prior_col_width + '╣'
-        bottom_border = '╚' + '═' * param_col_width + '╩' + '═' * prior_col_width + '╝'
-
-        # Header
-        header = '║ ' + 'Parameter'.ljust(param_col_width - 2) + ' ║ ' + 'Prior'.ljust(prior_col_width - 2) + ' ║'
-
-        # Build output
-        lines = [top_border, header, header_sep]
 
         # Sort parameters in logical order
         param_order = ['teff', 'logg', 'z', 'dist', 'rad', 'norm', 'Av']
         sorted_params = [p for p in param_order if p in physical_params]
-        # Add any remaining parameters not in the order list
         sorted_params.extend([p for p in physical_params if p not in param_order])
 
+        # Build table
+        lines = []
+        lines.append(f'{_T}{"Parameter":24s}  {"Prior"}')
+        lines.append(f'{_T}{"-" * 52}')
         for param_name in sorted_params:
-            param_cell = '║ ' + param_name.ljust(param_col_width - 2)
-            prior_cell = ' ║ ' + prior_strs[param_name].ljust(prior_col_width - 2) + ' ║'
-            lines.append(param_cell + prior_cell)
-
-        lines.append(bottom_border)
+            lines.append(f'{_T}{param_name:24s}  {prior_strs[param_name]}')
 
         output = '\n'.join(lines)
 
         if return_string:
             return output
         else:
-            print(output)
+            print(colored(output, c))
+            print()
             return None
 
     def _format_prior_notation(self, param_name, prior_obj):
@@ -687,65 +665,60 @@ class Fitter:
         str
             Formatted statistical notation
         """
-        # Check for RAVE population prior
+        # RAVE population prior: loaded as an InterpolatedUnivariateSpline
+        # from teff_ppf.pkl / logg_ppf.pkl. Detect by type since manual
+        # prior setups don't populate prior_sources.
+        if 'Spline' in type(prior_obj).__name__:
+            return "RAVE (population)"
         if hasattr(self, 'prior_sources') and param_name in self.prior_sources:
             if self.prior_sources[param_name] == 'rave_population':
                 return "RAVE (population)"
 
-        # Get distribution type name
-        dist_name = type(prior_obj).__name__
+        # Frozen scipy distributions expose .dist (the class) and .kwds/.args
+        # (the frozen parameters). Use the underlying class name to identify
+        # the distribution.
+        if hasattr(prior_obj, 'dist'):
+            inner_name = type(prior_obj.dist).__name__
+            kwds = dict(getattr(prior_obj, 'kwds', {}) or {})
+            args = list(getattr(prior_obj, 'args', ()) or ())
+        else:
+            inner_name = type(prior_obj).__name__
+            kwds, args = {}, []
+
+        def _pop(key, idx, default=0.0):
+            if key in kwds:
+                return kwds[key]
+            if idx < len(args):
+                return args[idx]
+            return default
 
         try:
-            if 'norm_gen' in dist_name:  # Normal distribution
-                mu = prior_obj.dist.loc
-                sigma = prior_obj.dist.scale
-                return f"N({mu:.2f}, {sigma:.2f})"
+            if 'norm_gen' in inner_name and 'truncnorm' not in inner_name:
+                mu = _pop('loc', 0)
+                sigma = _pop('scale', 1, 1.0)
+                return f"N({mu:.3f}, {sigma:.3f})"
 
-            elif 'uniform_gen' in dist_name:  # Uniform distribution
-                a = prior_obj.dist.loc
-                b = prior_obj.dist.loc + prior_obj.dist.scale
-                # Format with appropriate precision
-                if b > 1000:
-                    return f"U({a:.1f}, {b:.0f})"
-                elif b < 1:
-                    return f"U({a:.4f}, {b:.4f})"
-                else:
-                    return f"U({a:.2f}, {b:.2f})"
+            if 'uniform_gen' in inner_name:
+                a = _pop('loc', 0)
+                scale = _pop('scale', 1, 1.0)
+                b = a + scale
+                return f"U({a:.2f}, {b:.2f})"
 
-            elif 'truncnorm_gen' in dist_name:  # Truncated normal
-                mu = prior_obj.dist.loc
-                sigma = prior_obj.dist.scale
-                a_std = prior_obj.dist.a
-                b_std = prior_obj.dist.b
-
-                # Convert standardized bounds to actual bounds
-                a_actual = mu + a_std * sigma
-                b_actual = mu + b_std * sigma
-
-                # Format bounds with 'inf' for very large values
-                if abs(a_actual) < 1e-6:
-                    a_str = "0"
-                elif abs(a_std) > 1e10:
-                    a_str = "-inf" if a_std < 0 else "inf"
-                else:
-                    a_str = f"{a_actual:.2f}"
-
-                if abs(b_std) > 1e10:
-                    b_str = "inf"
-                elif b_actual > 1e10:
-                    b_str = "inf"
-                else:
-                    b_str = f"{b_actual:.2f}"
-
+            if 'truncnorm_gen' in inner_name:
+                a_std = _pop('a', 0)
+                b_std = _pop('b', 1)
+                mu = _pop('loc', 2)
+                sigma = _pop('scale', 3, 1.0)
+                a_act = mu + a_std * sigma
+                b_act = mu + b_std * sigma
+                a_str = "-inf" if a_std < -1e10 else f"{a_act:.2f}"
+                b_str = "inf" if b_std > 1e10 else f"{b_act:.2f}"
                 return f"TN({mu:.2f}, {sigma:.2f}, [{a_str}, {b_str}])"
 
-            else:
-                # Fallback for custom/unknown distributions
-                return f"{dist_name}"
+            return inner_name
 
-        except (AttributeError, TypeError) as e:
-            # Handle special cases or distributions without standard attributes
-            return f"{dist_name} (custom)"
+        except (AttributeError, TypeError):
+            return f"{inner_name} (custom)"
 
     def fit(self):
         """Run fitting routine."""
