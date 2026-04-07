@@ -495,7 +495,11 @@ class Star:
         pass
 
     def clip_outlier_magnitudes(self, sigma=5.0, err_floor=0.05, warn_only=False):
-        """Iterative SED outlier rejection using a blackbody consensus model.
+        """Iterative SED outlier rejection using synthetic photometry.
+
+        Uses per-filter zero-point fluxes (Vega or AB as appropriate)
+        so that magnitudes across different photometric systems are
+        compared on a consistent scale.
 
         Seeds the trusted set from Gaia anchors (BP/G/RP), then iteratively
         promotes the best-fitting untrusted filter if its blackbody residual
@@ -516,26 +520,6 @@ class Star:
         list[str]
             Names of removed filters.
         """
-        def _planck_mag(lam_m, T):
-            x = _h * _c / (lam_m * _k * np.maximum(T, 1.0))
-            flux = 1.0 / (lam_m ** 3 * (np.exp(np.clip(x, 0, 500)) - 1.0))
-            return -2.5 * np.log10(np.maximum(flux, 1e-300))
-
-        def _residuals(fit_idx):
-            if len(fit_idx) < 2:
-                return np.full(len(mags), np.inf)
-            best_resid = np.full(len(mags), np.inf)
-            best_rss = np.inf
-            for T in np.linspace(2000, 60000, 300):
-                model_mag = _planck_mag(lam_m, T)
-                offset = np.mean(mags[fit_idx] - model_mag[fit_idx])
-                resid = np.abs(mags - (model_mag + offset))
-                rss = np.sum(resid[fit_idx] ** 2)
-                if rss < best_rss:
-                    best_rss = rss
-                    best_resid = resid
-            return best_resid
-
         mask = self.filter_mask
         if len(mask) < 4:
             return []
@@ -548,6 +532,35 @@ class Star:
             lam_m = np.array([get_effective_wavelength(f) for f in filt_names]) * 1e-6
         except Exception:
             return []
+
+        # Pre-compute per-filter zero-point fluxes (Vega or AB)
+        f0_arr = np.empty(len(filt_names))
+        for i, band in enumerate(filt_names):
+            if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band:
+                leff = get_effective_wavelength(band)
+                f0_arr[i] = convert_f_nu_to_f_lambda(3.631e-20, leff)
+            else:
+                f0_arr[i] = get_zero_flux(band)
+
+        def _synth_mags(T):
+            x = _h * _c / (lam_m * _k * np.maximum(T, 1.0))
+            B = 1.0 / (lam_m ** 5 * (np.exp(np.clip(x, 0, 500)) - 1.0))
+            return -2.5 * np.log10(np.maximum(B / f0_arr, 1e-300))
+
+        def _residuals(fit_idx):
+            if len(fit_idx) < 2:
+                return np.full(len(mags), np.inf)
+            best_resid = np.full(len(mags), np.inf)
+            best_rss = np.inf
+            for T in np.linspace(2000, 60000, 300):
+                model_mag = _synth_mags(T)
+                offset = np.mean(mags[fit_idx] - model_mag[fit_idx])
+                resid = np.abs(mags - (model_mag + offset))
+                rss = np.sum(resid[fit_idx] ** 2)
+                if rss < best_rss:
+                    best_rss = rss
+                    best_resid = resid
+            return best_resid
 
         scale = np.maximum(errs, err_floor)
         gaia_mask = np.array([any(f.startswith(p) for p in _GAIA_PREFIXES)
