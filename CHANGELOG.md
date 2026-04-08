@@ -5,6 +5,15 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-04-07
+
+### Fixed
+- Photometry QC outlier detection used a monochromatic Planck function with
+  incorrect `lambda^-3` scaling and no zero-point calibration, causing false
+  positives in NIR/MIR bands (2MASS, WISE). Replaced with `_synth_mags()`
+  that uses the correct `lambda^-5` Planck formula and per-filter zero-point
+  fluxes (Vega or AB as appropriate for PS1, SDSS, GALEX).
+
 ## [1.4.5] - 2026-04-05
 
 ### Added
