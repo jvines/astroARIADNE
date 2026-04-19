@@ -563,11 +563,15 @@ class Fitter:
                     self.coordinator[idx] = 1
                     self.fixed[idx] = value
                     prior_out += k + '\tfixed\t{}\n'.format(value)
+                    if hasattr(self, 'prior_sources'):
+                        self.prior_sources[k] = 'user_fixed'
                 if prior == 'normal':
                     mu = self.prior_setup[k][1]
                     sig = self.prior_setup[k][2]
                     prior_dict[k] = st.norm(loc=mu, scale=sig)
                     prior_out += k + '\tnormal\t{}\t{}\n'.format(mu, sig)
+                    if hasattr(self, 'prior_sources'):
+                        self.prior_sources[k] = 'user_normal'
                 if prior == 'truncnorm':
                     mu = self.prior_setup[k][1]
                     sig = self.prior_setup[k][2]
@@ -578,11 +582,15 @@ class Fitter:
                     prior_out += k
                     prior_out += '\ttruncatednormal\t{}\t{}\t{}\t{}\n'.format(
                         mu, sig, low, up)
+                    if hasattr(self, 'prior_sources'):
+                        self.prior_sources[k] = 'user_truncnorm'
                 if prior == 'uniform':
                     low = self.prior_setup[k][1]
                     up = self.prior_setup[k][2]
                     prior_dict[k] = st.uniform(loc=low, scale=up - low)
                     prior_out += k + '\tuniform\t{}\t{}\n'.format(low, up)
+                    if hasattr(self, 'prior_sources'):
+                        self.prior_sources[k] = 'user_uniform'
         for par in noise:
             prior_dict[par] = self.default_priors[par]
         ff = open(self.out_folder + '/prior.dat', 'w')
