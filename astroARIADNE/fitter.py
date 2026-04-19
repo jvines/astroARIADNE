@@ -473,8 +473,10 @@ class Fitter:
         # Distance prior setup.
         if not self._norm:
             if self.star.dist != -1:
+                _d_scale = 3 * self.star.dist_e
                 defaults['dist'] = st.truncnorm(
-                    a=0, b=1e100, loc=self.star.dist, scale=3 * self.star.dist_e
+                    a=-self.star.dist / _d_scale, b=1e100,
+                    loc=self.star.dist, scale=_d_scale,
                 )
                 self.prior_sources['dist'] = 'gaia'
             else:
