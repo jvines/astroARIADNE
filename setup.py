@@ -38,6 +38,7 @@ setup(
         "astropy>=7.0.0",
         "astroquery>=0.4.9",
         "regions>=0.10",
+        "requests>=2.31.0",
         "PyAstronomy>=0.22.0",
         "tqdm>=4.67.0",
         "matplotlib>=3.10.0",
