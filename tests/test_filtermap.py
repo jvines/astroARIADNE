@@ -1,6 +1,7 @@
 """Tests for the librarian -> ARIADNE filter-name bridge."""
 from astroARIADNE import config
 from astroARIADNE.librarian._filtermap import (
+    GAIA_RENAMES,
     LACHESIS_TO_ARIADNE,
     to_ariadne_filters,
 )
@@ -8,23 +9,35 @@ from astroARIADNE.librarian._filtermap import (
 
 def test_gaia_renamed_to_dr2():
     """Librarian Gaia DR3 keys map to ARIADNE DR2 grid names."""
-    assert LACHESIS_TO_ARIADNE["Gaia_G"] == "GaiaDR2v2_G"
-    assert LACHESIS_TO_ARIADNE["Gaia_BP"] == "GaiaDR2v2_BP"
-    assert LACHESIS_TO_ARIADNE["Gaia_RP"] == "GaiaDR2v2_RP"
+    assert GAIA_RENAMES["Gaia_G"] == "GaiaDR2v2_G"
+    assert GAIA_RENAMES["Gaia_BP"] == "GaiaDR2v2_BP"
+    assert GAIA_RENAMES["Gaia_RP"] == "GaiaDR2v2_RP"
+    # Backwards-compatible alias.
+    assert LACHESIS_TO_ARIADNE is GAIA_RENAMES
+
+
+def test_gaia_rename_targets_are_valid():
+    """Every Gaia rename target is a valid ARIADNE filter."""
+    valid = set(config.filter_names)
+    for out_name in GAIA_RENAMES.values():
+        assert out_name in valid, out_name
 
 
 def test_shared_names_unchanged():
-    """Names already shared with ARIADNE are identity-mapped."""
+    """Names already shared with ARIADNE pass through by identity."""
     for name in ("2MASS_J", "GROUND_JOHNSON_V", "WISE_RSR_W1",
-                 "SDSS_g", "PS1_g"):
-        assert LACHESIS_TO_ARIADNE[name] == name
+                 "SDSS_g", "PS1_g", "STROMGREN_y", "STROMGREN_b"):
+        out = to_ariadne_filters({name: (10.0, 0.01)})
+        assert out == {name: (10.0, 0.01)}
 
 
-def test_all_outputs_in_config_filter_names():
-    """Every mapped output name is a valid ARIADNE filter."""
-    valid = set(config.filter_names)
-    for out_name in LACHESIS_TO_ARIADNE.values():
-        assert out_name in valid, out_name
+def test_stromgren_band_kept():
+    """Stromgren bands are shared with ARIADNE and must not be dropped."""
+    assert to_ariadne_filters({"STROMGREN_y": (8.0, 0.01)}) == {
+        "STROMGREN_y": (8.0, 0.01)
+    }
+    for band in ("STROMGREN_u", "STROMGREN_v", "STROMGREN_b", "STROMGREN_y"):
+        assert to_ariadne_filters({band: (8.0, 0.01)}) == {band: (8.0, 0.01)}
 
 
 def test_to_ariadne_filters_renames_and_preserves_values():
@@ -54,6 +67,9 @@ def test_to_ariadne_filters_drops_unknown():
 def test_to_ariadne_filters_output_keys_all_valid():
     """Output of the bridge only ever contains valid ARIADNE filters."""
     valid = set(config.filter_names)
-    mags = {name: (10.0, 0.01) for name in LACHESIS_TO_ARIADNE}
+    mags = {name: (10.0, 0.01) for name in valid}
+    mags.update({name: (10.0, 0.01) for name in GAIA_RENAMES})
+    mags["TOTALLY_BOGUS"] = (9.0, 9.0)
     out = to_ariadne_filters(mags)
     assert all(k in valid for k in out)
+    assert "TOTALLY_BOGUS" not in out
