@@ -485,8 +485,18 @@ class Fitter:
             spec = getattr(self.star, 'rave_params', None)
         spec_source = spec.get('source', 'spectroscopic') if spec else None
 
+        # Per-field null-safe helper: a spectroscopic field is usable only if
+        # the spec dict exists and both the value and its error are not None.
+        # This handles partial spec dicts (e.g. Hypatia [Fe/H]-only results
+        # where teff/logg are None) by falling back per-field to the
+        # population/default prior rather than crashing.
+        def _spec_has(field):
+            return (spec is not None and
+                    spec.get(field) is not None and
+                    spec.get(field + '_err') is not None)
+
         # Teff: spectroscopic star-specific or population prior
-        if spec is not None:
+        if _spec_has('teff'):
             defaults['teff'] = st.norm(loc=spec['teff'],
                                        scale=spec['teff_err'])
             self.prior_sources['teff'] = spec_source
@@ -498,7 +508,7 @@ class Fitter:
             logger.info('Using population Teff prior (no spectroscopic match)')
 
         # logg: spectroscopic, isochrone, or population prior
-        if spec is not None:
+        if _spec_has('logg'):
             defaults['logg'] = st.norm(loc=spec['logg'],
                                        scale=spec['logg_err'])
             self.prior_sources['logg'] = spec_source
@@ -514,7 +524,7 @@ class Fitter:
             logger.info('Using population logg prior')
 
         # [Fe/H]: spectroscopic or population prior
-        if spec is not None:
+        if _spec_has('feh'):
             defaults['z'] = st.norm(loc=spec['feh'], scale=spec['feh_err'])
             self.prior_sources['z'] = spec_source
             logger.info('Using %s [Fe/H] prior (star-specific)', spec_source)
