@@ -342,18 +342,32 @@ class Librarian:
     # ── Gaia ID resolution ───────────────────────────────────────
 
     def _resolve_gaia_id(self):
-        """Find Gaia DR3 source_id via VizieR cone search if not provided."""
+        """Find Gaia DR3 source_id via a Gaia TAP cone query if not provided.
+
+        Uses an ADQL cone search against gaiadr3.gaia_source ordered by angular
+        separation (nearest match). This is more robust than the VizieR cone
+        search and avoids astroquery's ``Gaia.cone_search`` whose ``radius``
+        argument became keyword-only in recent versions.
+        """
         if self._gaia_id is not None:
             return
+        ra = self._coord.ra.deg
+        dec = self._coord.dec.deg
+        radius_deg = self._search_radius.to(u.deg).value
+        adql = (
+            "SELECT source_id, "
+            f"DISTANCE(POINT('ICRS', ra, dec), POINT('ICRS', {ra}, {dec})) "
+            "AS ang_sep FROM gaiadr3.gaia_source "
+            "WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), "
+            f"CIRCLE('ICRS', {ra}, {dec}, {radius_deg})) "
+            "ORDER BY ang_sep ASC"
+        )
         try:
-            cats = Vizier(columns=["Source", "+_r"]).query_region(
-                self._coord, radius=self._search_radius, catalog="I/355/gaiadr3"
-            )
-            if not cats or len(cats[0]) == 0:
+            res = _with_timeout(lambda: Gaia.launch_job(adql).get_results())
+            if res is None or len(res) == 0:
                 logger.warning("No Gaia DR3 source within search radius")
                 return
-            cats[0].sort("_r")
-            self._gaia_id = int(cats[0]["Source"][0])
+            self._gaia_id = int(res["source_id"][0])
             logger.info("Resolved Gaia DR3 ID: %d", self._gaia_id)
         except Exception as e:
             logger.warning("Gaia ID resolution failed: %s", e)
