@@ -37,6 +37,17 @@ filter_names = np.array([
        'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED'
 ])
 
+# Native wavelength coverage (upper limit, in micron) of model grids whose
+# spectra do not span the full ARIADNE filter set. Photometry redder than the
+# limit is excluded from a standalone fit with that grid, because the grid's
+# flux there was extrapolated when the grid was built and is unreliable.
+# Grids absent from this dict are assumed to cover all filters.
+# Coelho 2014 spectra span ~0.25-0.9 um, so its IR photometry (2MASS, WISE,
+# Spitzer, Herschel) is not trustworthy.
+grid_wave_coverage = {
+    'coelho': 0.9,
+}
+
 # termcolor colors.
 colors = [
         'red', 'green', 'blue', 'yellow',

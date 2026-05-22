@@ -474,6 +474,30 @@ identical and thus only BT-Settl is used, even if the three are selected. On the
 other hand, Kurucz and Castelli & Kurucz are known to work poorly on stars with
 Teff < 4000 K, thus they aren't used in that regime.
 
+**Grid wavelength coverage.** Some grids do not span the full set of filters
+**ARIADNE** supports. The Coelho 2014 grid, in particular, only covers the
+optical (≲ 0.9 µm); its infrared photometry (2MASS, WISE, Spitzer, Herschel)
+was extrapolated when the grid was built and is unreliable, especially for
+cool stars. For this reason Coelho is **not** part of the default BMA set. If
+you use it as a **standalone** grid (`f.bma = False; f.grid = 'coelho'`),
+**ARIADNE** automatically excludes any photometry redder than the grid's
+coverage from the fit (a warning lists the dropped bands). Coverage limits are
+declared in `grid_wave_coverage` in `config.py`. The exclusion is **not**
+applied in BMA mode, where every grid must be fit to the same bands for the
+evidences to be comparable — so Coelho should only be used standalone.
+
+**Performance & tuning knobs.** A few optional attributes control runtime:
+
+- `f.walks` (default `25`): number of `rwalk` MCMC steps per proposal. Can
+  also be passed as an 8th element of `setup`. Lower is faster but mixes less.
+- `f.n_grid_jobs` (default `1`): number of BMA model grids to fit
+  concurrently, one core each. Set to `len(models)` to run them all at once.
+  **CAUTION:** this spawns that many processes — pick a value your machine's
+  cores and memory can handle.
+- `f.isochrone_dlogz` (default `0.01`): evidence tolerance for the MIST
+  isochrone age/mass fit (the dominant cost of a BMA run, parallelised across
+  `threads`). Raising it trades age/mass precision for speed.
+
 We allow the use of four different extinction laws:
 
 - fitzpatrick

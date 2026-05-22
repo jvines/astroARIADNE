@@ -3,7 +3,9 @@
 __all__ = ['Fitter', 'dynesty_log_like', 'dynesty_loglike_bma', 'pt_dynesty',
            'pt_multinest']
 
+import copy
 import logging
+import os
 import pickle
 import time
 import warnings
@@ -23,7 +25,7 @@ from isochrones.interp import DFInterpolator
 from termcolor import colored
 
 from .config import (filesdir, gridsdir, priorsdir, filter_names, colors,
-                     iso_mask, iso_bands)
+                     iso_mask, iso_bands, grid_wave_coverage)
 from .error import *
 from .isochrone import estimate
 from .phot_utils import *
@@ -114,6 +116,18 @@ class Fitter:
         self.prior_setup = None
         self.sequential = True
         self.experimental = False
+        # Number of MCMC steps per proposal for dynesty's rwalk sampler.
+        self.walks = 25
+        # Number of BMA model grids to fit concurrently, each on a single
+        # core. 1 (default) keeps the original sequential behaviour. Set this
+        # to len(models) to run every grid at once. CAUTION: this spawns
+        # ``n_grid_jobs`` processes, so choose a value your machine's core
+        # count and memory can handle (each grid loads its own model grid).
+        self.n_grid_jobs = 1
+        # Evidence tolerance for the MIST isochrone age/mass nested sampling
+        # (the dominant cost of a BMA run). Lower is more precise but slower;
+        # the isochrone fit itself is parallelised across ``threads``.
+        self.isochrone_dlogz = 0.01
 
     @property
     def star(self):
@@ -162,6 +176,11 @@ class Fitter:
                 self._sample = setup[4]
                 self._threads = setup[5]
                 self._dynamic = setup[6]
+                # Optional 8th element: number of rwalk MCMC steps per
+                # proposal. Omitted -> keep the current value (default 25),
+                # so existing 7-element setups are unaffected.
+                if len(setup) > 7:
+                    self.walks = setup[7]
 
     @property
     def norm(self):
@@ -306,6 +325,34 @@ class Fitter:
             law_f = extinction.fitzpatrick99
         self._av_law = law_f
 
+    def _apply_grid_coverage(self):
+        """Drop bands outside the current grid's native wavelength coverage.
+
+        Some grids (e.g. Coelho 2014) only cover the optical; their redder
+        photometry was extrapolated when the grid was built and is unreliable.
+        For a standalone fit we therefore exclude those bands. The user's Star
+        is left untouched: a shallow copy with a restricted ``used_filters`` /
+        ``filter_mask`` is substituted, so every downstream consumer
+        (dimension count, priors, likelihood, output) sees the reduced set.
+        """
+        cov = grid_wave_coverage.get(self._grid.lower())
+        if cov is None:
+            return
+        used = self.star.used_filters == 1
+        outside = used & (self.star.wave > cov)
+        if not outside.any():
+            return
+        dropped = self.star.filter_names[outside]
+        s = copy.copy(self.star)
+        s.used_filters = self.star.used_filters.copy()
+        s.used_filters[outside] = 0
+        s.filter_mask = np.where(s.used_filters == 1)[0]
+        self.star = s
+        logger.warning(
+            "Grid '%s' only covers <= %.2f um; excluding %d out-of-coverage "
+            "band(s) from the fit: %s", self._grid, cov, len(dropped),
+            ', '.join(dropped))
+
     def initialize(self):
         """Initialize the fitter.
 
@@ -321,6 +368,11 @@ class Fitter:
             er = InputError(err_msg)
             er.log(self.out + '/output.log')
             er.__raise__()
+        # For a standalone fit with a grid of limited wavelength coverage,
+        # exclude out-of-coverage bands (e.g. Coelho's extrapolated IR). Not
+        # applied in BMA, where every grid must share the same band set.
+        if not self._bma:
+            self._apply_grid_coverage()
         star = self.star
         if not self._bma:
             global interpolator
@@ -750,19 +802,40 @@ class Fitter:
             print(colored('\t\t\tNOT ENOUGH POINTS TO MAKE THE FIT! !', 'red'))
             return
 
-        global interpolator
-        for intp, gr in zip(self._interpolators, self._grids):
-            interpolator = intp
-            self.grid = gr
-            out_file = self.out_folder + '/' + gr + '_out.pkl'
-            print('\t\t\tFITTING MODEL : ' + gr)
-            try:
-                self.fit_dynesty(out_file=out_file)
-            except ValueError as e:
-                dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
-                pickle.dump(self.sampler.results, open(dump_out, 'wb'))
-                DynestyError(dump_out, gr, e).__raise__()
-                continue
+        global interpolator, _BMA_FITTER
+
+        n_jobs = min(max(int(self.n_grid_jobs), 1), len(self._grids))
+        if n_jobs > 1:
+            # Across-grid parallelism: the grids are independent fits, so run
+            # several at once (one core each). Each worker writes its own
+            # ``_out.pkl``, which we read back below for averaging.
+            ncpu = os.cpu_count() or 1
+            if n_jobs > ncpu:
+                logger.warning(
+                    'n_grid_jobs=%d exceeds the %d available CPU cores; '
+                    'this will oversubscribe the machine.', n_jobs, ncpu)
+            _BMA_FITTER = self
+            print(f'\t\t\tFITTING {len(self._grids)} MODELS, '
+                  f'{n_jobs} CONCURRENTLY')
+            with Pool(n_jobs) as pool:
+                for gr, err in pool.map(_bma_grid_worker,
+                                        range(len(self._grids))):
+                    if err is not None:
+                        dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
+                        DynestyError(dump_out, gr, err).__raise__()
+        else:
+            for intp, gr in zip(self._interpolators, self._grids):
+                interpolator = intp
+                self.grid = gr
+                out_file = self.out_folder + '/' + gr + '_out.pkl'
+                print('\t\t\tFITTING MODEL : ' + gr)
+                try:
+                    self.fit_dynesty(out_file=out_file)
+                except ValueError as e:
+                    dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
+                    pickle.dump(self.sampler.results, open(dump_out, 'wb'))
+                    DynestyError(dump_out, gr, e).__raise__()
+                    continue
 
         # Now that the fitting finished, read the outputs and average
         # the posteriors
@@ -880,15 +953,15 @@ class Fitter:
                     self.sampler = dynesty.DynamicNestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         bound=self._bound, sample=self._sample,
-                        pool=executor, walks=25,
-                        queue_size=self._threads - 1
+                        pool=executor, walks=self.walks,
+                        queue_size=self._threads
                     )
                     self.sampler.run_nested(dlogz_init=self._dlogz,
                                             nlive_init=self._nlive,
                                             wt_kwargs={'pfrac': 1})
             else:
                 self.sampler = dynesty.DynamicNestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim, walks=25,
+                    dynesty_log_like, pt_dynesty, self.ndim, walks=self.walks,
                     bound=self._bound, sample=self._sample
 
                 )
@@ -902,13 +975,13 @@ class Fitter:
                         dynesty_log_like, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
                         sample=self._sample,
-                        pool=executor, walks=25,
-                        queue_size=self._threads - 1,
+                        pool=executor, walks=self.walks,
+                        queue_size=self._threads,
                     )
                     self.sampler.run_nested(dlogz=self._dlogz)
             else:
                 self.sampler = dynesty.NestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim, walks=25,
+                    dynesty_log_like, pt_dynesty, self.ndim, walks=self.walks,
                     nlive=self._nlive, bound=self._bound,
                     sample=self._sample
                 )
@@ -1033,9 +1106,9 @@ class Fitter:
         # do only if not bma
 
         if not self.bma:
-            out['best_fit'] = dict()
-            out['uncertainties'] = dict()
-            out['confidence_interval'] = dict()
+            out['best_fit_averaged'] = dict()
+            out['uncertainties_averaged'] = dict()
+            out['confidence_interval_averaged'] = dict()
             best_theta = np.zeros(order.shape[0])
 
             for i, param in enumerate(order):
@@ -1058,9 +1131,9 @@ class Fitter:
                         logdat = out_filler(samp, logdat, param, param, out)
                 else:
                     logdat = out_filler(
-                        0, logdat, param, out, fixed=self.fixed[i]
+                        0, logdat, param, param, out, fixed=self.fixed[i]
                     )
-                best_theta[i] = out['best_fit'][param]
+                best_theta[i] = out['best_fit_averaged'][param]
 
             # Add derived mass to best fit dictionary.
 
@@ -1090,7 +1163,7 @@ class Fitter:
 
             # Fill in best loglike, prior and posterior.
 
-            out['best_fit']['loglike'] = log_likelihood(
+            out['best_fit_averaged']['loglike'] = log_likelihood(
                 best_theta, flux, flux_er, wave,
                 filts, interpolator, self.norm, av_law
             )
@@ -1103,7 +1176,7 @@ class Fitter:
                 filesdir + '/mamajek_spt.dat', usecols=[1])
 
             # Find spt
-            spt_idx = np.argmin(abs(mamajek_temp - out['best_fit']['teff']))
+            spt_idx = np.argmin(abs(mamajek_temp - out['best_fit_averaged']['teff']))
             spt = mamajek_spt[spt_idx]
             out['spectral_type'] = spt
 
@@ -1647,7 +1720,10 @@ class Fitter:
                 params[b] = (m, e)
                 used_bands.append(b)
 
-        age_samp, mass_samp, eep_samp = estimate(used_bands, params, logg=False)
+        age_samp, mass_samp, eep_samp = estimate(
+            used_bands, params, logg=False,
+            out_folder=self.out_folder,
+            threads=self._threads, dlogz=self.isochrone_dlogz)
 
         return age_samp, mass_samp, eep_samp
 
@@ -1848,6 +1924,40 @@ class Fitter:
 
 #####################
 # Dynesty and multinest wrappers
+
+
+# Set by fit_bma before forking the grid-parallel Pool; read by the workers.
+_BMA_FITTER = None
+
+
+def _bma_grid_worker(index):
+    """Fit one BMA model grid single-threaded and write its ``_out.pkl``.
+
+    Runs in a forked worker process: the star photometry, priors, coordinator
+    and other module globals are inherited from the parent, so only the
+    per-grid interpolator is swapped in. The fit result is delivered via the
+    on-disk pickle (the parent reads it back for averaging), so nothing needs
+    to be pickled back to the parent. Returns ``(grid, None)`` on success or
+    ``(grid, error)`` on failure.
+    """
+    global interpolator
+    fitter = _BMA_FITTER
+    intp = fitter._interpolators[index]
+    grid = fitter._grids[index]
+    out_file = f'{fitter.out_folder}/{grid}_out.pkl'
+    # Forked processes inherit the parent's RNG state; reseed so each grid
+    # draws independently.
+    np.random.seed()
+    interpolator = intp
+    fitter._threads = 1   # grids are the unit of parallelism; no inner Pool
+    fitter._grid = grid   # used by save() for out['model_grid']
+    try:
+        fitter.fit_dynesty(out_file=out_file)
+    except ValueError as e:
+        dump_out = f'{fitter.out_folder}/{grid}_DUMP.pkl'
+        pickle.dump(fitter.sampler.results, open(dump_out, 'wb'))
+        return grid, e
+    return grid, None
 
 
 def dynesty_loglike_bma(cube, interpolator):
