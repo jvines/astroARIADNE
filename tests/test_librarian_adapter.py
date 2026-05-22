@@ -15,8 +15,13 @@ Contract replicated from the OLD ``astroARIADNE.librarian.Librarian``:
 
 ``mags`` / ``mag_errs`` (float64, same length): value at the band's index.
 
-Missing scalar (property is ``None``) -> ``-1`` sentinel for value AND error,
-matching ``extract_from_lib(None) == [-1] * 10``.
+Missing scalar sentinels are PER-FIELD (matching the old extractors):
+    * parallax / distance missing -> ``-1`` (value AND error)
+    * radius / teff / luminosity missing -> ``0`` (value AND error)
+
+The FLAME family (rad/temp/lum) must miss to ``0``, not ``-1``, because
+downstream code guards those with ``!= 0`` (star.py:437/439/442,
+fitter.py:1712); a ``-1`` sentinel would wrongly fire those branches.
 """
 import numpy as np
 
@@ -185,15 +190,46 @@ def test_scalars_passthrough():
     assert out.lum_e == 0.15
 
 
-def test_missing_scalars_are_minus_one():
+def test_missing_parallax_distance_are_minus_one():
+    """Missing parallax/distance -> -1 for value AND error (old _get_*)."""
+    fake = FakeLibrarian(
+        magnitudes={"2MASS_J": (10.5, 0.04)},
+        parallax=None, distance=None,
+        radius=(1.0, 0.1), teff=(5700.0, 90.0), luminosity=(1.3, 0.15),
+    )
+    out = adapt_librarian(fake)
+    for v in (out.plx, out.plx_e, out.dist, out.dist_e):
+        assert v == -1
+
+
+def test_missing_flame_fields_are_zero():
+    """Missing radius/teff/luminosity -> 0 for value AND error.
+
+    Must NOT be -1: downstream ``!= 0`` guards (star.py:437/439/442,
+    fitter.py:1712) would wrongly fire and feed bad values to the isochrone /
+    compute np.log10(-1) = NaN.
+    """
+    fake = FakeLibrarian(
+        magnitudes={"2MASS_J": (10.5, 0.04)},
+        parallax=(8.5, 0.05), distance=(117.0, 1.2),
+        radius=None, teff=None, luminosity=None,
+    )
+    out = adapt_librarian(fake)
+    for v in (out.rad, out.rad_e, out.temp, out.temp_e, out.lum, out.lum_e):
+        assert v == 0
+
+
+def test_all_scalars_missing_per_field_sentinels():
+    """All properties None: plx/dist -> -1, rad/temp/lum -> 0."""
     fake = FakeLibrarian(
         magnitudes={"2MASS_J": (10.5, 0.04)},
         parallax=None, distance=None, radius=None, teff=None, luminosity=None,
     )
     out = adapt_librarian(fake)
-    for v in (out.plx, out.plx_e, out.dist, out.dist_e, out.rad, out.rad_e,
-              out.temp, out.temp_e, out.lum, out.lum_e):
+    for v in (out.plx, out.plx_e, out.dist, out.dist_e):
         assert v == -1
+    for v in (out.rad, out.rad_e, out.temp, out.temp_e, out.lum, out.lum_e):
+        assert v == 0
 
 
 def test_id_and_param_passthrough():

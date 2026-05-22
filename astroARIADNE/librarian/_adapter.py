@@ -26,14 +26,27 @@ Conventions replicated verbatim from the old code
 
 Arrays are ``float64`` (old code built them with ``np.zeros(...)``).
 
-Missing-scalar sentinel:
-    A property returning ``None`` is mapped to ``-1`` for BOTH value and error,
-    matching ``extract_from_lib(None) == [-1] * 10``. NOTE: the old per-field
-    extractors were inconsistent -- ``_get_parallax``/``_get_distance`` returned
-    ``-1`` on a miss, but ``_get_radius``/``_get_teff``/``_get_lum`` returned
-    ``0``. We standardise on ``-1`` (the documented Star contract and the
-    ``lib is None`` path), since the new librarian signals "missing" uniformly
-    via ``None``.
+Missing-scalar sentinels (PER-FIELD, matching the old extractors exactly):
+    * ``parallax`` (plx, plx_e) missing -> ``-1, -1``
+    * ``distance`` (dist, dist_e) missing -> ``-1, -1``
+    * ``radius`` (rad, rad_e) missing -> ``0, 0``
+    * ``teff`` (temp, temp_e) missing -> ``0, 0``
+    * ``luminosity`` (lum, lum_e) missing -> ``0, 0``
+
+  These are NOT uniform. The old ``_get_parallax``/``_get_distance`` returned
+  ``-1`` on a miss, while ``_get_radius``/``_get_teff``/``_get_lum`` returned
+  ``0``. This asymmetry is load-bearing: downstream code guards the FLAME family
+  with ``!= 0`` rather than ``is not None``, e.g.
+
+    * ``star.py:437``  ``if self.temp is not None and self.temp_e != 0:``
+    * ``star.py:439``  ``if self.lum is not None and self.lum != 0:``
+    * ``star.py:442``  ``if self.get_rad and self.rad is not None and self.rad != 0:``
+    * ``fitter.py:1712``  ``if self.star.lum != 0 and self.star.lum_e != 0:``
+
+  A uniform ``-1`` sentinel would make these branches WRONGLY fire on a missing
+  field (feeding ``Teff = (-1, -1)`` to the isochrone, computing
+  ``np.log10(-1) = NaN`` for luminosity, etc.). So a missing FLAME field MUST
+  be ``0`` and a missing parallax/distance MUST be ``-1``.
 
 Return type
 -----------
@@ -52,9 +65,11 @@ import numpy as np
 from .. import config
 from ._filtermap import to_ariadne_filters
 
-# Sentinel for a missing scalar parameter (value and error), matching
-# ``extract_from_lib(None) == [-1] * 10`` in star.py.
-_MISSING = -1
+# Per-field missing sentinels (value and error). NOT uniform: parallax/distance
+# miss to -1, while the FLAME family (radius/teff/luminosity) misses to 0 so the
+# downstream ``!= 0`` guards in star.py / fitter.py don't wrongly fire.
+_MISSING_PLX = -1
+_MISSING_FLAME = 0
 
 
 @dataclass
@@ -85,13 +100,14 @@ class AdaptedStar:
     spectroscopic_params: dict | None
 
 
-def _scalar(pair):
+def _scalar(pair, missing):
     """Map a ``(value, error)`` tuple or ``None`` to a ``(value, error)`` pair.
 
-    ``None`` -> ``(-1, -1)`` (missing sentinel for both value and error).
+    ``None`` -> ``(missing, missing)``; the caller supplies the per-field
+    sentinel (``-1`` for parallax/distance, ``0`` for the FLAME family).
     """
     if pair is None:
-        return _MISSING, _MISSING
+        return missing, missing
     return pair[0], pair[1]
 
 
@@ -133,11 +149,11 @@ def adapt_librarian(lib) -> AdaptedStar:
         mags[idx] = mag
         mag_errs[idx] = err
 
-    plx, plx_e = _scalar(lib.parallax)
-    dist, dist_e = _scalar(lib.distance)
-    rad, rad_e = _scalar(lib.radius)
-    temp, temp_e = _scalar(lib.teff)
-    lum, lum_e = _scalar(lib.luminosity)
+    plx, plx_e = _scalar(lib.parallax, _MISSING_PLX)
+    dist, dist_e = _scalar(lib.distance, _MISSING_PLX)
+    rad, rad_e = _scalar(lib.radius, _MISSING_FLAME)
+    temp, temp_e = _scalar(lib.teff, _MISSING_FLAME)
+    lum, lum_e = _scalar(lib.luminosity, _MISSING_FLAME)
 
     return AdaptedStar(
         used_filters=used_filters,
