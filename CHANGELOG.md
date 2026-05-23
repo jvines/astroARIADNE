@@ -5,6 +5,41 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-23
+
+### Added
+- Three new model grids:
+  - **BOSZ** (Mészáros et al. 2024) — MARCS+ATLAS9 atmospheres synthesised with
+    Synspec, Teff 2800–16000 K, full 0.05–32 µm coverage. Added to the BMA set
+    (temperature-gated to its validity range); brings independent
+    MARCS/Synspec physics to the FGK regime.
+  - **SPHINX-II** (Iyer et al. 2025) — M-dwarf grid (Teff 2000–4000 K), gray
+    cloud log κ = −29 / C/O = 0.5 fiducial slice. Standalone (`f.grid = 'sphinx'`).
+  - **TLUSTY** OSTAR2002 + BSTAR2006 (Lanz & Hubeny) — NLTE hot O/B stars
+    (Teff 15000–55000 K). Standalone; uses a wide uniform Teff prior since the
+    FGK population prior cannot reach the hot regime.
+- Tunable sampler/parallelism knobs (defaults preserve prior behaviour):
+  - `walks` — number of `rwalk` MCMC steps per proposal (also `setup[7]`).
+  - `n_grid_jobs` — number of BMA model grids fit concurrently (one core each).
+  - `isochrone_dlogz` — evidence tolerance for the MIST isochrone age/mass fit.
+- `grid_wave_coverage` in `config.py`: standalone fits with a limited-coverage
+  grid (e.g. Coelho) now exclude out-of-coverage bands instead of using
+  extrapolated fluxes.
+
+### Changed
+- **Major fitting speedups** (~12–25× on the benchmark BMA run):
+  - Prior transform now uses closed-form inverse CDFs instead of scipy frozen
+    `.ppf` (~80× faster per call — the dominant cost).
+  - `nogil` numba trilinear interpolator replaces the per-call DFInterpolator
+    path (~18× faster, bit-identical for in-bounds inputs).
+  - Parameter order, prior transforms and the extinction curve are cached on
+    object identity (extinction is linear in Av → precomputed once).
+  - The MIST isochrone age/mass fit is parallelised across `threads`.
+
+### Fixed
+- `KeyError` in the non-BMA `save()`/`end()` path (`best_fit_averaged` keys).
+- dynesty `queue_size` off-by-one left one pool worker idle.
+
 ## [1.4.6] - 2026-04-07
 
 ### Fixed

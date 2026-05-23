@@ -361,6 +361,12 @@ class Star:
             gridname = gridsdir + '/model_grid_Kurucz.dat'
         if model.lower() == 'coelho':
             gridname = gridsdir + '/model_grid_Coelho.dat'
+        if model.lower() == 'bosz':
+            gridname = gridsdir + '/model_grid_BOSZ.dat'
+        if model.lower() == 'sphinx':
+            gridname = gridsdir + '/model_grid_SPHINX.dat'
+        if model.lower() == 'tlusty':
+            gridname = gridsdir + '/model_grid_TLUSTY.dat'
 
         self.full_grid = np.loadtxt(gridname)
         self.teff = self.full_grid[:, 0]

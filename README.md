@@ -454,7 +454,8 @@ models = [
 	'btnextgen',
 	'btcond',
 	'kurucz',
-	'ck04'
+	'ck04',
+	'bosz'      # MARCS+ATLAS9/Synspec, 2800-16000 K (BMA-capable)
 ]
 
 f = Fitter()
@@ -473,6 +474,44 @@ results. For stars with Teff > 4000 K BT-Settl, BT-NextGen and BT-Cond are
 identical and thus only BT-Settl is used, even if the three are selected. On the
 other hand, Kurucz and Castelli & Kurucz are known to work poorly on stars with
 Teff < 4000 K, thus they aren't used in that regime.
+
+**Additional grids.** Three more grids ship with **ARIADNE**:
+
+| grid | regime | Teff (K) | use |
+| --- | --- | --- | --- |
+| `bosz` | FGK + warm | 2800–16000 | BMA member (independent MARCS+ATLAS9/Synspec physics) |
+| `sphinx` | M dwarfs | 2000–4000 | standalone |
+| `tlusty` | hot O/B (NLTE) | 15000–55000 | standalone |
+
+`bosz` can be added to the `models` list like any other (it is
+temperature-gated to its validity range). `sphinx` and `tlusty` are meant to be
+run **standalone** (see below); `tlusty` uses a wide uniform Teff prior because
+the FGK population prior cannot reach the hot-star regime.
+
+### Running a single model (standalone)
+
+To fit a single grid instead of doing BMA, set `f.bma = False` and pick the
+grid with `f.grid`, then call `f.fit()`:
+
+```python
+f = Fitter()
+f.star = s
+f.setup = ['dynesty', 500, 0.1, 'multi', 'rwalk', 4, False]
+f.av_law = 'fitzpatrick'
+f.out_folder = out_folder
+f.bma = False
+f.grid = 'phoenix'      # or 'bosz', 'sphinx', 'tlusty', 'coelho', ...
+f.prior_setup = {
+	'teff': ('default'), 'logg': ('default'), 'z': ('default'),
+	'dist': ('default'), 'rad': ('default'), 'Av': ('default'),
+}
+f.initialize()
+f.fit()                 # single-grid fit (not fit_bma)
+```
+
+This is the right mode for the standalone grids: `sphinx` (M dwarfs),
+`tlusty` (hot stars), and `coelho` (optical-only). The output goes to the same
+files as a BMA run minus the model-averaging products.
 
 **Grid wavelength coverage.** Some grids do not span the full set of filters
 **ARIADNE** supports. The Coelho 2014 grid, in particular, only covers the

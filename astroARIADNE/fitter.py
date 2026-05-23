@@ -228,6 +228,15 @@ class Fitter:
         if grid.lower() == 'coelho':
             with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
                 self._interpolator = DFInterpolator(pd.read_pickle(intp))
+        if grid.lower() == 'bosz':
+            with open(gridsdir + '/BOSZ_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
+        if grid.lower() == 'sphinx':
+            with open(gridsdir + '/SPHINX_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
+        if grid.lower() == 'tlusty':
+            with open(gridsdir + '/TLUSTY_DF.pkl', 'rb') as intp:
+                self._interpolator = DFInterpolator(pd.read_pickle(intp))
 
     @property
     def bma(self):
@@ -447,7 +456,11 @@ class Fitter:
                     self.star.temp > 4000) or \
                         (mod.lower() in ['ck04', 'kurucz'] and
                          self.star.temp < 4000) or \
-                        (mod.lower() == 'coelho' and self.star.temp < 3500):
+                        (mod.lower() == 'coelho' and self.star.temp < 3500) or \
+                        (mod.lower() == 'bosz' and
+                         (self.star.temp < 2800 or self.star.temp > 16000)) or \
+                        (mod.lower() == 'sphinx' and self.star.temp > 4000) or \
+                        (mod.lower() == 'tlusty' and self.star.temp < 15000):
                     continue
 
                 df = self.load_interpolator(mod.lower())
@@ -485,8 +498,15 @@ class Fitter:
             spec = getattr(self.star, 'rave_params', None)
         spec_source = spec.get('source', 'spectroscopic') if spec else None
 
+        # Teff: hot-star grids (TLUSTY) need a wide uniform prior — the FGK
+        # population prior assigns ~zero probability above ~12000 K, so it
+        # cannot reach the O/B regime. Applied for standalone TLUSTY fits.
+        if self._grid.lower() == 'tlusty':
+            defaults['teff'] = st.uniform(loc=15000, scale=40000)  # 15-55 kK
+            self.prior_sources['teff'] = 'tlusty_uniform'
+            logger.info('Using uniform Teff prior for the TLUSTY hot-star grid')
         # Teff: spectroscopic star-specific or population prior
-        if spec is not None:
+        elif spec is not None:
             defaults['teff'] = st.norm(loc=spec['teff'],
                                        scale=spec['teff_err'])
             self.prior_sources['teff'] = spec_source
@@ -1664,6 +1684,15 @@ class Fitter:
                 df = DFInterpolator(pd.read_pickle(intp))
         elif model.lower() == 'coelho':
             with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'bosz':
+            with open(gridsdir + '/BOSZ_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'sphinx':
+            with open(gridsdir + '/SPHINX_DF.pkl', 'rb') as intp:
+                df = DFInterpolator(pd.read_pickle(intp))
+        elif model.lower() == 'tlusty':
+            with open(gridsdir + '/TLUSTY_DF.pkl', 'rb') as intp:
                 df = DFInterpolator(pd.read_pickle(intp))
         return df
 
