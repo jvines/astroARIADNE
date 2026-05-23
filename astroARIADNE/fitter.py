@@ -511,7 +511,7 @@ class Fitter:
         # Teff: hot-star grids (TLUSTY) need a wide uniform prior — the FGK
         # population prior assigns ~zero probability above ~12000 K, so it
         # cannot reach the O/B regime. Applied for standalone TLUSTY fits.
-        if self._grid.lower() == 'tlusty':
+        if (getattr(self, '_grid', '') or '').lower() == 'tlusty':
             defaults['teff'] = st.uniform(loc=15000, scale=40000)  # 15-55 kK
             self.prior_sources['teff'] = 'tlusty_uniform'
             logger.info('Using uniform Teff prior for the TLUSTY hot-star grid')
