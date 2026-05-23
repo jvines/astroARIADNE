@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `grid_wave_coverage` in `config.py`: standalone fits with a limited-coverage
   grid (e.g. Coelho) now exclude out-of-coverage bands instead of using
   extrapolated fluxes.
+- Blackbody quality-control overlay on the raw SED plot: the photometry QC
+  blackbody fit (temperature + flagged bands) is persisted on the `Star` and
+  drawn on `SED_no_model.png`, with QC-flagged bands outlined in red so SED
+  outliers (blends, bad cross-matches, IR excess) can be inspected visually.
 
 ### Changed
 - **Major fitting speedups** (~12–25× on the benchmark BMA run):

@@ -458,24 +458,22 @@ class SEDPlotter:
 
         # Model plot
         used_f = self.star.filter_names[self.star.filter_mask]
-        colors = np.array([
-            'tomato', 'indianred', 'tab:red',
-            'salmon', 'coral',
-            'mediumorchid', 'mediumslateblue', 'tab:blue',
-            'darkslateblue', 'darkblue',
-            'olivedrab', 'yellowgreen', 'greenyellow', 'yellow',
-            'orangered', 'chocolate', 'khaki',
-            'limegreen', 'darkgreen', 'lime', 'seagreen', 'lawngreen', 'green',
-            'aquamarine', 'turquoise', 'lightseagreen', 'teal', 'cadetblue',
-            'tab:pink', 'tab:purple', 'tab:cyan', 'aqua', 'azure', 'dodgerblue',
-            'firebrick', 'darkred',
-            'blueviolet', 'darkviolet',
-            'midnightblue', 'blue',
-            'deeppink', 'fuchsia', 'mediumslateblue'
-        ])
+        # Bands flagged by the blackbody QC are outlined in red so outliers
+        # can be eyeballed against the BB fit drawn below.
+        flagged = set(getattr(self.star, '_qc_bb_flagged_bands', None) or [])
+
+        # Colour each point by its effective wavelength so the SED shape reads
+        # directly off the plot: short wavelengths -> violet/blue, long
+        # wavelengths -> orange/red.
+        lam_log = np.log10(self.wave)
+        if lam_log.max() > lam_log.min():
+            cnorm = plt.Normalize(vmin=lam_log.min(), vmax=lam_log.max())
+        else:
+            cnorm = plt.Normalize(vmin=lam_log.min() - 1, vmax=lam_log.max() + 1)
+        point_colors = plt.cm.rainbow(cnorm(lam_log))
 
         for c, w, fl, fe, bp, fi in zip(
-                colors[self.star.filter_mask],
+                point_colors,
                 self.wave, self.flux, self.flux_er,
                 self.bandpass, used_f):
             ax.errorbar(w, fl * w,
@@ -486,10 +484,48 @@ class SEDPlotter:
 
             ax.scatter(w, fl * w,
                        edgecolors='black',
+                       linewidths=0.5,
                        marker=self.marker,
-                       c=c,
+                       c=[c],
                        s=self.scatter_size,
                        alpha=self.scatter_alpha, label=fi)
+
+            # QC-flagged bands get a hollow red halo drawn on top, which stays
+            # visible regardless of the point's wavelength colour (the colormap
+            # is itself red at long wavelengths).
+            if fi in flagged:
+                ax.scatter(w, fl * w,
+                           edgecolors='red', facecolors='none',
+                           linewidths=1.8, marker=self.marker,
+                           s=self.scatter_size * 2.4, zorder=4)
+
+        # Blackbody fit from the photometry QC, log-scaled to the non-flagged
+        # bands so it overlays the data. Lets the user judge visually whether a
+        # red-outlined band genuinely departs from the stellar continuum.
+        bb_T = getattr(self.star, '_qc_bb_teff', None)
+        if bb_T:
+            h_, c_, k_ = 6.62607015e-34, 2.99792458e8, 1.380649e-23
+
+            def _planck(lam_um_arr):
+                lam_m = np.asarray(lam_um_arr) * 1e-6
+                x = h_ * c_ / (lam_m * k_ * bb_T)
+                return 1.0 / (lam_m ** 5 * (np.exp(np.clip(x, 0, 500)) - 1.0))
+
+            wave_um = np.asarray(self.wave)
+            F_lam = np.asarray(self.flux)
+            trusted = np.array([fi not in flagged for fi in used_f])
+            if trusted.sum() < 2:
+                trusted = np.ones(len(used_f), dtype=bool)
+            B_bands = _planck(wave_um)
+            log_scale = np.median(np.log10(F_lam[trusted])
+                                  - np.log10(B_bands[trusted]))
+            scale = 10.0 ** log_scale
+            lam_curve = np.logspace(np.log10(max(wave_um.min() * 0.5, 0.1)),
+                                    np.log10(wave_um.max() * 2.0), 400)
+            F_curve = _planck(lam_curve) * scale
+            ax.plot(lam_curve, F_curve * lam_curve,
+                    color='0.4', lw=1.0, ls='--', zorder=1,
+                    label=f'BB fit, T={bb_T:.0f} K')
 
         ax.set_ylim([ymin * .8, ymax * 1.25])
         ax.set_xscale('log', nonpositive='clip')
@@ -508,9 +544,18 @@ class SEDPlotter:
             axis='both', which='minor',
             labelsize=self.tick_labelsize
         )
+        # X-axis built like the model SED plot: log scale in micron, integer
+        # ticks, lower bound set by whether GALEX UV bands are present.
         ax.set_xticks(np.linspace(1, 10, 10))
         ax.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
-        ax.set_xlim([0.1, 6])
+        fnames = self.star.filter_names[self.star.filter_mask]
+        if 'GALEX_FUV' in fnames or 'GALEX_NUV' in fnames:
+            ax.set_xlim([0.125, 6])
+        else:
+            ax.set_xlim([0.25, 6])
+        ax.set_xlabel(r'$\lambda (\mu m)$',
+                      fontsize=self.fontsize,
+                      fontname=self.fontname)
 
         for tick in ax.get_yticklabels():
             tick.set_fontname(self.fontname)

@@ -536,6 +536,13 @@ class Star:
         list[str]
             Names of removed filters.
         """
+        # Persisted for the blackbody diagnostic overlay in
+        # SEDPlotter.plot_SED_no_model. ``_qc_bb_teff`` is the best-fit
+        # blackbody temperature on the trusted set; ``_qc_bb_flagged_bands``
+        # lists the bands flagged as outliers (whether or not removed).
+        self._qc_bb_teff = None
+        self._qc_bb_flagged_bands = []
+
         mask = self.filter_mask
         if len(mask) < 4:
             return []
@@ -565,9 +572,10 @@ class Star:
 
         def _residuals(fit_idx):
             if len(fit_idx) < 2:
-                return np.full(len(mags), np.inf)
+                return np.full(len(mags), np.inf), np.nan
             best_resid = np.full(len(mags), np.inf)
             best_rss = np.inf
+            best_T = np.nan
             for T in np.linspace(2000, 60000, 300):
                 model_mag = _synth_mags(T)
                 offset = np.mean(mags[fit_idx] - model_mag[fit_idx])
@@ -576,7 +584,8 @@ class Star:
                 if rss < best_rss:
                     best_rss = rss
                     best_resid = resid
-            return best_resid
+                    best_T = T
+            return best_resid, best_T
 
         scale = np.maximum(errs, err_floor)
         gaia_mask = np.array([any(f.startswith(p) for p in _GAIA_PREFIXES)
@@ -588,7 +597,7 @@ class Star:
                 untrusted_idx = np.where(~trusted)[0]
                 if len(untrusted_idx) == 0:
                     break
-                resid = _residuals(np.where(trusted)[0])
+                resid, _ = _residuals(np.where(trusted)[0])
                 z = resid / scale
                 best = untrusted_idx[np.argmin(z[untrusted_idx])]
                 if z[best] < sigma:
@@ -602,7 +611,7 @@ class Star:
                 active_idx = np.where(active)[0]
                 if len(active_idx) < 4:
                     break
-                resid = _residuals(active_idx)
+                resid, _ = _residuals(active_idx)
                 z = resid / scale
                 worst = active_idx[np.argmax(z[active_idx])]
                 if z[worst] >= sigma:
@@ -610,6 +619,12 @@ class Star:
                 else:
                     break
             outlier_idx = np.where(~active)[0]
+
+        # Final fit on the trusted set, captured for the diagnostic overlay.
+        trusted_idx = np.setdiff1d(np.arange(len(filt_names)), outlier_idx)
+        _, best_T = _residuals(trusted_idx)
+        self._qc_bb_teff = float(best_T) if np.isfinite(best_T) else None
+        self._qc_bb_flagged_bands = [str(filt_names[i]) for i in outlier_idx]
 
         removed = []
         for i in outlier_idx:

@@ -705,7 +705,9 @@ Another important output are the plots. Inside the plots folder you can find
 `CORNER.png/pdf` with the cornerplot (the plot showing the distribution of the
 parameters agains eachother), `HR_diagram.png/pdf` only for the BMA, with the HR
 diagram showing the position of the star, `SED_no_model.png/pdf` with the RAW
-SED showing each photometry point color coded to their respective filter, and
+SED showing each photometry point color coded to their respective filter
+(coloured by wavelength, overlaid with the blackbody fit from the photometry
+quality-control step, and any QC-flagged bands circled in red — see below), and
 `SED.png/pdf` with the SED with the catalog photometry plus synthetic
 photometry. If BMA was done, there's also a `histograms` folder inside the plot
 folder with various histograms of the fitted parameters and their distribution
@@ -717,6 +719,23 @@ Examples of those figures:
 ![HR Diagram](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/HR_diagram.png)
 ![Corner plot](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/CORNER.png)
 ![Histogram example](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/rad.png)
+
+### Photometry quality control
+
+The raw SED plot doubles as a quality-control diagnostic. ARIADNE fits a
+blackbody to the photometry (anchored on the Gaia bands) and overlays it on
+`SED_no_model.png`. Points are coloured by effective wavelength (violet/blue at
+short wavelengths through to orange/red at long ones), and bands that sit more
+than 5σ off the fit are flagged and **circled in red** so you can eyeball
+whether a catalogue point genuinely belongs to the stellar continuum — useful
+for spotting blends, bad cross-matches or real infrared excesses. By default
+flagged bands are only warned about, not removed, so the decision stays with
+you.
+
+In the example below the star is a clean ~5500 K blackbody and the WISE W2
+point (circled in red) shows a clear infrared excess above the fit:
+
+![Blackbody QC](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/SED_blackbody.png)
 
 
 ## NetCDF Export (Ecosystem Interop)
