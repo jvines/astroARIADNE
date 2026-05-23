@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.0] - 2026-05-23
 
 ### Added
+- **New photometry/astrometry librarian** (now a `librarian/` package): Gaia
+  DR3 `best_neighbour` cross-matching with a VizieR XMatch fallback,
+  per-catalogue quality-control, robust coordinate→`source_id` resolution via a
+  Gaia TAP cone query, and **Hypatia-Catalog [Fe/H]** spectroscopic priors. The
+  `Star` lookup and prior construction were adapted accordingly, including
+  per-field null-safe spectroscopic priors (a Hypatia [Fe/H]-only result no
+  longer requires a spectroscopic Teff/logg). Filter names are bridged to the
+  ARIADNE convention (Gaia DR3 → `GaiaDR2v2_*`).
 - Three new model grids:
   - **BOSZ** (Mészáros et al. 2024) — MARCS+ATLAS9 atmospheres synthesised with
     Synspec, Teff 2800–16000 K, full 0.05–32 µm coverage. Added to the BMA set

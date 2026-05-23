@@ -19,6 +19,7 @@ from scipy.constants import h as _h, c as _c, k as _k
 from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands)
 from .isochrone import estimate
 from .librarian import Librarian
+from .librarian._adapter import adapt_librarian
 from .error import StarWarning
 from .phot_utils import *
 from .utils import (display_star_fin, display_star_init)
@@ -184,28 +185,30 @@ class Star:
                         colored('\t\t*** LOOKING UP ARCHIVAL INFORMATION ***',
                                 c)
                     )
-                lib = Librarian(starname, self.ra, self.dec, g_id=self.g_id,
-                                mags=self.get_mags, ignore=ignore)
-                self.g_id = lib.g_id
-                self.tic = lib.tic
-                self.kic = lib.kic
+                ignore_arg = ignore if ignore is not None else ()
+                lib = Librarian(self.ra, self.dec, gaia_id=self.g_id,
+                                ignore=ignore_arg, verbose=self.verbose)
+                adapted = adapt_librarian(lib)
+                self.g_id = adapted.g_id
+                self.tic = adapted.tic
+                self.kic = adapted.kic
                 # Store spectroscopic parameters for use in priors
-                self.rave_params = lib.rave_params
-                self.spectroscopic_params = lib.spectroscopic_params
+                self.rave_params = adapted.rave_params
+                self.spectroscopic_params = adapted.spectroscopic_params
             else:
                 print(
                     colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)
                 )
                 if self.get_mags:
                     StarWarning('', 1).__raise__()
-                lib = None
+                adapted = None
                 self.tic = False
                 self.kic = False
                 self.rave_params = None
                 self.spectroscopic_params = None
 
             # [plx, plx_e, dist, dist_e, rad, rad_e, temp, temp_e, lum, lum_e]
-            libouts = extract_from_lib(lib)
+            libouts = extract_from_lib(adapted)
 
             if self.get_plx:
                 self.plx = libouts[0]
@@ -248,9 +251,16 @@ class Star:
                 self.lum_e = lum_e
 
         if self.get_mags:
-            self.used_filters = lib.used_filters
-            self.mags = lib.mags
-            self.mag_errs = lib.mag_errs
+            # The adapter preserves the old _add_mags 1/2 distinction (2 ==
+            # band present but no error). The OLD Librarian.__init__ collapsed
+            # 2 -> 1 (`used_filters[used_filters >= 1] = 1`) before Star ever
+            # saw it, and all downstream code keys off `== 1`. Replicate that
+            # collapse here so the contract is byte-for-byte unchanged.
+            used_filters = adapted.used_filters.copy()
+            used_filters[used_filters >= 1] = 1
+            self.used_filters = used_filters
+            self.mags = adapted.mags
+            self.mag_errs = adapted.mag_errs
         else:
             filters = []
             self.used_filters = np.zeros(self.filter_names.shape[0])
