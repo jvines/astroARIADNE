@@ -1,0 +1,6 @@
+sphinx>=7.0
+myst-parser>=2.0
+sphinx-rtd-theme>=2.0
+numpy>=1.26
+scipy>=1.15
+numba>=0.61
