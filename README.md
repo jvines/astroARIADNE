@@ -6,6 +6,8 @@ Sampling algorithms.
 
 # Installation
 
+<!-- DOC:INSTALLATION-START -->
+
 **ARIADNE** requires Python 3.11 or higher and uses modern Python packaging standards (PEP 517/518).
 
 ## Quick Install (Recommended)
@@ -47,12 +49,8 @@ All required dependencies are automatically installed via pip. The main packages
 - extinction (<https://extinction.readthedocs.io/en/latest/>)
 - pyphot (<http://mfouesneau.github.io/docs/pyphot/>)
 - dustmaps (<https://dustmaps.readthedocs.io/en/latest/>) [**NEEDS CONFIGURING AND DOWNLOADING OF DUSTMAPS**]
-- PyMultinest (<https://johannesbuchner.github.io/PyMultiNest/>) [**OPTIONAL**]
 - dynesty (<https://dynesty.readthedocs.io/en/latest/>)
 - isochrones (<https://isochrones.readthedocs.io/en/latest/>) [**NEEDS EXTRA SETUP WITH `nosetests isochrones`**]
-
-**PyMultinest is an optional package and can be hard to install! If you're
-planning on doing BMA only then you can skip installing it!!**
 
 ### Special Installations
 
@@ -236,7 +234,11 @@ Models_Dir
 - The Phoenix v2 models with alpha enhancements are unused
 - BT-models are BT-Settl, BT-Cond, and BT-NextGen
 
+<!-- DOC:INSTALLATION-END -->
+
 # How to use?
+
+<!-- DOC:USAGE-START -->
 
 ## Stellar information setup
 
@@ -428,11 +430,16 @@ from astroARIADNE.fitter import Fitter
 
 There are several configuration parameters we have to setup, the first one is
 the output folder where we want **ARIADNE** to output the fitting files and
-results, next we have to select the fitting engine (for BMA only dynesty is
-supported), number of live points to use, evidence tolerance threshold, and the
-following only apply for dynesty: bounding method, sampling method, threads,
-dynamic nested sampler. After selecting all of those, we need to select the
-models we want to use and finally, we feed them all to the fitter:
+results, next we have to select the fitting engine (`'dynesty'`), number of
+live points to use, evidence tolerance threshold, bounding method, sampling
+method, threads, and whether to use the dynamic nested sampler. After selecting
+all of those, we need to select the models we want to use and finally, we feed
+them all to the fitter:
+
+> **Deprecation:** `'dynesty'` is the engine. The legacy `'multinest'` engine
+> is **deprecated** and will be **removed entirely in v2.0** — it only ever
+> supported single-grid fits (not BMA), and dynesty is now faster besides. Use
+> `'dynesty'`.
 
 ```python
 out_folder = 'your folder here'
@@ -678,7 +685,12 @@ If you don't have either the spectra cache or the full model grids, then the
 An example usage file is provided in the repository called `test_bma.py` demonstrating
 the recommended BMA (Bayesian Model Averaging) approach.
 
+<!-- DOC:USAGE-END -->
+
 ## OUTPUT FILES
+
+<!-- DOC:OUTPUT-START -->
+
 After **ARIADNE** has finished running, it will output a series of files and
 plots showing the results of the fit and other information.
 
@@ -701,10 +713,10 @@ per model, highlighting the benefits of BMA.
 
 Examples of those figures:
 
-![SED plot](https://github.com/jvines/astroARIADNE/blob/master/img/SED.png)
-![HR Diagram](https://github.com/jvines/astroARIADNE/blob/master/img/HR_diagram.png)
-![Corner plot](https://github.com/jvines/astroARIADNE/blob/master/img/CORNER.png)
-![Histogram example](https://github.com/jvines/astroARIADNE/blob/master/img/rad.png)
+![SED plot](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/SED.png)
+![HR Diagram](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/HR_diagram.png)
+![Corner plot](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/CORNER.png)
+![Histogram example](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/rad.png)
 
 
 ## NetCDF Export (Ecosystem Interop)
@@ -764,8 +776,8 @@ from scipy.stats import gaussian_kde
 kde = gaussian_kde(teff.values.flatten())
 ```
 
-As of 1.4.1, the host application can inject the best-fit model SED before
-exporting so the `.nc` file is fully self-contained for visualization:
+Since 1.4.1 you can attach the best-fit model SED before exporting, so the
+`.nc` file carries everything needed to re-plot it:
 
 ```python
 # Assuming `artist` is an SEDPlotter that has been initialized
@@ -841,6 +853,7 @@ Allowed filters for infrared excess plots are **WISE W3, WISE W4, HERSCHEL PACS
 BLUE, GREEN and RED**, names for these filters can be found in the
 [filters page.](https://github.com/jvines/astroARIADNE/blob/master/filters.md)
 
+<!-- DOC:OUTPUT-END -->
 
 ## Citing ARIADNE
 

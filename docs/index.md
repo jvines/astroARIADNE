@@ -9,7 +9,10 @@ grids through Bayesian Model Averaging (BMA).
 :maxdepth: 2
 :caption: Contents
 
-guide
+installation
+theory
+usage
+output
 customization
 filters
 api

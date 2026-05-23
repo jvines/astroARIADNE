@@ -30,7 +30,8 @@ extensions = [
 source_suffix = {'.rst': 'restructuredtext', '.md': 'markdown'}
 master_doc = 'index'
 
-myst_enable_extensions = ['colon_fence', 'deflist', 'attrs_inline']
+myst_enable_extensions = ['colon_fence', 'deflist', 'attrs_inline',
+                          'dollarmath', 'amsmath']
 myst_heading_anchors = 3
 
 # Don't choke the RTD build on the heavy / compiled scientific dependencies;

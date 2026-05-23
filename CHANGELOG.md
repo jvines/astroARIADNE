@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `KeyError` in the non-BMA `save()`/`end()` path (`best_fit_averaged` keys).
 - dynesty `queue_size` off-by-one left one pool worker idle.
 
+### Deprecated
+- The `'multinest'` sampling engine is **deprecated** and will be **removed
+  entirely in v2.0**. It only ever supported single-grid fits (not BMA), and
+  `dynesty` is now both faster and the only engine exercised by the BMA path.
+  Use `engine='dynesty'` (the default).
+
 ## [1.4.6] - 2026-04-07
 
 ### Fixed

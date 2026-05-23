@@ -66,32 +66,56 @@ class Fitter:
 
     Attributes
     ----------
-    out_folder : type
-        Description of attribute `out_folder`.
-    verbose : type
-        Description of attribute `verbose`.
-    star : type
-        Description of attribute `star`.
-    setup : type
-        Description of attribute `setup`.
-    norm : type
-        Description of attribute `norm`.
-    grid : type
-        Description of attribute `grid`.
-    estimate_logg : type
-        Description of attribute `estimate_logg`.
-    priorfile : type
-        Description of attribute `priorfile`.
-    av_law : type
-        Description of attribute `av_law`.
-    n_samples : type
-        Description of attribute `n_samples`.
-    bma : type
-        Description of attribute `bma`.
-    prior_setup : type
-        Description of attribute `prior_setup`.
-    sequential : type
-        Description of attribute `sequential`.
+    star : Star
+        The ``Star`` object to fit.
+    setup : list
+        Sampler configuration. The first element selects the engine
+        (``'dynesty'``); the remaining elements are
+        ``[nlive, dlogz, bound, sample, threads, dynamic, walks]``.
+    out_folder : str
+        Folder where results and plots are written. Defaults to the star name.
+    verbose : bool
+        Program verbosity. Default ``True``.
+    norm : bool
+        If ``True``, fit a single normalisation constant instead of radius and
+        distance; the radius is recovered afterwards from the Gaia parallax.
+    grid : str
+        Atmosphere grid for a single-grid fit (e.g. ``'phoenix'``,
+        ``'btsettl'``, ``'ck04'``, ``'kurucz'``, ``'coelho'``, ``'bosz'``,
+        ``'sphinx'``, ``'tlusty'``).
+    bma : bool
+        If ``True``, run Bayesian Model Averaging across several grids. This
+        loads every model interpolator and fits all of them, so it is slower.
+    models : list
+        The grids to average over when ``bma`` is ``True``.
+    sequential : bool
+        If ``True``, fit the BMA grids one after another. See also
+        ``n_grid_jobs`` to fit grids concurrently. Default ``True``.
+    n_grid_jobs : int
+        Number of BMA grids fit concurrently, one core each. Default ``1``
+        (sequential). Each job loads its own grid, so size this to the
+        machine's core count and memory.
+    n_samples : int or None
+        Number of samples drawn from the BMA-averaged posterior. ``None`` uses
+        the combined chain length.
+    walks : int
+        Number of ``rwalk`` MCMC steps per dynesty proposal. Default ``25``;
+        also settable as ``setup[7]``.
+    av_law : str
+        Extinction law. Default ``'fitzpatrick'``.
+    estimate_logg : bool
+        If ``True``, treat log g as a derived quantity via the isochrone step.
+        Default ``False``.
+    estimate_age : bool
+        If ``True``, run the MIST isochrone fit for age, mass and EEP after the
+        SED fit. Default ``True``.
+    isochrone_dlogz : float
+        Evidence tolerance for the MIST isochrone age/mass fit (the dominant
+        cost of a BMA run). Lower is more precise but slower. Default ``0.01``.
+    prior_setup : dict or None
+        Manual prior specification consumed by ``create_priors_from_setup``.
+    experimental : bool
+        Enable experimental code paths. Default ``False``.
 
     """
 
@@ -155,6 +179,12 @@ class Fitter:
         if len(setup) == 1:
             defaults = True
         if self._engine == 'multinest':
+            warnings.warn(
+                "The 'multinest' engine is deprecated and will be removed "
+                "entirely in astroARIADNE v2.0. It only supports single-grid "
+                "fits (not BMA); use engine='dynesty' instead.",
+                DeprecationWarning, stacklevel=2,
+            )
             if defaults:
                 self._nlive = 500
                 self._dlogz = 0.5

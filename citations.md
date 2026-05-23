@@ -75,49 +75,6 @@ archivePrefix = {arXiv},
 }
 ```
 
-### MultiNest
-```
-@ARTICLE{MULTINEST,
-       author = {{Feroz}, F. and {Hobson}, M.~P. and {Bridges}, M.},
-        title = "{MULTINEST: an efficient and robust Bayesian inference tool for cosmology and particle physics}",
-      journal = {\mnras},
-    archivePrefix = "arXiv",
-       eprint = {0809.3437},
-     keywords = {methods: data analysis , methods: statistical},
-         year = 2009,
-        month = oct,
-       volume = 398,
-        pages = {1601-1614},
-          doi = {10.1111/j.1365-2966.2009.14548.x},
-       adsurl = {http://adsabs.harvard.edu/abs/2009MNRAS.398.1601F},
-      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
-}
-```
-
-### PyMultiNest
-
-```
-@ARTICLE{PYMULTINEST,
-   author = {{Buchner}, J. and {Georgakakis}, A. and {Nandra}, K. and {Hsu}, L. and 
-	{Rangel}, C. and {Brightman}, M. and {Merloni}, A. and {Salvato}, M. and 
-	{Donley}, J. and {Kocevski}, D.},
-    title = "{X-ray spectral modelling of the AGN obscuring region in the CDFS: Bayesian model selection and catalogue}",
-  journal = {\aap},
-archivePrefix = "arXiv",
-   eprint = {1402.0004},
- primaryClass = "astro-ph.HE",
- keywords = {accretion, accretion disks, methods: data analysis, methods: statistical, galaxies: nuclei, X-rays: galaxies, galaxies: high-redshift},
-     year = 2014,
-    month = apr,
-   volume = 564,
-      eid = {A125},
-    pages = {A125},
-      doi = {10.1051/0004-6361/201322971},
-   adsurl = {http://adsabs.harvard.edu/abs/2014A%26A...564A.125B},
-  adsnote = {Provided by the SAO/NASA Astrophysics Data System}
-}
-```
-
 ### Isochrones
 
 ```
@@ -243,6 +200,121 @@ archivePrefix = {arXiv},
        eprint = {astro-ph/0405087},
  primaryClass = {astro-ph},
        adsurl = {https://ui.adsabs.harvard.edu/abs/2003IAUS..210P.A20C},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
+
+### BOSZ
+
+```
+@ARTICLE{BOSZ2024,
+       author = {{M{\'e}sz{\'a}ros}, Szabolcs and {Bohlin}, Ralph and
+                 {Allende Prieto}, Carlos and {Cseh}, Borb{\'a}la and
+                 {Kov{\'a}cs}, J{\'o}zsef and {Fleming}, Scott W. and
+                 {Dencs}, Zolt{\'a}n and {Deustua}, Susana and
+                 {Gordon}, Karl D. and {Hubeny}, Ivan and
+                 {Mez{\H{o}}}, Gy{\"o}rgy and {Truszek}, M{\'a}rton},
+        title = "{The updated BOSZ synthetic stellar spectral library}",
+      journal = {\aap},
+         year = 2024,
+        month = aug,
+       volume = {688},
+          eid = {A197},
+        pages = {A197},
+          doi = {10.1051/0004-6361/202449306},
+archivePrefix = {arXiv},
+       eprint = {2407.10872},
+ primaryClass = {astro-ph.SR},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2024A&A...688A.197M},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
+
+### SPHINX-II
+
+```
+@ARTICLE{SPHINX2,
+       author = {{Iyer}, Aishwarya R. and {Line}, Michael R. and
+                 {Muirhead}, Philip S. and {Fortney}, Jonathan J. and
+                 {Faherty}, Jacqueline K.},
+        title = "{The SPHINX M dwarf Spectral Grid. II. New Model Atmospheres and Spectra to Derive Fundamental Properties of mid-to-late type M-dwarfs}",
+      journal = {arXiv e-prints},
+         year = 2025,
+        month = dec,
+          eid = {arXiv:2512.02269},
+        pages = {arXiv:2512.02269},
+          doi = {10.48550/arXiv.2512.02269},
+archivePrefix = {arXiv},
+       eprint = {2512.02269},
+ primaryClass = {astro-ph.SR},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2025arXiv251202269I},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
+
+The original SPHINX grid (paper I) is Iyer et al. (2023):
+
+```
+@ARTICLE{SPHINX1,
+       author = {{Iyer}, Aishwarya R. and {Line}, Michael R. and
+                 {Muirhead}, Philip S. and {Fortney}, Jonathan J. and
+                 {Faherty}, Jacqueline K.},
+        title = "{The SPHINX M-dwarf Spectral Grid. I. Benchmarking New Model Atmospheres to Derive Fundamental M-dwarf Properties}",
+      journal = {\apj},
+         year = 2023,
+        month = feb,
+       volume = {944},
+       number = {1},
+          eid = {41},
+        pages = {41},
+          doi = {10.3847/1538-4357/acabc2},
+archivePrefix = {arXiv},
+       eprint = {2206.12010},
+ primaryClass = {astro-ph.SR},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2023ApJ...944...41I},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
+
+### TLUSTY (OSTAR2002 & BSTAR2006)
+
+The TLUSTY hot-star grids combine the O-star (OSTAR2002) and early B-star
+(BSTAR2006) NLTE line-blanketed model atmospheres of Lanz & Hubeny.
+
+```
+@ARTICLE{OSTAR2002,
+       author = {{Lanz}, Thierry and {Hubeny}, Ivan},
+        title = "{A Grid of Non-LTE Line-blanketed Model Atmospheres of O-Type Stars}",
+      journal = {\apjs},
+         year = 2003,
+        month = jun,
+       volume = {146},
+       number = {2},
+        pages = {417-441},
+          doi = {10.1086/374373},
+archivePrefix = {arXiv},
+       eprint = {astro-ph/0210157},
+ primaryClass = {astro-ph},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2003ApJS..146..417L},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
+
+```
+@ARTICLE{BSTAR2006,
+       author = {{Lanz}, Thierry and {Hubeny}, Ivan},
+        title = "{A Grid of NLTE Line-blanketed Model Atmospheres of Early B-Type Stars}",
+      journal = {\apjs},
+         year = 2007,
+        month = mar,
+       volume = {169},
+       number = {1},
+        pages = {83-104},
+          doi = {10.1086/511270},
+archivePrefix = {arXiv},
+       eprint = {astro-ph/0611891},
+ primaryClass = {astro-ph},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2007ApJS..169...83L},
       adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
 ```
