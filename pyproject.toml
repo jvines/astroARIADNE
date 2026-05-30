@@ -54,7 +54,7 @@ dependencies = [
 Homepage = "https://github.com/jvines/astroARIADNE"
 
 [tool.setuptools]
-packages = ["astroARIADNE"]
+packages = ["astroARIADNE", "astroARIADNE.librarian"]
 
 [tool.setuptools.package-data]
 astroARIADNE = ["Datafiles/**/*"]
