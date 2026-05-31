@@ -41,7 +41,7 @@ myst_heading_anchors = 3
 # RTD installs it cheaply.
 autodoc_mock_imports = [
     'isochrones', 'dynesty', 'pyphot', 'dustmaps', 'astroquery',
-    'extinction', 'regions', 'PyAstronomy', 'pymultinest', 'healpy',
+    'extinction', 'regions', 'PyAstronomy', 'healpy',
     'pandas', 'astropy', 'matplotlib', 'termcolor', 'tqdm',
     'corner', 'tabulate', 'requests', 'arviz',
 ]

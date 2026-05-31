@@ -348,12 +348,3 @@ def prior_transform_dynesty(u, flux, flux_er, filts, prior_dict, coordinator,
     for i, transform in enumerate(transforms):
         u2[i] = transform(u2[i])
     return u2
-
-
-def prior_transform_multinest(u, flux, flux_er, filts, prior_dict, coordinator,
-                              use_norm):
-    """Transform the prior from the unit cube to the parameter space."""
-    order = _param_order(filts, use_norm)
-    transforms = _free_param_transforms(prior_dict, coordinator, order)
-    for i, transform in enumerate(transforms):
-        u[i] = transform(u[i])

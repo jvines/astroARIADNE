@@ -190,12 +190,10 @@ def display_routine(engine, live_points, dlogz, ndim, bound=None, sample=None,
     Program name
     Program author
     Star selected
-    Algorithm used (i.e. Multinest or Dynesty)
+    Algorithm used (i.e. Dynesty)
     Setup used (i.e. Live points, dlogz tolerance)
     """
     c = random.choice(colors)
-    if engine == 'multinest':
-        engine = 'MultiNest'
     if engine == 'dynesty':
         engine = 'Dynesty'
     print(colored('\n\t\t*** EXECUTING MAIN FITTING ROUTINE ***', c))

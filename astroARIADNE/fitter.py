@@ -1,7 +1,6 @@
 """Main driver of the fitting routine."""
 
-__all__ = ['Fitter', 'dynesty_log_like', 'dynesty_loglike_bma', 'pt_dynesty',
-           'pt_multinest']
+__all__ = ['Fitter', 'dynesty_log_like', 'dynesty_loglike_bma', 'pt_dynesty']
 
 import copy
 import logging
@@ -42,12 +41,6 @@ except ModuleNotFoundError:
     wrn += 'Install dynesty with `pip install dynesty`'
     warnings.warn(wrn)
     bma_flag = False
-try:
-    import pymultinest
-except ModuleNotFoundError:
-    warnings.warn(
-        '(py)MultiNest installation (or libmultinest.dylib) not detected.'
-    )
 
 set_start_method('fork', force=True)
 
@@ -183,7 +176,7 @@ class Fitter:
     @setup.setter
     def setup(self, setup):
         err_msg = 'The setup has to contain at least the fitting engine'
-        err_msg += f', multinest or dynesty.\nThe setup was {setup}'
+        err_msg += f', which must be dynesty.\nThe setup was {setup}'
         if len(setup) < 1:
             InputError(err_msg).__raise__()
         self._setup = setup
@@ -192,18 +185,11 @@ class Fitter:
         if len(setup) == 1:
             defaults = True
         if self._engine == 'multinest':
-            warnings.warn(
-                "The 'multinest' engine is deprecated and will be removed "
-                "entirely in astroARIADNE v2.0. It only supports single-grid "
-                "fits (not BMA); use engine='dynesty' instead.",
-                DeprecationWarning, stacklevel=2,
-            )
-            if defaults:
-                self._nlive = 500
-                self._dlogz = 0.5
-            else:
-                self._nlive = setup[1]
-                self._dlogz = setup[2]
+            InputError(
+                "The 'multinest' engine has been removed (deprecated since "
+                "1.5.0). Use engine='dynesty' (the default), which also "
+                "supports Bayesian Model Averaging."
+            ).__raise__()
         if self._engine == 'dynesty':
             if defaults:
                 self._nlive = 500
@@ -860,10 +846,7 @@ class Fitter:
 
     def fit(self):
         """Run fitting routine."""
-        if self._engine == 'multinest':
-            self.fit_multinest()
-        else:
-            self.fit_dynesty()
+        self.fit_dynesty()
         elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time,
             self.out_folder, self._engine, self.norm, )
@@ -987,33 +970,6 @@ class Fitter:
         self.save(out_file, results=results)
         pass
 
-    def fit_multinest(self, out_file=None):
-        """Run MultiNest."""
-        # Set up some globals
-        global mask, flux, flux_er, filts, wave
-        mask = star.filter_mask
-        flux = star.flux[mask]
-        flux_er = star.flux_er[mask]
-        filts = star.filter_names[mask]
-        wave = star.wave[mask]
-        path = self.out_folder + '/mnest/'
-        create_dir(path)  # Create multinest path.
-        pymultinest.run(
-            multinest_log_like, pt_multinest, self.ndim,
-            n_params=self.ndim,
-            sampling_efficiency=0.8,
-            evidence_tolerance=self._dlogz,
-            n_live_points=self._nlive,
-            outputfiles_basename=path + 'chains',
-            max_modes=100,
-            verbose=self.verbose,
-            resume=False
-        )
-        if out_file is None:
-            out_file = f'{self.out_folder}/{self._grid}_out.pkl'
-        self.save(out_file=out_file)
-        pass
-
     def fit_dynesty(self, out_file=None):
         """Run dynesty."""
         # Set up some globals
@@ -1069,7 +1025,7 @@ class Fitter:
         pass
 
     def save(self, out_file, results=None):
-        """Save multinest/dynesty output and relevant information.
+        """Save the dynesty output and relevant information.
 
         Saves a dictionary as a pickle file. The dictionary contains the
         following:
@@ -1087,7 +1043,7 @@ class Fitter:
                    It also includes the log likelihood of the best fit.
         star: The Star object containing the information of the star (name,
                magnitudes, fluxes, coordinates, etc)
-        engine: The fitting engine used (i.e. MultiNest or Dynesty)
+        engine: The fitting engine used (Dynesty)
 
         Also creates a log file with the best fit parameters and 1 sigma
         error bars.
@@ -1096,20 +1052,12 @@ class Fitter:
         out = dict()
         logdat = '#Parameter\tmedian\tupper\tlower\t3sig_CI\n'
         log_out = self.out_folder + '/' + 'best_fit.dat'
-        if self._engine == 'multinest':
-            lnz, lnzer, posterior_samples = self.multinest_results(
-                self.out_folder,
-                self.ndim
-            )
-        else:
-            lnz, lnzer, posterior_samples = self.dynesty_results(results)
+        lnz, lnzer, posterior_samples = self.dynesty_results(results)
 
         mask = self.star.filter_mask
 
         # Save global evidence
-
-        if self._engine == 'dynesty':
-            out['dynesty'] = results
+        out['dynesty'] = results
         out['global_lnZ'] = lnz
         out['global_lnZerr'] = lnzer
 
@@ -1668,16 +1616,6 @@ class Fitter:
         return out
 
     @staticmethod
-    def multinest_results(out_folder, ndim):
-        """Extract posterior samples, global evidence and its error."""
-        path = f'{out_folder}/mnest/chains'
-        output = pymultinest.Analyzer(outputfiles_basename=path, n_params=ndim)
-        posterior_samples = output.get_equal_weighted_posterior()[:, :-1]
-        lnz = output.get_stats()['global evidence']
-        lnzer = output.get_stats()['global evidence error']
-        return lnz, lnzer, posterior_samples
-
-    @staticmethod
     def dynesty_results(results):
         """Extract posterior samples, global evidence and its error."""
         weights = np.exp(results['logwt'] - results['logz'][-1])
@@ -2012,7 +1950,7 @@ class Fitter:
 
 
 #####################
-# Dynesty and multinest wrappers
+# Dynesty wrappers
 
 
 # Set by fit_bma before forking the grid-parallel Pool; read by the workers.
@@ -2068,19 +2006,3 @@ def pt_dynesty(cube):
     """Dynesty prior transform."""
     return prior_transform_dynesty(cube, flux, flux_er, filts, prior_dict,
                                    coordinator, use_norm)
-
-
-def multinest_log_like(cube, ndim, nparams):
-    """Multinest log likelihood wrapper."""
-    theta = [cube[i] for i in range(ndim)]
-    theta = build_params(
-        theta, flux, flux_er, filts, coordinator, fixed, use_norm
-    )
-    return log_likelihood(theta, flux, flux_er, wave,
-                          filts, interpolator, use_norm, av_law)
-
-
-def pt_multinest(cube, ndim, nparams):
-    """Multinest prior transform."""
-    prior_transform_multinest(cube, flux, flux_er, filts, prior_dict,
-                              coordinator, use_norm)

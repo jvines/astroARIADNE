@@ -5,6 +5,22 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `Star.from_gaia(source_id)` and `Star.from_name(name)` classmethods that
+  resolve coordinates (Gaia DR3 TAP / Simbad name resolution) and build the
+  `Star` — the documented "I have a Gaia ID" entry point no longer requires
+  hand-entering RA/Dec.
+- Fitzpatrick & Massa (2007) extinction law (`av_law='fm07'`).
+
+### Removed
+- **The `'multinest'` sampling engine has been removed** (deprecated in 1.5.0).
+  It only ever supported single-grid fits, never BMA; `dynesty` is the sole
+  engine and is faster. `engine='multinest'` now raises with a clear message,
+  and `pymultinest` is no longer imported. **This is a breaking change** for any
+  code that passed `engine='multinest'`.
+
 ## [1.5.1] - 2026-05-31
 
 ### Fixed
