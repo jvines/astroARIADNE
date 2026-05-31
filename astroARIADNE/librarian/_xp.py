@@ -41,30 +41,36 @@ XP_PSEUDO_BANDS = [
     ('XP_NIRcont',  960.0, 30.0),   # near-IR continuum anchor
 ]
 
-# erg/s/cm^2/AA  <-  W/nm/m^2  (XP calibrated flux units)
-_WNM_M2_TO_ERG_S_CM2_AA = 1e7 / 1e4 / 10.0
+# erg/s/cm^2/um  <-  W/nm/m^2  (XP calibrated flux -> ARIADNE grid-column units).
+#   W -> erg/s : 1e7   |   /m^2 -> /cm^2 : 1e-4   |   /nm -> /um : *1e3
+_WNM_M2_TO_ERG_S_CM2_UM = 1e7 * 1e-4 * 1e3
 
 _FILTER_CACHE = None
 
 
 def _build_pseudo_filters():
-    """Build (and cache) pyphot Filter objects for the pseudo-bands.
+    """Build (and cache) pyphot UnitFilter objects for the pseudo-bands.
 
-    Constructed in Angstrom to match pyphot's native internal unit; Gaussian
-    transmission, photon-counting (``dtype='photon'``), matching the SED grids.
+    Built as ``UnitFilter`` with a unit-quantity wavelength in micron — the same
+    class and unit convention as ``pyphot.get_library()`` filters and the
+    erg/cm^2/s/um flux ARIADNE feeds. (A plain ``Filter`` with a ``unit='um'``
+    *string* mis-scales the photon-counting integral by ~1e4 — verified against a
+    library filter — so the Quantity form is required.) Gaussian transmission,
+    photon-counting.
     """
     global _FILTER_CACHE
     if _FILTER_CACHE is not None:
         return _FILTER_CACHE
-    from pyphot import Filter
+    from pyphot.sandbox import UnitFilter
+    from pyphot.ezunits import unit
     out = []
     for name, c_nm, fwhm_nm in XP_PSEUDO_BANDS:
-        sig_aa = (fwhm_nm / 2.3548200450309493) * 10.0
-        c_aa = c_nm * 10.0
-        wl = np.linspace(c_aa - 5 * sig_aa, c_aa + 5 * sig_aa, 400)
-        trans = np.exp(-0.5 * ((wl - c_aa) / sig_aa) ** 2)
-        out.append((name, Filter(wl, trans, name=name, dtype='photon',
-                                 unit='Angstrom')))
+        sig = (fwhm_nm / 2.3548200450309493) * 1e-3   # nm FWHM -> um sigma
+        c = c_nm * 1e-3                               # nm -> um
+        wl = np.linspace(c - 5 * sig, c + 5 * sig, 400)
+        trans = np.exp(-0.5 * ((wl - c) / sig) ** 2)
+        out.append((name, UnitFilter(unit.Quantity(wl, 'um'), trans,
+                                     name=name, dtype='photon')))
     _FILTER_CACHE = out
     return out
 
@@ -90,7 +96,7 @@ def fetch_xp_continuous(source_id, data_release='Gaia DR3'):
 def xp_pseudo_fluxes(source_id, data_release='Gaia DR3'):
     """Synthetic fluxes through the XP pseudo-bands for a Gaia source_id.
 
-    Returns ``(names, fluxes, flux_errors)`` in erg/s/cm^2/AA (matching the SED
+    Returns ``(names, fluxes, flux_errors)`` in erg/s/cm^2/um (matching the SED
     grid columns / pyphot zero-point convention), or ``None`` if the source has
     no XP spectrum. ``flux_errors`` are propagated from GaiaXPy's per-sample flux
     errors (treated as independent — an approximation; the full XP covariance is
@@ -102,17 +108,22 @@ def xp_pseudo_fluxes(source_id, data_release='Gaia DR3'):
     import gaiaxpy
     from pyphot.ezunits import unit
     spec, sampling = gaiaxpy.calibrate(df, save_file=False)
-    wl_aa = np.asarray(sampling, float) * 10.0
-    F = np.asarray(spec['flux'].iloc[0], float) * _WNM_M2_TO_ERG_S_CM2_AA
-    Ferr = np.asarray(spec['flux_error'].iloc[0], float) * _WNM_M2_TO_ERG_S_CM2_AA
-    wq = unit.Quantity(wl_aa, 'angstrom')
-    fq = unit.Quantity(F, 'erg/s/cm**2/angstrom')
+    wl_um = np.asarray(sampling, float) * 1e-3                  # nm -> um
+    F = np.asarray(spec['flux'].iloc[0], float) * _WNM_M2_TO_ERG_S_CM2_UM
+    Ferr = np.asarray(spec['flux_error'].iloc[0], float) * _WNM_M2_TO_ERG_S_CM2_UM
+    wq = unit.Quantity(wl_um, 'um')
+    fq = unit.Quantity(F, 'erg/cm**2/s/um')
     # error: integrate (F+sigma) through each band and difference, a cheap
     # independent-sample approximation of the band-flux uncertainty.
-    feq = unit.Quantity(F + Ferr, 'erg/s/cm**2/angstrom')
+    feq = unit.Quantity(F + Ferr, 'erg/cm**2/s/um')
 
+    # Mirror the grid builder exactly: get_flux(...).to('erg/cm**2/s/um'). The
+    # ``.to()`` is essential — pyphot's raw get_flux normalises to its internal
+    # wavelength unit (Angstrom), a uniform 1e4 offset; ``.to('...um')`` puts the
+    # synthetic flux on the SAME scale as the grid columns.
     def _val(r):
-        return float(r.magnitude) if hasattr(r, 'magnitude') else float(r)
+        return float(r.to('erg/cm**2/s/um').magnitude) if hasattr(r, 'to') \
+            else (float(r.magnitude) if hasattr(r, 'magnitude') else float(r))
 
     names, fluxes, errs = [], [], []
     for name, filt in _build_pseudo_filters():

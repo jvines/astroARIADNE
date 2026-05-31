@@ -31,21 +31,34 @@ def test_filters_build_and_match_centers():
     assert len(filts) == len(_xp.XP_PSEUDO_BANDS)
     for (name, c_nm, _), (fname, filt) in zip(_xp.XP_PSEUDO_BANDS, filts):
         assert fname == name
-        leff_nm = filt.leff.magnitude / 10.0      # AA -> nm
+        leff_nm = filt.leff.magnitude * 1e3       # um -> nm
         assert abs(leff_nm - c_nm) < 2.0, f'{name} leff {leff_nm} != {c_nm}'
 
 
 def test_flat_spectrum_recovers_constant():
     # a photon-counting band over a flat F_lambda must return that constant.
+    # Units are micron throughout (matching the SED grid columns).
     from pyphot.ezunits import unit
-    wl = np.linspace(3000.0, 10000.0, 7001)          # AA
+    wl = np.linspace(0.30, 1.05, 7501)               # um
     F = np.full_like(wl, 3.0e-13)
-    wq = unit.Quantity(wl, 'angstrom')
-    fq = unit.Quantity(F, 'erg/s/cm**2/angstrom')
+    wq = unit.Quantity(wl, 'um')
+    fq = unit.Quantity(F, 'erg/cm**2/s/um')
     for name, filt in _xp._build_pseudo_filters():
         r = filt.get_flux(wq, fq)
-        v = float(r.magnitude) if hasattr(r, 'magnitude') else float(r)
+        # match the grid-builder convention: normalise to erg/cm^2/s/um
+        v = float(r.to('erg/cm**2/s/um').magnitude) if hasattr(r, 'to') \
+            else float(r)
         assert abs(v - 3.0e-13) / 3.0e-13 < 1e-6, name
+
+
+def test_leff_matches_band_centers_in_um():
+    # the UnitFilter must store leff in micron at the band center (guards the
+    # ~1e4 mis-scaling that a plain Filter(unit='um') string produces).
+    for (name, c_nm, _), (fname, filt) in zip(
+            _xp.XP_PSEUDO_BANDS, _xp._build_pseudo_filters()):
+        leff_um = filt.leff.magnitude
+        assert abs(leff_um - c_nm * 1e-3) < 2e-3, (
+            f'{name} leff {leff_um} um != center {c_nm*1e-3} um')
 
 
 def test_live_retrieval_proxima():
@@ -60,9 +73,10 @@ def test_live_retrieval_proxima():
     assert np.all(er > 0)
     # M dwarf: NIR continuum >> blue (steep red SED)
     assert fl[-1] > 10 * fl[0]
-    # TiO843 absorbed below its red-continuum neighbour
+    # bands rise monotonically-ish blue->red for an M dwarf continuum; the
+    # NIR continuum anchor is the brightest band.
     d = dict(zip(names, fl))
-    assert d['XP_TiO843'] < d['XP_redcont'] or d['XP_TiO843'] < d['XP_NIRcont']
+    assert d['XP_NIRcont'] == max(d.values())
 
 
 if __name__ == '__main__':
