@@ -20,7 +20,7 @@ from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands)
 from .isochrone import estimate
 from .librarian import Librarian
 from .librarian._adapter import adapt_librarian
-from .error import StarWarning
+from .error import StarWarning, InputError
 from .phot_utils import *
 from .utils import (display_star_fin, display_star_init)
 
@@ -337,6 +337,74 @@ class Star:
         # self.calculate_distance()
         c = random.choice(self.colors)
         display_star_fin(self, c)
+
+    @classmethod
+    def from_gaia(cls, source_id, **kwargs):
+        """Create a Star from a Gaia DR3 ``source_id``.
+
+        Resolves RA/Dec by querying Gaia DR3, then delegates to the normal
+        constructor (which runs the librarian crossmatch as usual). Any other
+        keyword (``mag_dict``, ``offline``, ``ignore``, ``dustmap``, ``plx``,
+        ...) is forwarded to ``__init__``. ``starname`` defaults to
+        ``'Gaia DR3 <source_id>'`` when not given.
+
+        Parameters
+        ----------
+        source_id : int
+            Gaia DR3 source identifier.
+
+        Raises
+        ------
+        InputError
+            If the source_id cannot be resolved (not found, or query failed).
+        """
+        from astroquery.gaia import Gaia
+        adql = ('SELECT ra, dec FROM gaiadr3.gaia_source '
+                f'WHERE source_id = {int(source_id)}')
+        try:
+            res = Gaia.launch_job(adql).get_results()
+        except Exception as e:
+            InputError(
+                f'Failed to resolve Gaia source_id {source_id}: {e}'
+            ).__raise__()
+        if len(res) == 0:
+            InputError(
+                f'Gaia DR3 source_id {source_id} not found.'
+            ).__raise__()
+        ra = float(res['ra'][0])
+        dec = float(res['dec'][0])
+        starname = kwargs.pop('starname', f'Gaia DR3 {source_id}')
+        return cls(starname, ra, dec, g_id=int(source_id), **kwargs)
+
+    @classmethod
+    def from_name(cls, name, **kwargs):
+        """Create a Star from a resolvable name (e.g. 'HD 209458', 'TOI-1234').
+
+        Resolves RA/Dec via ``astropy.coordinates.SkyCoord.from_name`` (Simbad),
+        then delegates to the normal constructor. Any other keyword is forwarded
+        to ``__init__``. ``starname`` defaults to ``name`` when not given.
+
+        Parameters
+        ----------
+        name : str
+            Any identifier resolvable by Simbad.
+
+        Raises
+        ------
+        InputError
+            If the name cannot be resolved.
+        """
+        from astropy.coordinates import SkyCoord
+        try:
+            coord = SkyCoord.from_name(name)
+        except Exception as e:
+            InputError(
+                f"Could not resolve name '{name}': {e}"
+            ).__raise__()
+        ra = float(coord.ra.deg)
+        dec = float(coord.dec.deg)
+        starname = kwargs.pop('starname', name)
+        return cls(starname, ra, dec, **kwargs)
 
     def __repr__(self):
         """Repr overload."""

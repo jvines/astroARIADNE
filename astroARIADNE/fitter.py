@@ -52,6 +52,19 @@ except ModuleNotFoundError:
 set_start_method('fork', force=True)
 
 
+def _fm07_rv(wave, a_v, r_v=3.1):
+    """Fitzpatrick & Massa (2007) extinction with the ARIADNE call signature.
+
+    ``extinction.fm07`` is fixed at Rv=3.1 and takes ``(wave, a_v, unit)`` rather
+    than ``(wave, a_v, r_v)``. ARIADNE always calls laws as ``law(wave, Av, Rv)``,
+    so this wrapper absorbs (and ignores) ``r_v`` and forwards to ``fm07``. It is
+    a single module-level function on purpose: ``sed_library._ext_attenuation_base``
+    memoises on the law object's identity, so a stable callable is required for
+    the cache to hit.
+    """
+    return extinction.fm07(wave, a_v)
+
+
 class Fitter:
     """The Fitter class handles the fitting routines and parameter estimation.
 
@@ -345,13 +358,14 @@ class Fitter:
             'cardelli',
             'odonnell',
             'calzetti',
-            'fitzpatrick'
+            'fitzpatrick',
+            'fm07'
         ]
         law = law.lower()
         if law not in laws:
             err_msg = f'Extinction law {law} not recognized.'
             err_msg += 'Available extinction  laws are: `cardelli`, `odonnell`'
-            err_msg += ', `calzetti`, and `fitzpatrick`'
+            err_msg += ', `calzetti`, `fitzpatrick`, and `fm07`'
             InputError(err_msg).__raise__()
         law_f = None
         if law == laws[0]:
@@ -362,6 +376,8 @@ class Fitter:
             law_f = extinction.calzetti00
         if law == laws[3]:
             law_f = extinction.fitzpatrick99
+        if law == laws[4]:
+            law_f = _fm07_rv  # fixed Rv=3.1; see module-level wrapper
         self._av_law = law_f
 
     def _apply_grid_coverage(self):
