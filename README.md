@@ -442,10 +442,9 @@ method, threads, and whether to use the dynamic nested sampler. After selecting
 all of those, we need to select the models we want to use and finally, we feed
 them all to the fitter:
 
-> **Deprecation:** `'dynesty'` is the engine. The legacy `'multinest'` engine
-> is **deprecated** and will be **removed entirely in v2.0** — it only ever
-> supported single-grid fits (not BMA), and dynesty is now faster besides. Use
-> `'dynesty'`.
+> **Note:** `'dynesty'` is the engine. The legacy `'multinest'` engine was
+> **removed in 2.0** — it only ever supported single-grid fits (not BMA), and
+> dynesty is faster besides. Always use `'dynesty'`.
 
 ```python
 out_folder = 'your folder here'

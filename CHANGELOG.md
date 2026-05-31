@@ -5,7 +5,7 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-05-31
 
 ### Added
 - `Star.from_gaia(source_id)` and `Star.from_name(name)` classmethods that
@@ -14,19 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hand-entering RA/Dec.
 - Fitzpatrick & Massa (2007) extinction law (`av_law='fm07'`).
 
+### Changed
+- Bayesian Model Averaging weights: the evidence softmax now shifts by the
+  maximum log-evidence instead of the minimum, preventing `exp()` overflow to
+  `nan` weights when one grid dominates by a large margin (Δln Z ≳ 709).
+
 ### Removed
 - **The `'multinest'` sampling engine has been removed** (deprecated in 1.5.0).
   It only ever supported single-grid fits, never BMA; `dynesty` is the sole
-  engine and is faster. `engine='multinest'` now raises with a clear message,
-  and `pymultinest` is no longer imported. **This is a breaking change** for any
-  code that passed `engine='multinest'`.
-
-## [1.5.1] - 2026-05-31
+  engine and is faster. `engine='multinest'` now raises a clear error, and
+  `pymultinest` is no longer imported. **Breaking change** for any code that
+  passed `engine='multinest'`.
 
 ### Fixed
-- BMA model weights: the evidence softmax now shifts by the maximum
-  log-evidence instead of the minimum, preventing `exp()` overflow to `nan`
-  weights when one grid dominates by a large margin (Δln Z ≳ 709).
 - `_make_transform` (prior transform) read only keyword arguments, so a
   positionally-constructed prior (`truncnorm(a, b, loc, scale)`) raised a
   `KeyError` and `norm(mu, sigma)` silently became a standard normal. It now
