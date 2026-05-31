@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Star` — the documented "I have a Gaia ID" entry point no longer requires
   hand-entering RA/Dec.
 - Fitzpatrick & Massa (2007) extinction law (`av_law='fm07'`).
+- Fit-health diagnostics: each fit now records per-grid log-evidence ± error,
+  effective sample size, a convergence proxy, and grid-edge-pegging flags
+  (when a teff/logg/[Fe/H] posterior is railed against a grid boundary, so the
+  error bar is unreliable). Stored in the output (`diagnostics` /
+  `per_model_diagnostics`) and printed after each fit.
+- Typo guard on `Fitter` config: assigning an unknown public attribute (e.g.
+  `f.bmaa = True` instead of `f.bma`) now raises `AttributeError` instead of
+  silently creating a dead attribute and running the wrong kind of fit.
 
 ### Changed
 - Bayesian Model Averaging weights: the evidence softmax now shifts by the

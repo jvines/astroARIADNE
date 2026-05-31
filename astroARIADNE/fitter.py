@@ -1254,6 +1254,24 @@ class Fitter:
         out['norm'] = self.norm
         out['model_grid'] = self.grid
         out['av_law'] = av_law
+
+        # Fit-health diagnostics (additive; never changes the fit). Grid axes
+        # come from the interpolator the fit used (free, no reload); the
+        # grid-edge check is skipped gracefully if they can't be obtained.
+        grid_axes = None
+        _interp = globals().get('interpolator', None)
+        if _interp is not None and hasattr(_interp, 'index_columns'):
+            try:
+                ii = _interp.index_columns          # (logg, teff, z)
+                grid_axes = {'logg': ii[0], 'teff': ii[1], 'z': ii[2]}
+            except Exception:
+                grid_axes = None
+        out['diagnostics'] = self._fit_health(
+            results, param_samples=out['posterior_samples'],
+            grid_axes=grid_axes)
+        if self.verbose:
+            self._print_fit_health(out['diagnostics'], self.grid)
+
         if not self.bma:
             with open(log_out, 'w') as logfile:
                 logfile.write(logdat)
@@ -1595,6 +1613,14 @@ class Fitter:
         for o in model_posteriors:
             evidences.append(o['global_lnZ'])
             post_samples.append(o['posterior_samples'])
+        # Per-model fit-health diagnostics + evidence errors (additive).
+        per_model_diag = {}
+        evidence_err = {}
+        for o in model_posteriors:
+            g = o['model_grid']
+            if 'diagnostics' in o:
+                per_model_diag[g] = o['diagnostics']
+            evidence_err[g] = o.get('global_lnZerr', float('nan'))
         # Convert evidences to weights/probabilities via a softmax of the
         # log-evidences. Shift by the MAX (not the min) so the largest exponent
         # is 0: softmax is shift-invariant, so the weights are unchanged in the
@@ -1654,6 +1680,14 @@ class Fitter:
         out['evidences'] = dict()
         for e, g in zip(evidences, grids):
             out['evidences'][g] = e
+        out['evidences_err'] = evidence_err
+        out['per_model_diagnostics'] = per_model_diag
+        # Surface per-grid fit health to the user.
+        if per_model_diag:
+            print(colored('\t\t*** PER-GRID FIT HEALTH ***', c))
+            for g in grids:
+                if g in per_model_diag:
+                    Fitter._print_fit_health(per_model_diag[g], g)
         return out
 
     @staticmethod
@@ -1664,6 +1698,96 @@ class Fitter:
         lnz = results.logz[-1]
         lnzer = results.logzerr[-1]
         return lnz, lnzer, posterior_samples
+
+    @staticmethod
+    def _fit_health(results, param_samples=None, grid_axes=None,
+                    edge_frac=0.02):
+        """Compute additive fit-health diagnostics for a single grid fit.
+
+        Purely diagnostic — it never alters the fit. Returns a dict with:
+
+        - ``logz`` / ``logzerr`` : the grid's log-evidence and its error.
+        - ``eff_samples`` : Kish effective sample size of the importance
+          weights (a low value flags an under-sampled / unreliable posterior).
+        - ``dlogz_final`` : the last log-evidence increment (a convergence
+          proxy; small means the run had stopped accumulating evidence).
+        - ``edge_flags`` : a list of teff/logg/z parameters whose posterior
+          median sits within ``edge_frac`` of a grid boundary, i.e. the fit is
+          pegged against the edge of the model grid and the (tight) error bar
+          is not trustworthy. Empty when ``grid_axes`` is unavailable.
+
+        Parameters
+        ----------
+        results : dynesty results
+            The sampler results object.
+        param_samples : dict, optional
+            ``{param_name: samples}`` (e.g. the saved ``posterior_samples``),
+            used for the grid-edge check.
+        grid_axes : dict, optional
+            ``{'teff': arr, 'logg': arr, 'z': arr}`` of grid node values.
+        edge_frac : float
+            Fraction of the grid span that counts as "at the edge".
+        """
+        diag = {}
+        try:
+            diag['logz'] = float(results.logz[-1])
+            diag['logzerr'] = float(results.logzerr[-1])
+        except Exception:
+            diag['logz'] = float('nan')
+            diag['logzerr'] = float('nan')
+        try:
+            logwt = np.asarray(results['logwt'])
+            w = np.exp(logwt - results.logz[-1])
+            w = w / w.sum()
+            diag['eff_samples'] = int(round(1.0 / np.sum(w ** 2)))
+        except Exception:
+            diag['eff_samples'] = None
+        try:
+            diag['dlogz_final'] = float(results.logz[-1] - results.logz[-2])
+        except Exception:
+            diag['dlogz_final'] = None
+
+        flags = []
+        if param_samples is not None and grid_axes is not None:
+            for p, axis in grid_axes.items():
+                s = param_samples.get(p)
+                if s is None:
+                    continue
+                s = np.atleast_1d(np.asarray(s, dtype=float))
+                if s.size < 2:          # fixed parameter, nothing to flag
+                    continue
+                axis = np.asarray(axis, dtype=float)
+                lo, hi = float(axis.min()), float(axis.max())
+                span = hi - lo
+                if span <= 0:
+                    continue
+                med = float(np.median(s))
+                if med <= lo + edge_frac * span:
+                    flags.append({'param': p, 'edge': 'lower',
+                                  'median': med, 'bound': lo})
+                elif med >= hi - edge_frac * span:
+                    flags.append({'param': p, 'edge': 'upper',
+                                  'median': med, 'bound': hi})
+        diag['edge_flags'] = flags
+        return diag
+
+    @staticmethod
+    def _print_fit_health(diag, grid_name=None):
+        """Print a one-line fit-health summary plus any grid-edge warnings."""
+        tag = f' — {grid_name}' if grid_name else ''
+        lnz = diag.get('logz', float('nan'))
+        lnzerr = diag.get('logzerr', float('nan'))
+        neff = diag.get('eff_samples')
+        neff_s = 'n/a' if neff is None else str(neff)
+        print(colored(
+            f'\t\t\tFit health{tag}: log Z = {lnz:.3f} +/- {lnzerr:.3f} | '
+            f'eff. samples {neff_s}', 'cyan'))
+        for f in diag.get('edge_flags', []):
+            print(colored(
+                f"\t\t\t  WARNING: {f['param']} posterior pegged at the "
+                f"{f['edge']} grid edge (median {f['median']:.4g}, "
+                f"bound {f['bound']:.4g}) — error bar may be unreliable.",
+                'yellow'))
 
     @staticmethod
     def _get_mass(logg, rad):
