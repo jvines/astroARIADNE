@@ -56,10 +56,12 @@ def test_fm07_cache_key_stable():
 
 
 def test_unknown_law_still_rejected():
+    # InputError.__raise__ calls sys.exit() (SystemExit derives from
+    # BaseException, not Exception), so catch BaseException here.
     raised = False
     try:
         _set_law('nonsense_law')
-    except Exception:
+    except BaseException:
         raised = True
     assert raised, 'unknown law must raise'
 
