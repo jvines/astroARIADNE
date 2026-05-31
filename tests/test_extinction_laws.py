@@ -3,8 +3,17 @@
 Runs as a plain script (the project has no pytest dependency):
     python tests/test_extinction_laws.py
 """
+import os
+import sys
+
+# Ensure we test the source tree, not any stale installed build.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 
+import astroARIADNE as _aa
+assert 'site-packages' not in _aa.__file__, (
+    f'testing the installed build, not source: {_aa.__file__}')
 from astroARIADNE.fitter import Fitter
 from astroARIADNE.sed_library import _ext_attenuation_base
 

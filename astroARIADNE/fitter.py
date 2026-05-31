@@ -158,6 +158,47 @@ class Fitter:
         # (the dominant cost of a BMA run). Lower is more precise but slower;
         # the isochrone fit itself is parallelised across ``threads``.
         self.isochrone_dlogz = 0.01
+        # Activate the typo guard now that all default attributes exist. After
+        # this, assigning a *new* public attribute (e.g. ``f.bmaa = True`` for
+        # ``f.bma``) raises instead of silently creating a dead attribute and
+        # running the wrong kind of fit. See ``__setattr__``.
+        self._guard_active = True
+
+    # Public attributes set after __init__ (by initialize(), the fit methods
+    # and the BMA worker). Allow-listed so the typo guard does not reject
+    # ARIADNE's own internal writes.
+    _ALLOWED_DYNAMIC = frozenset({
+        'coordinator', 'default_priors', 'fixed', 'ndim', 'out',
+        'prior_sources', 'priors', 'sampler', 'start',
+    })
+
+    def __setattr__(self, name, value):
+        """Guard against silently mistyped config attributes.
+
+        Private (``_``-prefixed) names, declared ``@property`` setters, the
+        public attributes created in ``__init__``, and the known post-init
+        attributes (``_ALLOWED_DYNAMIC``) are all allowed. A *new* public name
+        assigned after construction (e.g. ``f.bmaa`` for ``f.bma``) raises
+        ``AttributeError`` rather than becoming a dead attribute. The guard is
+        inactive until ``_guard_active`` is set at the end of ``__init__`` so
+        construction, copying and unpickling (which start from a fresh
+        ``__dict__``) are unaffected.
+        """
+        if (name.startswith('_')
+                or not self.__dict__.get('_guard_active', False)
+                or name in self.__dict__
+                or name in self._ALLOWED_DYNAMIC
+                or isinstance(getattr(type(self), name, None), property)):
+            super().__setattr__(name, value)
+            return
+        raise AttributeError(
+            f"{type(self).__name__!r} has no configuration attribute "
+            f"{name!r}. Check for a typo (e.g. 'bma' not 'bmaa'). Valid "
+            f"config options: av_law, bma, estimate_age, estimate_logg, "
+            f"experimental, grid, isochrone_dlogz, models, n_grid_jobs, "
+            f"n_samples, norm, out_folder, prior_setup, sequential, setup, "
+            f"star, verbose, walks."
+        )
 
     @property
     def star(self):
