@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0] - 2026-05-31
 
 ### Added
+- Regime-aware priors for M dwarfs. Cool stars (Gaia BP-RP > 1.8, or Teff
+  < 4000 K) now get an M/late-K uniform Teff prior instead of the FGK
+  population prior, and cool dwarfs (absolute G > 8, i.e. on the main sequence)
+  a tight `N(5.0, 0.25)` log g prior. This fixes a systematic in which M dwarfs
+  were pulled ~600 K hot into a spurious hot-giant solution (GJ 1214 with
+  default priors: log g 1.7 -> 5.0, Teff 3800 -> 2940 K). Detection is
+  colour-primary because M dwarfs frequently lack a Gaia Teff/luminosity
+  estimate; spectroscopic priors still take precedence.
 - `Star.from_gaia(source_id)` and `Star.from_name(name)` classmethods that
   resolve coordinates (Gaia DR3 TAP / Simbad name resolution) and build the
   `Star` — the documented "I have a Gaia ID" entry point no longer requires

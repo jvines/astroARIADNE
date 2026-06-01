@@ -556,6 +556,59 @@ class Fitter:
         ndim -= self.coordinator.sum()
         return int(ndim)
 
+    @staticmethod
+    def _gaia_color_absmag(star):
+        """Gaia BP-RP colour and absolute G magnitude from the star.
+
+        Returns ``(bp_rp, abs_g)``, either being ``None`` when its inputs are
+        missing (no Gaia photometry, or no parallax/distance). This is the robust
+        cool-dwarf signal: M dwarfs almost always have Gaia BP/RP photometry even
+        when they lack a Gaia Teff/luminosity estimate.
+        """
+        try:
+            fn = list(star.filter_names)
+            mags = star.mags
+            bp = mags[fn.index('GaiaDR2v2_BP')]
+            g = mags[fn.index('GaiaDR2v2_G')]
+            rp = mags[fn.index('GaiaDR2v2_RP')]
+        except (ValueError, AttributeError, KeyError, IndexError, TypeError):
+            return None, None
+        bp_rp = (bp - rp) if (bp and rp) else None
+        abs_g = None
+        dist = getattr(star, 'dist', None)
+        if g and dist and dist > 0:
+            abs_g = g + 5.0 - 5.0 * np.log10(dist)
+        return bp_rp, abs_g
+
+    @staticmethod
+    def _cool_dwarf_flags(temp, lum, bp_rp=None, abs_g=None):
+        """Classify a star for regime-aware priors.
+
+        Returns ``(is_cool, is_cool_dwarf)``. The FGK population priors mishandle
+        M dwarfs (Teff pulled ~600 K hot into a hot-giant degeneracy; logg left
+        wide), so cool stars get an M/late-K Teff prior and cool *dwarfs* a tight
+        main-sequence logg prior.
+
+        Primary signal is Gaia BP-RP colour (>1.8 -> M/late-K) and absolute G
+        magnitude (>8 -> on the main sequence, excluding red giants), because M
+        dwarfs frequently lack the Gaia Teff/luminosity estimates. Falls back to
+        the Teff estimate (< 4000 K) and luminosity (< 0.5 Lsun) when colour /
+        parallax are unavailable (e.g. non-Gaia input).
+        """
+        if bp_rp is not None:
+            is_cool = bp_rp > 1.8
+        else:
+            # temp > 0 (not just != 0) so the -1 / -999 "no Gaia data" sentinels
+            # are treated as unknown, NOT as cool (-1 < 4000 would misfire).
+            is_cool = temp is not None and temp > 0 and temp < 4000
+        if abs_g is not None:
+            dwarfish = abs_g > 8.0
+        elif lum is not None and lum > 0:
+            dwarfish = lum < 0.5
+        else:
+            dwarfish = False
+        return is_cool, bool(is_cool and dwarfish)
+
     def _default_priors(self):
         global order
         defaults = dict()
@@ -581,6 +634,16 @@ class Fitter:
                     spec.get(field) is not None and
                     spec.get(field + '_err') is not None)
 
+        # Regime detection for cool stars: the FGK population priors are wrong
+        # for M dwarfs (Teff pulled ~600 K hot into a hot-giant degeneracy; logg
+        # left wide open). Use the Gaia Teff/luminosity estimates to switch in
+        # M-dwarf-appropriate Teff/logg priors below. Spectroscopic priors, when
+        # present, still take precedence over these.
+        _bp_rp, _abs_g = self._gaia_color_absmag(self.star)
+        is_cool, is_cool_dwarf = self._cool_dwarf_flags(
+            getattr(self.star, 'temp', None), getattr(self.star, 'lum', None),
+            _bp_rp, _abs_g)
+
         # Teff: hot-star grids (TLUSTY) need a wide uniform prior — the FGK
         # population prior assigns ~zero probability above ~12000 K, so it
         # cannot reach the O/B regime. Applied for standalone TLUSTY fits.
@@ -594,6 +657,11 @@ class Fitter:
                                        scale=spec['teff_err'])
             self.prior_sources['teff'] = spec_source
             logger.info('Using %s Teff prior (star-specific)', spec_source)
+        elif is_cool:
+            # M / late-K dwarf range; uniform avoids imposing the FGK centre.
+            defaults['teff'] = st.uniform(loc=2300, scale=1900)  # 2300-4200 K
+            self.prior_sources['teff'] = 'mdwarf_uniform'
+            logger.info('Using cool-star uniform Teff prior (Gaia Teff < 4000 K)')
         else:
             with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
                 defaults['teff'] = pickle.load(jar)
@@ -606,6 +674,14 @@ class Fitter:
                                        scale=spec['logg_err'])
             self.prior_sources['logg'] = spec_source
             logger.info('Using %s logg prior (star-specific)', spec_source)
+        elif is_cool_dwarf:
+            # M dwarfs sit tightly on the main sequence; this replaces both the
+            # wide uniform default and the (typically uninformative, ~3 dex)
+            # isochrone estimate, which is what let broadband fits drift to the
+            # hot-giant solution.
+            defaults['logg'] = st.norm(loc=5.0, scale=0.25)
+            self.prior_sources['logg'] = 'mdwarf_main_sequence'
+            logger.info('Using M-dwarf main-sequence logg prior N(5.0, 0.25)')
         elif self.star.get_logg:
             defaults['logg'] = st.norm(
                 loc=self.star.logg, scale=self.star.logg_e)
