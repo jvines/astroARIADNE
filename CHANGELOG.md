@@ -19,9 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   light correction — in `out['binary_dilution']`, and flags a prior-dominated
   secondary Teff. A single contrast band pins the dilution but leaves teff2
   weakly constrained; two bands of differing colour recover the secondary
-  (validated to ~1% on synthetic data). Single-grid only for now; BMA-binary,
-  the single-vs-binary evidence comparison and the binary SED plot are
-  follow-ups. Single-star fits are byte-identical (the mode is fully gated).
+  (validated to ~1% on synthetic data). Works single-grid or with BMA (the
+  dilution is then grid-systematics-aware). Automatically reports a fair
+  *SED-only* single-vs-binary Bayesian evidence comparison in
+  `out['binary_vs_single']` — does the photometry alone favour two temperatures,
+  independent of the contrast detection (delta_lnZ > 0 favours the binary) — and
+  the SED plot overlays both components and their sum. Single-star fits are
+  byte-identical (the mode is fully gated).
 - Regime-aware priors for M dwarfs. Cool stars (Gaia BP-RP > 1.8, or Teff
   < 4000 K) now get an M/late-K uniform Teff prior instead of the FGK
   population prior, and cool dwarfs (absolute G > 8, i.e. on the main sequence)

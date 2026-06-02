@@ -59,10 +59,6 @@ def test_gate_requires_no_norm():
     _gate_raises(_gate_fitter(norm=True), 'norm=False')
 
 
-def test_gate_rejects_bma():
-    _gate_raises(_gate_fitter(bma=True), 'BMA')
-
-
 def test_gate_requires_contrast():
     _gate_raises(_gate_fitter(contrast=None), 'flux-ratio')
 

@@ -183,7 +183,7 @@ class Fitter:
     # ARIADNE's own internal writes.
     _ALLOWED_DYNAMIC = frozenset({
         'coordinator', 'default_priors', 'fixed', 'ndim', 'out',
-        'prior_sources', 'priors', 'sampler', 'start',
+        'prior_sources', 'priors', 'sampler', 'start', 'binary_comparison',
     })
 
     def __setattr__(self, name, value):
@@ -509,6 +509,10 @@ class Fitter:
             host[i] = f1 / (f1 + f2)
         out['binary_dilution'] = {str(b): host[:, j]
                                   for j, b in enumerate(bands)}
+        # Also expose each band's dilution as a posterior trace so the BMA
+        # averager (which iterates posterior_samples) folds it across grids.
+        for j, b in enumerate(bands):
+            out['posterior_samples'][f'dilution_{b}'] = host[:, j]
         frac = float(np.std(t2) / np.median(t2)) if np.median(t2) else np.inf
         out['binary_secondary_unconstrained'] = bool(frac > 0.15)
         if self.verbose:
@@ -523,6 +527,95 @@ class Fitter:
                     '(sigma/Teff > 15%); the dilution is reliable but teff2 is '
                     'weakly constrained. Add a second contrast band of '
                     'differing colour to constrain it.', 'yellow'))
+
+    def _evidence_fit(self, binary, grids, subfolder):
+        """Run an auxiliary SED-only fit (no contrast) and return per-grid
+        log-evidence. Used by the model comparison; reuses this fit's star,
+        sampler settings and primary priors. For ``binary=True`` the degenerate
+        (contrast-free) binary is allowed via ``_skip_contrast_gate``.
+        """
+        sub = Fitter()
+        sub.star = self.star
+        sub.setup = list(self._setup)
+        sub.norm = False
+        sub._av_law = self._av_law            # resolved law (bypass setter)
+        sub.binary = binary
+        sub._skip_contrast_gate = True        # SED-only, no contrast term
+        sub.estimate_logg = self.estimate_logg
+        sub.estimate_age = False              # not needed for the evidence
+        sub.n_samples = self.n_samples
+        sub.n_grid_jobs = self.n_grid_jobs
+        sub.prior_setup = {
+            k: v for k, v in self.prior_setup.items()
+            if k in ('teff', 'logg', 'z', 'dist', 'rad', 'Av', 'norm')}
+        sub.out_folder = self.out_folder.rstrip('/') + '/' + subfolder
+        sub.verbose = False
+        if self._bma:
+            sub.bma = True
+            sub.models = grids
+        else:
+            sub.bma = False
+            sub.grid = self._grid
+        sub.initialize()
+        if self._bma:
+            sub.fit_bma()
+        else:
+            sub.fit_dynesty()
+        ev = {}
+        for g in grids:
+            try:
+                with open(f'{sub.out_folder}/{g}_out.pkl', 'rb') as fh:
+                    ev[g] = float(pickle.load(fh)['global_lnZ'])
+            except (FileNotFoundError, KeyError):
+                pass
+        return ev
+
+    def _binary_model_comparison(self):
+        """Does the broadband SED alone favour a binary? Reports, per grid, the
+        SED-only Bayesian evidence of the two-component vs single-star model
+        (``delta_lnZ > 0`` favours the binary).
+
+        BOTH models condition on the same data -- the photometry, NOT the
+        contrast. Including the contrast would trivially favour the binary (it
+        is a companion detection), so this asks the separate, well-posed
+        question of whether the SED shows two temperatures on its own. If
+        ``delta_lnZ <= 0`` the secondary is established by the contrast rather
+        than the SED, so trust the dilution but not the SED-derived teff2. The
+        contrast still does its job in the main fit (the dilution). Roughly
+        triples the run time; a failure here is logged, not fatal.
+        """
+        grids = list(self._bma_models) if self._bma else [self._grid]
+        print(colored('\t\t*** SED-ONLY BINARY-vs-SINGLE EVIDENCE ***', 'cyan'))
+        try:
+            z_single = self._evidence_fit(False, grids, 'single_star_comparison')
+            z_binary = self._evidence_fit(True, grids, 'binary_sed_comparison')
+        except Exception as e:
+            print(colored(f'\t\t\tmodel comparison failed ({e}); the binary '
+                          f'fit is unaffected.', 'yellow'))
+            return
+
+        comp = {}
+        for g in grids:
+            if g not in z_binary or g not in z_single:
+                continue
+            zb, zs = z_binary[g], z_single[g]
+            comp[g] = {'lnZ_binary_sed': zb, 'lnZ_single': zs,
+                       'delta_lnZ': zb - zs}
+            verdict = ('SED favours binary' if zb - zs > 0
+                       else 'SED alone does not require binary')
+            print(colored(f'\t\t\t{g}: ln Z  binary {zb:.2f}  single {zs:.2f}'
+                          f'  ->  Delta {zb - zs:+.2f}  ({verdict})', 'cyan'))
+        self.binary_comparison = comp
+        for g, c in comp.items():
+            p = f'{self.out_folder}/{g}_out.pkl'
+            try:
+                with open(p, 'rb') as fh:
+                    o = pickle.load(fh)
+                o['binary_vs_single'] = c
+                with open(p, 'wb') as fh:
+                    pickle.dump(o, fh)
+            except FileNotFoundError:
+                pass
 
     def initialize(self):
         """Initialize the fitter.
@@ -550,17 +643,17 @@ class Fitter:
             if self.norm:
                 raise ValueError('binary mode requires norm=False (explicit '
                                  'rad/dist), not the normalisation parametrisation.')
-            if self._bma:
-                raise ValueError('binary mode is not yet supported with BMA; '
-                                 'run a single grid (bma=False, set grid=...).')
-            if not self.contrast:
+            if not self.contrast and not getattr(self, '_skip_contrast_gate',
+                                                  False):
                 raise ValueError('binary mode requires at least one flux-ratio '
                                  'constraint: Fitter.add_contrast(filter, '
                                  'delta_mag, sigma) or set Fitter.contrast.')
             if self.star.dist is None or self.star.dist == -1:
                 raise ValueError('binary mode requires a parallax-based distance '
                                  '(shared between the two components).')
-            contrast = self._prep_contrast()
+            # contrast is optional only for the internal SED-only comparison fit
+            # (_skip_contrast_gate); a normal binary fit always has one.
+            contrast = self._prep_contrast() if self.contrast else None
         # For a standalone fit with a grid of limited wavelength coverage,
         # exclude out-of-coverage bands (e.g. Coelho's extrapolated IR). Not
         # applied in BMA, where every grid must share the same band set.
@@ -1092,6 +1185,8 @@ class Fitter:
     def fit(self):
         """Run fitting routine."""
         self.fit_dynesty()
+        if self.binary:
+            self._binary_model_comparison()
         elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time,
             self.out_folder, self._engine, self.norm, )
@@ -1153,6 +1248,9 @@ class Fitter:
         avgd = self.bayesian_model_average(outs, self._grids, self._norm,
                                            self.n_samples, c)
         self.save_bma(avgd)
+
+        if self.binary:
+            self._binary_model_comparison()
 
         elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time, self.out_folder,
@@ -1462,6 +1560,7 @@ class Fitter:
         out['norm'] = self.norm
         out['model_grid'] = self.grid
         out['av_law'] = av_law
+        out['binary'] = self.binary
 
         # Fit-health diagnostics (additive; never changes the fit). Grid axes
         # come from the interpolator the fit used (free, no reload); the
@@ -1538,6 +1637,11 @@ class Fitter:
             else:
                 out['weighted_samples'][par] = self.fixed[i]
                 out['weighted_average'][par] = self.fixed[i]
+        # Carry over the binary per-band dilution traces (not in `order`).
+        for par in avgd['weighted_samples']:
+            if par.startswith('dilution_'):
+                out['weighted_samples'][par] = avgd['weighted_samples'][par]
+                out['weighted_average'][par] = avgd['weighted_average'][par]
 
         # If normalization constant was fitted, create a distribution of radii.
 
@@ -1762,6 +1866,7 @@ class Fitter:
         out['norm'] = self.norm
         out['engine'] = 'Bayesian Model Averaging'
         out['av_law'] = av_law
+        out['binary'] = self.binary
 
         # Spectral type
 
@@ -1788,8 +1893,14 @@ class Fitter:
             logfile.write(synthdat)
         pickle.dump(out, open(out_file, 'wb'))
         self.out = out
+        # NetCDF is an optional ecosystem-interop export (needs arviz). Don't
+        # let a missing optional dependency or an export hiccup discard the
+        # primary BMA.pkl result that was just written.
         nc_file = f'{self.out_folder}/ariadne_result.nc'
-        self.to_netcdf(nc_file)
+        try:
+            self.to_netcdf(nc_file)
+        except Exception as e:
+            logger.warning('NetCDF export skipped (%s); BMA.pkl is written.', e)
 
     @staticmethod
     def bayesian_model_average(outputs, grids, norm, nsamples, c='white'):

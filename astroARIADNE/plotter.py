@@ -133,6 +133,7 @@ class SEDPlotter:
             self.coordinator = out['coordinator']
             self.fixed = out['fixed']
             self.norm = out['norm']
+            self.binary = out.get('binary', False)
             if model is None:
                 if self.engine != 'Bayesian Model Averaging':
                     self.grid = out['model_grid']
@@ -162,6 +163,9 @@ class SEDPlotter:
                         'dist', 'rad', 'Av',
                     ]
                 )
+                if self.binary:
+                    self.order = np.append(self.order,
+                                           ['teff2', 'logg2', 'rad2'])
             else:
                 self.order = np.array(
                     ['teff', 'logg', 'z', 'norm', 'Av'])
@@ -221,17 +225,17 @@ class SEDPlotter:
             # Calculate best fit model.
             model_samples = model_grid(theta_samples, filters, wave,
                                        self.interpolator, self.norm,
-                                       self.av_law)
+                                       self.av_law, binary=self.binary)
             model_average = model_grid(theta_average, filters, wave,
                                        self.interpolator, self.norm,
-                                       self.av_law)
+                                       self.av_law, binary=self.binary)
             if self.irx:
                 irx_model_sam = model_grid(theta_samples, irx_filt, irx_wave,
                                            self.interpolator, self.norm,
-                                           self.av_law)
+                                           self.av_law, binary=self.binary)
                 irx_model_avg = model_grid(theta_average, irx_filt, irx_wave,
                                            self.interpolator, self.norm,
-                                           self.av_law)
+                                           self.av_law, binary=self.binary)
             if method == 'averaged':
                 self.theta = theta_average
                 self.model = model_average
@@ -609,7 +613,7 @@ class SEDPlotter:
 
         residuals, errors = get_residuals(
             self.theta, flxs, errs, wave, filters, self.interpolator, self.norm,
-            self.av_law)
+            self.av_law, binary=self.binary)
 
         norm_res = residuals / errors
 
@@ -790,7 +794,30 @@ class SEDPlotter:
             Av = self.theta[4]
 
         # SED plot.
-        if self.grid == 'phoenix':
+        if self.binary:
+            # Two-component continuous spectrum: sum the components (sharing
+            # dist, z and Av) and overlay each. Reuses the per-grid spectrum
+            # fetcher; if the grid has no cached spectra it draws nothing (the
+            # band-flux model points are still shown).
+            norm2 = (self.theta[8] / dist) ** 2     # (rad2/dist)^2, dist solRad
+            gk = self.grid.lower()
+            s1 = self._get_raw_spectrum(gk, self.theta[0], self.theta[1],
+                                        self.theta[2])
+            s2 = self._get_raw_spectrum(gk, self.theta[6], self.theta[7],
+                                        self.theta[2])
+            if s1 is not None and s2 is not None:
+                w, f1 = s1
+                _, f2 = s2
+                ext = self.av_law(w * 1e4, Av, Rv)
+                comp1 = apply(ext, f1 * norm) * w
+                comp2 = apply(ext, f2 * norm2) * w
+                ax.plot(w, comp1, lw=0.8, ls='--', color=self.model_color,
+                        alpha=0.55, zorder=0)
+                ax.plot(w, comp2, lw=0.8, ls=':', color='tab:red',
+                        alpha=0.6, zorder=0)
+                ax.plot(w, comp1 + comp2, lw=1.25, color=self.model_color,
+                        zorder=0)
+        elif self.grid == 'phoenix':
             cached = self._load_from_cache('phoenix')
             if cached is not None and not self.irx:
                 new_w, brf = cached
