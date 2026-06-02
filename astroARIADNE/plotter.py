@@ -406,56 +406,56 @@ class SEDPlotter:
             self.theta[:] = orig_theta
 
     def _plot_bma_gray_spectra(self, ax, n_samples=100):
-        """Draw gray sampled model spectra weighted by BMA weights."""
+        """Draw gray sampled model spectra to show the posterior uncertainty.
+
+        For BMA the draws are spread across grids by their weights; for a single
+        grid they are drawn straight from the posterior. For a binary fit each
+        draw is the summed two-component model (primary + secondary), matching
+        the best-fit overlay. Component spectra are fetched per draw -- the HDF5
+        cache makes the lookups cheap.
+        """
         rng = np.random.default_rng()
         Rv = 3.1
 
-        for model_name, weight in self.out['weights'].items():
-            if weight < 1e-4:
-                continue
+        # (grid name, weight, posterior-sample dict) sources to draw from.
+        if 'weights' in self.out and 'originals' in self.out:
+            models = [(m, w, self.out['originals'][m])
+                      for m, w in self.out['weights'].items() if w >= 1e-4]
+        else:
+            models = [(self.grid, 1.0, self.out['posterior_samples'])]
+
+        def _sv(v, i):
+            # fixed parameters are stored as scalars, free ones as arrays
+            return v[i] if np.ndim(v) else v
+
+        for model_name, weight, samples in models:
             n_model = max(1, round(weight * n_samples))
-            samples = self.out['originals'][model_name]
-            n_avail = len(samples['teff'])
-            indices = rng.choice(n_avail, size=n_model, replace=True)
-
+            indices = rng.choice(len(samples['teff']), size=n_model,
+                                 replace=True)
             self.star.load_grid(model_name)
-
-            # Snap samples to grid points and deduplicate
-            grouped = {}  # (teff_grid, logg_grid, z_grid) -> [(norm, Av)]
-            unique_teff = np.unique(self.star.teff)
-            unique_logg = np.unique(self.star.logg)
-            unique_z = np.unique(self.star.z)
-
             for idx in indices:
-                t_snap = unique_teff[
-                    np.argmin(np.abs(unique_teff - samples['teff'][idx]))]
-                g_snap = unique_logg[
-                    np.argmin(np.abs(unique_logg - samples['logg'][idx]))]
-                z_snap = unique_z[
-                    np.argmin(np.abs(unique_z - samples['z'][idx]))]
-
+                z_i = _sv(samples['z'], idx)
+                Av = _sv(samples['Av'], idx)
                 if not self.norm:
-                    rad = samples['rad'][idx]
-                    dist = samples['dist'][idx] * u.pc.to(u.solRad)
-                    norm_val = (rad / dist) ** 2
-                    Av_val = samples['Av'][idx]
+                    dist = _sv(samples['dist'], idx) * u.pc.to(u.solRad)
+                    norm1 = (_sv(samples['rad'], idx) / dist) ** 2
                 else:
-                    norm_val = samples['norm'][idx]
-                    Av_val = samples['Av'][idx]
-
-                key = (t_snap, g_snap, z_snap)
-                grouped.setdefault(key, []).append((norm_val, Av_val))
-
-            for (t, g, z_val), param_list in grouped.items():
-                result = self._get_raw_spectrum(model_name, t, g, z_val)
-                if result is None:
+                    norm1 = _sv(samples['norm'], idx)
+                s1 = self._get_raw_spectrum(model_name, _sv(samples['teff'], idx),
+                                            _sv(samples['logg'], idx), z_i)
+                if s1 is None:
                     continue
-                wave, flux_raw = result
-                for norm_val, Av in param_list:
-                    ext = self.av_law(wave * 1e4, Av, Rv)
-                    flx = apply(ext, flux_raw.copy()) * norm_val * wave
-                    ax.plot(wave, flx, color='gray', alpha=0.15,
-                            lw=0.5, zorder=-1)
+                wave, f1 = s1
+                ext = self.av_law(wave * 1e4, Av, Rv)
+                flx = apply(ext, f1.copy()) * norm1 * wave
+                if self.binary:
+                    s2 = self._get_raw_spectrum(
+                        model_name, _sv(samples['teff2'], idx),
+                        _sv(samples['logg2'], idx), z_i)
+                    if s2 is not None:
+                        norm2 = (_sv(samples['rad2'], idx) / dist) ** 2
+                        flx = flx + apply(ext, s2[1].copy()) * norm2 * wave
+                ax.plot(wave, flx, color='gray', alpha=0.15, lw=0.5, zorder=-1)
 
         # Restore winning model's grid
         self.star.load_grid(self.grid)
@@ -627,7 +627,7 @@ class SEDPlotter:
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
 
-        if self.bma:
+        if self.bma or self.binary:
             self._plot_bma_gray_spectra(ax)
         self.SED(ax)
 
