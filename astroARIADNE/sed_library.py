@@ -16,6 +16,7 @@ _ORDER_CACHE = {}
 _EXT_CACHE = {}
 _TRANSFORM_CACHE = {}
 _GRID_CACHE = {}
+_BINARY_SWAP_CACHE = {}
 
 
 @nb.njit(cache=True, nogil=True)
@@ -193,21 +194,27 @@ def _free_param_transforms(prior_dict, coordinator, order):
     return transforms
 
 
-def _param_order(filts, use_norm):
+def _param_order(filts, use_norm, binary=False):
     """Return (and cache) the full parameter-name order for a filter set.
 
-    Memoised on ``use_norm`` with an identity check on ``filts`` to avoid
-    building ``tuple(filts)`` on every call.
+    Memoised on ``(use_norm, binary)`` with an identity check on ``filts`` to
+    avoid building ``tuple(filts)`` on every call.
+
+    For an unresolved-binary fit (``binary=True``, requires ``use_norm=False``)
+    a second stellar component is appended -- ``teff2, logg2, rad2`` -- sharing
+    the primary's ``z``, ``dist`` and ``Av``.
     """
-    cached = _ORDER_CACHE.get(use_norm)
+    cached = _ORDER_CACHE.get((use_norm, binary))
     if cached is not None and cached[0] is filts:
         return cached[1]
     if use_norm:
         base = ['teff', 'logg', 'z', 'norm', 'Av']
     else:
         base = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+    if binary:
+        base = base + ['teff2', 'logg2', 'rad2']
     order = np.array(base + [get_noise_name(f) + '_noise' for f in filts])
-    _ORDER_CACHE[use_norm] = (filts, order)
+    _ORDER_CACHE[(use_norm, binary)] = (filts, order)
     return order
 
 
@@ -267,7 +274,8 @@ def get_interpolated_flux(temp, logg, z, filts, interpolators):
     return _trilinear3d(logg, temp, z, ii0, ii1, ii2, cube)
 
 
-def model_grid(theta, filts, wave, interpolators, use_norm, av_law):
+def model_grid(theta, filts, wave, interpolators, use_norm, av_law,
+               binary=False):
     """Return the model grid in the selected filters.
 
     Parameters:
@@ -281,6 +289,10 @@ def model_grid(theta, filts, wave, interpolators, use_norm, av_law):
     use_norm : bool
         False for a full fit  (including radius and distance). True to fit
         for a normalization constant instead.
+    binary : bool
+        If True, sum a second stellar component (teff2, logg2, rad2 in
+        ``theta[6:9]``) sharing the primary's z, dist and Av. Requires
+        ``use_norm=False``.
 
     Returns
     -------
@@ -291,6 +303,9 @@ def model_grid(theta, filts, wave, interpolators, use_norm, av_law):
     """
     if use_norm:
         teff, logg, z, norm, Av = theta[:5]
+    elif binary:
+        teff, logg, z, dist, rad, Av, teff2, logg2, rad2 = theta[:9]
+        dist *= 4.435e+7  # Transform from pc to solRad
     else:
         teff, logg, z, dist, rad, Av = theta[:6]
         dist *= 4.435e+7  # Transform from pc to solRad
@@ -301,34 +316,71 @@ def model_grid(theta, filts, wave, interpolators, use_norm, av_law):
     atten = _ext_attenuation_base(wave, av_law) ** Av
     if use_norm:
         model = flux * atten * norm
+    elif binary:
+        # Two components share distance and extinction; the secondary uses the
+        # primary's z (co-natal). Both luminosities scale as (R/d)^2.
+        flux2 = get_interpolated_flux(teff2, logg2, z, filts, interpolators)
+        model = (flux * (rad / dist) ** 2
+                 + flux2 * (rad2 / dist) ** 2) * atten
     else:
         model = flux * atten * (rad / dist) ** 2
     return model
 
 
 def get_residuals(theta, flux, flux_er, wave, filts, interpolators, use_norm,
-                  av_law):
+                  av_law, binary=False):
     """Calculate residuals of the model."""
-    model = model_grid(theta, filts, wave, interpolators, use_norm, av_law)
-    start = 5 if use_norm else 6
+    model = model_grid(theta, filts, wave, interpolators, use_norm, av_law,
+                       binary=binary)
+    start = 9 if binary else (5 if use_norm else 6)
     inflation = theta[start:]
     residuals = flux - model
     errs = np.sqrt(flux_er ** 2 + inflation ** 2)
     return residuals, errs
 
 
+def contrast_loglike(theta, interpolators, contrast):
+    """Gaussian log-likelihood of the binary component magnitude difference(s).
+
+    ``contrast`` is ``(cfilts, dmags, sigmas)`` of equal length: ``cfilts`` a
+    stable array of ARIADNE filter names where a delta-magnitude was measured
+    (speckle/AO/Gaia), ``dmags`` the observed |m2 - m1| in each, ``sigmas`` the
+    uncertainties. The model delta-mag in a band is
+    ``2.5 |log10[(rad2/rad1)^2 * F2/F1]|`` -- distance and (shared) extinction
+    cancel in the flux ratio. ``abs`` makes it label-independent: the constraint
+    is on the brighter/fainter contrast, while teff ordering is handled in the
+    prior transform.
+    """
+    cfilts, dmags, sigmas = contrast
+    teff1, logg1, z = theta[0], theta[1], theta[2]
+    rad1 = theta[4]
+    teff2, logg2, rad2 = theta[6], theta[7], theta[8]
+    f1 = get_interpolated_flux(teff1, logg1, z, cfilts, interpolators)
+    f2 = get_interpolated_flux(teff2, logg2, z, cfilts, interpolators)
+    ratio = (rad2 / rad1) ** 2 * (f2 / f1)
+    dmag_model = 2.5 * np.abs(np.log10(ratio))
+    return -0.5 * (((dmag_model - dmags) / sigmas) ** 2).sum()
+
+
 def log_likelihood(theta, flux, flux_er, wave, filts, interpolators, use_norm,
-                   av_law):
+                   av_law, binary=False, contrast=None):
     """Calculate log likelihood of the model."""
     res, ers = get_residuals(theta, flux, flux_er, wave,
-                             filts, interpolators, use_norm, av_law)
+                             filts, interpolators, use_norm, av_law,
+                             binary=binary)
 
     lnl = fast_loglik(res, ers)
 
     if not np.isfinite(lnl):
         return -1e300
 
-    return -.5 * lnl
+    ll = -.5 * lnl
+    if binary and contrast is not None:
+        c = contrast_loglike(theta, interpolators, contrast)
+        if not np.isfinite(c):
+            return -1e300
+        ll += c
+    return ll
 
 
 @nb.njit(cache=True)
@@ -339,12 +391,47 @@ def fast_loglik(res, ers):
     return lnl
 
 
+def _binary_swap_indices(order, coordinator):
+    """Free-parameter indices of (teff, teff2, logg, logg2, rad, rad2).
+
+    Returns the positions in the free-parameter vector so the binary prior
+    transform can enforce teff1 >= teff2 by swapping the two component blocks.
+    ``None`` if any of the six is fixed (then ordering is not enforced).
+    Cached on the (order, coordinator) identity.
+    """
+    cached = _BINARY_SWAP_CACHE.get(id(order))
+    if (cached is not None and cached[0] is order
+            and cached[1] is coordinator):
+        return cached[2]
+    free = [par for fixed, par in zip(coordinator, order) if not fixed]
+    try:
+        idx = (free.index('teff'), free.index('teff2'),
+               free.index('logg'), free.index('logg2'),
+               free.index('rad'), free.index('rad2'))
+    except ValueError:
+        idx = None
+    _BINARY_SWAP_CACHE[id(order)] = (order, coordinator, idx)
+    return idx
+
+
 def prior_transform_dynesty(u, flux, flux_er, filts, prior_dict, coordinator,
-                            use_norm):
+                            use_norm, binary=False):
     """Transform the prior from the unit cube to the parameter space."""
     u2 = np.array(u)
-    order = _param_order(filts, use_norm)
+    order = _param_order(filts, use_norm, binary)
     transforms = _free_param_transforms(prior_dict, coordinator, order)
     for i, transform in enumerate(transforms):
         u2[i] = transform(u2[i])
+    if binary:
+        # Enforce teff1 >= teff2 by folding the prior (swap the two component
+        # blocks when out of order). This imposes the ordered prior at sampling
+        # time so dynesty never sees the label-switching bimodality, keeping the
+        # evidence (the BMA's currency) clean. Requires teff1/teff2, logg1/logg2
+        # and rad1/rad2 to share priors, which _default_priors guarantees.
+        idx = _binary_swap_indices(order, coordinator)
+        if idx is not None and u2[idx[1]] > u2[idx[0]]:
+            it, it2, ig, ig2, ir, ir2 = idx
+            u2[it], u2[it2] = u2[it2], u2[it]
+            u2[ig], u2[ig2] = u2[ig2], u2[ig]
+            u2[ir], u2[ir2] = u2[ir2], u2[ir]
     return u2

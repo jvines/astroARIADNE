@@ -44,6 +44,11 @@ except ModuleNotFoundError:
 
 set_start_method('fork', force=True)
 
+# Module-level globals consumed by the dynesty wrappers; set per fit in
+# Fitter.initialize. Defaults keep single-star fits free of binary state.
+binary = False
+contrast = None
+
 
 def _fm07_rv(wave, a_v, r_v=3.1):
     """Fitzpatrick & Massa (2007) extinction with the ARIADNE call signature.
@@ -146,6 +151,15 @@ class Fitter:
         self.prior_setup = None
         self.sequential = True
         self.experimental = False
+        # Unresolved-binary / SB2 mode (opt-in, off by default). When True the
+        # forward model sums two stellar components sharing distance, extinction
+        # and metallicity (teff2/logg2/rad2 added). REQUIRES a flux-ratio
+        # constraint -- ``contrast`` is a list of (filter_name, delta_mag,
+        # sigma) tuples (|m2 - m1| in an ARIADNE filter) -- or the secondary is
+        # degenerate. Use ``add_contrast`` or set ``contrast`` directly; the
+        # binary gate in initialize enforces no-norm + a parallax + >=1 contrast.
+        self.binary = False
+        self.contrast = None
         # Number of MCMC steps per proposal for dynesty's rwalk sampler.
         self.walks = 25
         # Number of BMA model grids to fit concurrently, each on a single
@@ -194,10 +208,10 @@ class Fitter:
         raise AttributeError(
             f"{type(self).__name__!r} has no configuration attribute "
             f"{name!r}. Check for a typo (e.g. 'bma' not 'bmaa'). Valid "
-            f"config options: av_law, bma, estimate_age, estimate_logg, "
-            f"experimental, grid, isochrone_dlogz, models, n_grid_jobs, "
-            f"n_samples, norm, out_folder, prior_setup, sequential, setup, "
-            f"star, verbose, walks."
+            f"config options: av_law, binary, bma, contrast, estimate_age, "
+            f"estimate_logg, experimental, grid, isochrone_dlogz, models, "
+            f"n_grid_jobs, n_samples, norm, out_folder, prior_setup, "
+            f"sequential, setup, star, verbose, walks."
         )
 
     @property
@@ -435,6 +449,81 @@ class Fitter:
             "band(s) from the fit: %s", self._grid, cov, len(dropped),
             ', '.join(dropped))
 
+    def add_contrast(self, filt, delta_mag, sigma):
+        """Add a flux-ratio (delta-magnitude) constraint for a binary fit.
+
+        ``filt`` is an ARIADNE filter name where a companion contrast was
+        measured (speckle/AO/Gaia), ``delta_mag`` = |m2 - m1| > 0 in that band,
+        ``sigma`` its 1-sigma uncertainty. At least one such constraint is
+        required to enable ``binary`` mode (the secondary is otherwise
+        degenerate). Multiple bands of differing colour additionally constrain
+        the secondary Teff.
+        """
+        if self.contrast is None:
+            self.contrast = []
+        self.contrast.append((str(filt), float(delta_mag), float(sigma)))
+
+    def _prep_contrast(self):
+        """Validate ``self.contrast`` and pack it into the (cfilts, dmags,
+        sigmas) array triple the likelihood consumes. The filter array is built
+        once so the grid-interpolation cache keys on its identity.
+        """
+        cols = set(self._interpolator.column_index.keys())
+        cfilts, dmags, sigmas = [], [], []
+        for filt, dmag, sig in self.contrast:
+            filt = str(filt)
+            if filt not in cols:
+                raise ValueError(
+                    f"contrast filter {filt!r} is not a column in the model "
+                    f"grid; use an ARIADNE filter name present in the grid.")
+            cfilts.append(filt)
+            dmags.append(float(dmag))
+            sigmas.append(float(sig))
+        return (np.array(cfilts), np.array(dmags), np.array(sigmas))
+
+    def _add_binary_dilution(self, out):
+        """Per-band host-flux fraction f1/(f1+f2) from the binary posterior.
+
+        This is the Furlan & Howell planet-radius dilution / third-light
+        correction -- the quantity exoplanet radius-vetting needs. Distance and
+        the shared extinction cancel in the ratio, so the dilution in a band is
+        ``f1*rad1^2 / (f1*rad1^2 + f2*rad2^2)``. Stored per fitted band in
+        ``out['binary_dilution']`` (posterior samples). Also flags the secondary
+        as prior-dominated when its Teff scatter is large -- a single-band
+        contrast typically leaves teff2 weakly constrained, in which case the
+        dilution is still reliable but teff2 should not be quoted.
+        """
+        ps = out['posterior_samples']
+        t1, g1, z, r1 = (np.asarray(ps['teff']), np.asarray(ps['logg']),
+                         np.asarray(ps['z']), np.asarray(ps['rad']))
+        t2, g2, r2 = (np.asarray(ps['teff2']), np.asarray(ps['logg2']),
+                      np.asarray(ps['rad2']))
+        bands = self.star.filter_names[self.star.filter_mask]
+        n = len(t1)
+        host = np.empty((n, len(bands)))
+        for i in range(n):
+            f1 = get_interpolated_flux(
+                t1[i], g1[i], z[i], bands, interpolator) * r1[i] ** 2
+            f2 = get_interpolated_flux(
+                t2[i], g2[i], z[i], bands, interpolator) * r2[i] ** 2
+            host[i] = f1 / (f1 + f2)
+        out['binary_dilution'] = {str(b): host[:, j]
+                                  for j, b in enumerate(bands)}
+        frac = float(np.std(t2) / np.median(t2)) if np.median(t2) else np.inf
+        out['binary_secondary_unconstrained'] = bool(frac > 0.15)
+        if self.verbose:
+            med = ', '.join(
+                f'{b} {np.median(host[:, j]):.3f}'
+                for j, b in enumerate(bands))
+            print(colored('\t\t\tBinary host-flux fraction (median): '
+                          + med, 'cyan'))
+            if out['binary_secondary_unconstrained']:
+                print(colored(
+                    '\t\t\tWARNING: secondary Teff is prior-dominated '
+                    '(sigma/Teff > 15%); the dilution is reliable but teff2 is '
+                    'weakly constrained. Add a second contrast band of '
+                    'differing colour to constrain it.', 'yellow'))
+
     def initialize(self):
         """Initialize the fitter.
 
@@ -444,12 +533,34 @@ class Fitter:
         up global variables.
         """
         global prior_dict, coordinator, fixed, order, star, use_norm, av_law
+        global binary, contrast
         self.start = time.time()
         err_msg = 'No star is detected. Please create an instance of Star.'
         if self.star is None:
             er = InputError(err_msg)
             er.log(self.out + '/output.log')
             er.__raise__()
+
+        # Unresolved-binary mode gate. The secondary is degenerate without a
+        # flux-ratio constraint, so refuse to run without one; it also needs the
+        # explicit rad/dist (non-norm) model and a parallax-based distance.
+        binary = bool(self.binary)
+        contrast = None
+        if binary:
+            if self.norm:
+                raise ValueError('binary mode requires norm=False (explicit '
+                                 'rad/dist), not the normalisation parametrisation.')
+            if self._bma:
+                raise ValueError('binary mode is not yet supported with BMA; '
+                                 'run a single grid (bma=False, set grid=...).')
+            if not self.contrast:
+                raise ValueError('binary mode requires at least one flux-ratio '
+                                 'constraint: Fitter.add_contrast(filter, '
+                                 'delta_mag, sigma) or set Fitter.contrast.')
+            if self.star.dist is None or self.star.dist == -1:
+                raise ValueError('binary mode requires a parallax-based distance '
+                                 '(shared between the two components).')
+            contrast = self._prep_contrast()
         # For a standalone fit with a grid of limited wavelength coverage,
         # exclude out-of-coverage bands (e.g. Coelho's extrapolated IR). Not
         # applied in BMA, where every grid must share the same band set.
@@ -471,6 +582,8 @@ class Fitter:
                     'dist', 'rad', 'Av'
                 ]
             )
+            if binary:
+                order = np.append(order, ['teff2', 'logg2', 'rad2'])
         else:
             order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
 
@@ -487,6 +600,8 @@ class Fitter:
         # or
         # teff, logg, z, norm, Av, noise
         npars = 6 if not self.norm else 5
+        if binary:
+            npars += 3  # teff2, logg2, rad2
         npars += self.star.used_filters.sum()
         npars = int(npars)
         self.coordinator = np.zeros(npars)  # 1 for fixed params
@@ -552,6 +667,8 @@ class Fitter:
     def get_ndim(self):
         """Calculate number of dimensions."""
         ndim = 6 if not self.norm else 5
+        if self.binary:
+            ndim += 3  # teff2, logg2, rad2
         ndim += self.star.used_filters.sum()
         ndim -= self.coordinator.sum()
         return int(ndim)
@@ -826,6 +943,17 @@ class Fitter:
                         self.prior_sources[k] = 'user_uniform'
         for par in noise:
             prior_dict[par] = self.default_priors[par]
+        # Binary secondary shares the primary's resolved priors. Sharing the
+        # exact prior keeps the teff1>=teff2 swap in the prior transform
+        # measure-preserving (and gives a sensible default the user need not
+        # restate). prior_out already records the primary entries.
+        if self.binary:
+            for tgt, src in (('teff2', 'teff'), ('logg2', 'logg'),
+                             ('rad2', 'rad')):
+                if src in prior_dict:
+                    prior_dict[tgt] = prior_dict[src]
+                    if hasattr(self, 'prior_sources'):
+                        self.prior_sources[tgt] = self.prior_sources.get(src)
         ff = open(self.out_folder + '/prior.dat', 'w')
         ff.write(prior_out)
         ff.close()
@@ -1237,7 +1365,10 @@ class Fitter:
                 fixed, self.norm)
             out['posterior_samples']['loglike'][i] = log_likelihood(
                 theta, flux, flux_er, wave, filts, interpolator, self.norm,
-                av_law)
+                av_law, binary=self.binary, contrast=contrast)
+
+        if self.binary:
+            self._add_binary_dilution(out)
 
         # Best fit
         # The logic is as follows:
@@ -1306,7 +1437,8 @@ class Fitter:
 
             out['best_fit_averaged']['loglike'] = log_likelihood(
                 best_theta, flux, flux_er, wave,
-                filts, interpolator, self.norm, av_law
+                filts, interpolator, self.norm, av_law,
+                binary=self.binary, contrast=contrast
             )
 
             # Spectral type
@@ -2240,10 +2372,11 @@ def dynesty_log_like(cube):
         cube, flux, flux_er, filts, coordinator, fixed, use_norm
     )
     return log_likelihood(theta, flux, flux_er, wave,
-                          filts, interpolator, use_norm, av_law)
+                          filts, interpolator, use_norm, av_law,
+                          binary=binary, contrast=contrast)
 
 
 def pt_dynesty(cube):
     """Dynesty prior transform."""
     return prior_transform_dynesty(cube, flux, flux_er, filts, prior_dict,
-                                   coordinator, use_norm)
+                                   coordinator, use_norm, binary=binary)

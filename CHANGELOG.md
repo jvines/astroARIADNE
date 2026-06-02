@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0] - 2026-05-31
 
 ### Added
+- Unresolved-binary / SB2 fitting mode (`Fitter.binary = True`). The forward
+  model sums two stellar components (`teff2/logg2/rad2` added) sharing distance,
+  extinction and metallicity, with `teff1 >= teff2` enforced in the prior
+  transform. Requires a flux-ratio constraint via
+  `Fitter.add_contrast(filter, delta_mag, sigma)` — the secondary is otherwise
+  degenerate, so the mode refuses to run without one (and needs the explicit
+  rad/dist parametrisation + a parallax). Reports the per-band host-flux
+  fraction `f1/(f1+f2)` — the Furlan & Howell planet-radius dilution / third-
+  light correction — in `out['binary_dilution']`, and flags a prior-dominated
+  secondary Teff. A single contrast band pins the dilution but leaves teff2
+  weakly constrained; two bands of differing colour recover the secondary
+  (validated to ~1% on synthetic data). Single-grid only for now; BMA-binary,
+  the single-vs-binary evidence comparison and the binary SED plot are
+  follow-ups. Single-star fits are byte-identical (the mode is fully gated).
 - Regime-aware priors for M dwarfs. Cool stars (Gaia BP-RP > 1.8, or Teff
   < 4000 K) now get an M/late-K uniform Teff prior instead of the FGK
   population prior, and cool dwarfs (absolute G > 8, i.e. on the main sequence)
