@@ -17,10 +17,19 @@ try:
 except KeyError:
     modelsdir = None
 
-# Auto-discover pre-computed spectra cache from package data.
-# Download with: python -c "from astroARIADNE.fetch import fetch_spectra_cache; fetch_spectra_cache()"
+# Spectra cache for the continuous model SED in plots. Resolution order:
+#   1) $ARIADNE_SPECTRA_CACHE  -- a local/NAS cache (e.g. one extended with the
+#      BOSZ/SPHINX/TLUSTY grids) that needn't live under the package,
+#   2) the package Datafiles copy (fetch with
+#      `python -c "from astroARIADNE.fetch import fetch_spectra_cache; fetch_spectra_cache()"`).
+_env_spectra_cache = os.environ.get('ARIADNE_SPECTRA_CACHE')
 _spectra_cache_path = os.path.join(filesdir, 'spectra_cache.h5')
-spectra_cache = _spectra_cache_path if os.path.isfile(_spectra_cache_path) else None
+if _env_spectra_cache and os.path.isfile(_env_spectra_cache):
+    spectra_cache = _env_spectra_cache
+elif os.path.isfile(_spectra_cache_path):
+    spectra_cache = _spectra_cache_path
+else:
+    spectra_cache = None
 
 # pyphot filter names.
 filter_names = np.array([

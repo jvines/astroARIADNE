@@ -214,12 +214,14 @@ class SEDPlotter:
                 with open(gridsdir + '/TLUSTY_DF.pkl', 'rb') as intp:
                     self.interpolator = DFInterpolator(pd.read_pickle(intp))
 
-            # Get best fit parameters.
+            # Get best fit parameters. Single-grid outputs carry only
+            # 'best_fit_averaged'; fall back to it so single-grid SEDs plot too.
+            bf_samples = out.get('best_fit_samples', out['best_fit_averaged'])
             theta_samples = np.zeros(self.order.shape[0])
             theta_average = np.zeros(self.order.shape[0])
             for i, param in enumerate(self.order):
                 if param != 'inflation':
-                    theta_samples[i] = out['best_fit_samples'][param]
+                    theta_samples[i] = bf_samples[param]
                     theta_average[i] = out['best_fit_averaged'][param]
 
             # Calculate best fit model.
