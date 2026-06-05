@@ -79,7 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   posterior-predictive model. A band is quantified only where *every* in-play
   grid reaches it — single fit → that grid; BMA → the intersection of the
   ensemble's (reliability-capped) reach — and redder bands are shown plot-only.
-  Stored in `out['irx']`.
+  `out['irx']['_summary']` aggregates this into catalogue columns: an excess χ²,
+  the number of ≥3σ bands, a `has_excess` flag, and — when ≥2 positive bands are
+  available — a single-temperature blackbody characterization of the excess
+  (`t_dust` and the fractional excess luminosity `l_dust_over_lstar`, the
+  debris-disk product). Stored per band in `out['irx']`.
 - The atmosphere grids are **reconvolved out to the mid/far-IR**, each to its own
   true spectral reach (BT-Settl/NextGen/Cond ~150 µm, TLUSTY to SPIRE 250 µm,
   CK04/Kurucz 160 µm, SPHINX ~70 µm, BOSZ to MIPS 24). A transmission-area NaN

@@ -110,9 +110,41 @@ def test_quantified_excess_significance():
         r1 = _fitter(2 * mod, mod * 0.1)._compute_irx(_out(), ['phoenix'],
                                                       _avlaw)
         assert r1['WISE_RSR_W3']['sigma'] > 5
-        assert r1['_summary']['significant'] == ['WISE_RSR_W3']
+        s1 = r1['_summary']
+        assert s1['significant'] == ['WISE_RSR_W3']
+        # aggregate stats
+        assert s1['has_excess'] is True and s1['n_significant'] == 1
+        assert s1['excess_chi2'] > 25                 # sigma>5 -> chi2>25
+        assert s1['blackbody'] is None                # 1 band can't fit a BB
+        assert r0['_summary']['has_excess'] is False
     finally:
         fmod.load_grid = orig
+
+
+def test_blackbody_excess_recovers_temperature():
+    """The debris-disk blackbody fit recovers an injected (T, L_dust/L_*)."""
+    from scipy.constants import h, c, k as kB, sigma as sig
+    from astroARIADNE.fitter import _fit_excess_blackbody
+
+    def planck_per_um(lam_um, T):
+        lam = np.asarray(lam_um) * 1e-6
+        return (2 * h * c ** 2 / lam ** 5) / np.expm1(h * c / (lam * kB * T)) \
+            * 1e-3                                     # erg/s/cm^2/um/sr
+
+    T_true, Om, dist, lum = 200.0, 1e-16, 30.0, 1.0
+    bands = np.array([12.0, 22.0, 23.8, 71.0])        # W3, W4, MIPS24, MIPS70
+    F = Om * planck_per_um(bands, T_true)
+    ld_ls = 4 * np.pi * (dist * 3.0856775815e18) ** 2 \
+        * (Om * sig * T_true ** 4 / np.pi * 1e3) / (lum * 3.828e33)
+    bb = _fit_excess_blackbody(bands, F, 0.05 * F, dist, lum)
+    assert abs(bb['t_dust'] - T_true) / T_true < 0.05
+    assert abs(bb['l_dust_over_lstar'] / ld_ls - 1) < 0.05
+    assert bb['n_bands'] == 4
+    # guards: a single band, or no positive excess, or no distance -> None
+    assert _fit_excess_blackbody([22.], [1e-13], [1e-14], 30., 1.) is None
+    assert _fit_excess_blackbody([12., 22.], [-1e-13, -1e-14],
+                                 [1e-14, 1e-14], 30., 1.) is None
+    assert _fit_excess_blackbody(bands, F, 0.05 * F, None, 1.) is None
 
 
 def test_bma_reach_is_intersection():

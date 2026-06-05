@@ -64,6 +64,56 @@ def _fm07_rv(wave, a_v, r_v=3.1):
     return extinction.fm07(wave, a_v)
 
 
+def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
+    """Characterize an IR excess as a single-temperature (debris-disk) blackbody.
+
+    Fits ``F_exc(lambda) = Omega * B_lambda(T)`` to the positive excess fluxes
+    (``F_obs - F_model`` in erg/s/cm^2/um at the band wavelengths), then derives
+    the dust temperature ``T`` and the fractional excess luminosity
+    ``L_dust/L_*`` from ``F_dust = Omega * sigma T^4 / pi`` (the bolometric
+    Planck integral), ``L_dust = 4 pi d^2 F_dust``.
+
+    Returns ``{t_dust, l_dust_over_lstar, n_bands, fit_chi2}`` or ``None`` when
+    fewer than two positive bands are available (or distance/luminosity unknown)
+    -- a single band cannot pin both temperature and solid angle.
+    """
+    from scipy.constants import h, c, k as kB, sigma as sigma_sb  # SI
+    w = np.asarray(waves_um, float)
+    F = np.asarray(excess, float)
+    E = np.asarray(excess_err, float)
+    m = (F > 0) & np.isfinite(F) & np.isfinite(E) & (E > 0)
+    if m.sum() < 2 or not dist_pc or dist_pc <= 0 or not lum_lsun \
+            or lum_lsun <= 0:
+        return None
+    lam = w[m] * 1e-6                                  # m
+    F, E = F[m], E[m]
+
+    def _planck_per_um(T):
+        # SI B_lambda [W/m^2/m/sr] -> erg/s/cm^2/um/sr (x1e7 x1e-4 x1e-6)
+        B = (2 * h * c ** 2 / lam ** 5) / np.expm1(h * c / (lam * kB * T))
+        return B * 1e-3
+
+    best = None                                        # (chi2, T, Omega)
+    for T in np.geomspace(30.0, 1500.0, 400):
+        B = _planck_per_um(T)
+        wts = 1.0 / E ** 2
+        Omega = float(np.sum(F * B * wts) / np.sum(B * B * wts))  # sr (>0)
+        if Omega <= 0:
+            continue
+        chi2 = float(np.sum(((F - Omega * B) * np.sqrt(wts)) ** 2))
+        if best is None or chi2 < best[0]:
+            best = (chi2, float(T), Omega)
+    if best is None:
+        return None
+    chi2, T, Omega = best
+    f_dust = Omega * sigma_sb * T ** 4 / np.pi * 1e3   # W/m^2 -> erg/s/cm^2
+    d_cm = dist_pc * 3.0856775815e18
+    l_dust = 4.0 * np.pi * d_cm ** 2 * f_dust          # erg/s
+    l_star = lum_lsun * 3.828e33                        # erg/s
+    return dict(t_dust=T, l_dust_over_lstar=float(l_dust / l_star),
+                n_bands=int(m.sum()), fit_chi2=chi2)
+
+
 class Fitter:
     """The Fitter class handles the fitting routines and parameter estimation.
 
@@ -1729,12 +1779,28 @@ class Fitter:
                              model=model, model_err=model_err, excess=excess,
                              sigma=sigma, quantified=True)
         q = {k: v for k, v in result.items() if v['quantified']}
+        sig = sorted(k for k, v in q.items()
+                     if np.isfinite(v['sigma']) and v['sigma'] >= 3)
+        # Aggregate deviation from the photosphere across the IR bands.
+        chi2 = float(np.nansum(
+            [v['sigma'] ** 2 for v in q.values() if np.isfinite(v['sigma'])]))
+        # Characterize the excess as a single-temperature blackbody (debris
+        # disk) -> dust temperature + fractional excess luminosity L_dust/L_*.
+        lum = out.get('best_fit_averaged', {}).get('lum')
+        bb = _fit_excess_blackbody(
+            [v['wave'] for v in q.values()],
+            [v['excess'] for v in q.values()],
+            [float(np.hypot(v['obs_err'], v['model_err'])) for v in q.values()],
+            getattr(star, 'dist', None), lum)
         result['_summary'] = dict(
             quantified=sorted(q),
             plot_only=sorted(k for k, v in result.items()
                              if k != '_summary' and not v['quantified']),
-            significant=sorted(k for k, v in q.items()
-                               if np.isfinite(v['sigma']) and v['sigma'] >= 3),
+            significant=sig,
+            n_significant=len(sig),
+            has_excess=bool(len(sig) >= 1),
+            excess_chi2=chi2,
+            blackbody=bb,
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
                              if q else float('nan')))
         return result
