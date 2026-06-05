@@ -3,6 +3,10 @@ chains/
 outs/
 notebooks/
 
+# spectra_cache: 2.8 GB continuous-spectrum cache, distributed via Zenodo
+# (fetched to Datafiles/ at runtime), never committed.
+astroARIADNE/Datafiles/spectra_cache.h5
+
 .DS_Store
 
 # Byte-compiled / optimized / DLL files
