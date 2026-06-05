@@ -11,13 +11,11 @@ logger = logging.getLogger(__name__)
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-import pandas as pd
 import numpy as np
 from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table
 from extinction import apply
-from isochrones.interp import DFInterpolator
 from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from PyAstronomy import pyasl
@@ -183,36 +181,7 @@ class SEDPlotter:
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = np.append(self.order, p_)
 
-            if self.grid.lower() == 'phoenix':
-                with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'btsettl':
-                with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'btnextgen':
-                with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'btcond':
-                with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'ck04':
-                with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'kurucz':
-                with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'coelho':
-                with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'bosz':
-                with open(gridsdir + '/BOSZ_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'sphinx':
-                with open(gridsdir + '/SPHINX_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
-            if self.grid.lower() == 'tlusty':
-                with open(gridsdir + '/TLUSTY_DF.pkl', 'rb') as intp:
-                    self.interpolator = DFInterpolator(pd.read_pickle(intp))
+            self.interpolator = load_grid(self.grid)
 
             # Get best fit parameters. Single-grid outputs carry only
             # 'best_fit_averaged'; fall back to it so single-grid SEDs plot too.
@@ -232,12 +201,24 @@ class SEDPlotter:
                                        self.interpolator, self.norm,
                                        self.av_law, binary=self.binary)
             if self.irx:
-                irx_model_sam = model_grid(theta_samples, irx_filt, irx_wave,
-                                           self.interpolator, self.norm,
-                                           self.av_law, binary=self.binary)
-                irx_model_avg = model_grid(theta_average, irx_filt, irx_wave,
-                                           self.interpolator, self.norm,
-                                           self.av_law, binary=self.binary)
+                # Reach-gate: only model the IR-excess bands this grid both
+                # reaches and reliably models (grid_irx_reach = finite columns
+                # within grid_wave_coverage). Bands beyond reach are plot-only --
+                # left NaN here so the SED still shows the observed point but no
+                # model line, and model_grid never KeyErrors on a missing band.
+                reach = grid_irx_reach(self.grid, self.interpolator)
+                keep = np.array([f in reach for f in irx_filt], dtype=bool)
+                irx_model_sam = np.full(len(irx_filt), np.nan)
+                irx_model_avg = np.full(len(irx_filt), np.nan)
+                if keep.any():
+                    irx_model_sam[keep] = model_grid(
+                        theta_samples, irx_filt[keep], irx_wave[keep],
+                        self.interpolator, self.norm, self.av_law,
+                        binary=self.binary)
+                    irx_model_avg[keep] = model_grid(
+                        theta_average, irx_filt[keep], irx_wave[keep],
+                        self.interpolator, self.norm, self.av_law,
+                        binary=self.binary)
             if method == 'averaged':
                 self.theta = theta_average
                 self.model = model_average

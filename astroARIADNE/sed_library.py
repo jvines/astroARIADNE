@@ -5,7 +5,66 @@ import numpy as np
 from extinction import apply
 from scipy.special import ndtr, ndtri
 
+from .config import gridsdir, GRID_BASENAMES
 from .utils import get_noise_name
+
+
+class GridInterpolator:
+    """Lightweight atmosphere-grid interpolator backed by an HDF5 cube.
+
+    Replaces isochrones' ``DFInterpolator`` for the model grids: it loads the
+    dense flux cube + axes + filter names from a version-stable HDF5 file (no
+    pandas, no pickle) and exposes exactly the three attributes the numba
+    interpolation path (``_grid_arrays`` / ``_trilinear3d``) reads —
+    ``index_columns`` (logg, teff, feh axes), ``grid`` (n_logg, n_teff, n_feh,
+    n_filter cube) and ``column_index`` (filter name -> column).
+
+    Also exposes ``finite_bands``: the set of filters the grid actually
+    constrains (at least one finite node). Bands beyond the grid's spectral
+    reach are NaN-padded at build time (see notebooks/build_model_grids.py), so
+    ``finite_bands`` is the grid's usable reach -- it drives IR-excess band
+    gating, where only bands every in-play grid reaches are quantified and
+    redder bands are shown plot-only.
+    """
+
+    def __init__(self, path):
+        import h5py
+        with h5py.File(path, 'r') as h:
+            self.index_columns = (np.asarray(h['logg'][:], dtype=np.float64),
+                                  np.asarray(h['teff'][:], dtype=np.float64),
+                                  np.asarray(h['feh'][:], dtype=np.float64))
+            self.grid = np.asarray(h['flux'][:], dtype=np.float64)
+            filts = [s.decode() if isinstance(s, bytes) else str(s)
+                     for s in h['filters'][:]]
+            self.column_index = {f: i for i, f in enumerate(filts)}
+        finite = np.isfinite(self.grid).any(axis=(0, 1, 2))
+        self.finite_bands = frozenset(f for f, i in self.column_index.items()
+                                      if finite[i])
+
+
+def load_grid(name):
+    """Load an atmosphere grid by name into a ``GridInterpolator``."""
+    base = GRID_BASENAMES[name.lower()]
+    return GridInterpolator(f'{gridsdir}/{base}.h5')
+
+
+def grid_irx_reach(grid_name, interp):
+    """Bands a grid both physically reaches (finite cube column) AND reliably
+    models (within its ``grid_wave_coverage`` cutoff, if any).
+
+    ``finite_bands`` alone is physical coverage; some grids (e.g. Coelho) span
+    further than they are trustworthy -- their red flux is extrapolated, capped
+    by ``grid_wave_coverage``. IR-excess gating uses this reliability-aware
+    reach (the same cutoff that drops those bands from the fit), so the
+    quantified IRX set is the intersection of it across the in-play grids.
+    """
+    from .config import grid_wave_coverage
+    from .phot_utils import get_effective_wavelength
+    bands = set(interp.finite_bands)
+    cov = grid_wave_coverage.get(grid_name.lower())
+    if cov is not None:
+        bands = {b for b in bands if get_effective_wavelength(b) <= cov}
+    return bands
 
 # The parameter order and the extinction curve are constant for a given fit
 # (they depend only on the filter set, the use_norm flag and the extinction
@@ -194,17 +253,18 @@ def _free_param_transforms(prior_dict, coordinator, order):
     return transforms
 
 
-def _param_order(filts, use_norm, binary=False):
+def _param_order(filts, use_norm, binary=False, shared=False):
     """Return (and cache) the full parameter-name order for a filter set.
 
-    Memoised on ``(use_norm, binary)`` with an identity check on ``filts`` to
-    avoid building ``tuple(filts)`` on every call.
+    Memoised on ``(use_norm, binary, shared)`` with an identity check on
+    ``filts`` to avoid building ``tuple(filts)`` on every call.
 
     For an unresolved-binary fit (``binary=True``, requires ``use_norm=False``)
     a second stellar component is appended -- ``teff2, logg2, rad2`` -- sharing
-    the primary's ``z``, ``dist`` and ``Av``.
+    the primary's ``z``, ``dist`` and ``Av``. When ``shared=True`` the noise
+    model is a single ``shared_noise`` term instead of one per band.
     """
-    cached = _ORDER_CACHE.get((use_norm, binary))
+    cached = _ORDER_CACHE.get((use_norm, binary, shared))
     if cached is not None and cached[0] is filts:
         return cached[1]
     if use_norm:
@@ -213,8 +273,10 @@ def _param_order(filts, use_norm, binary=False):
         base = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
     if binary:
         base = base + ['teff2', 'logg2', 'rad2']
-    order = np.array(base + [get_noise_name(f) + '_noise' for f in filts])
-    _ORDER_CACHE[(use_norm, binary)] = (filts, order)
+    noise = ['shared_noise'] if shared else [get_noise_name(f) + '_noise'
+                                             for f in filts]
+    order = np.array(base + noise)
+    _ORDER_CACHE[(use_norm, binary, shared)] = (filts, order)
     return order
 
 
@@ -415,10 +477,14 @@ def _binary_swap_indices(order, coordinator):
 
 
 def prior_transform_dynesty(u, flux, flux_er, filts, prior_dict, coordinator,
-                            use_norm, binary=False):
+                            use_norm, binary=False, shared=False):
     """Transform the prior from the unit cube to the parameter space."""
     u2 = np.array(u)
-    order = _param_order(filts, use_norm, binary)
+    # Derive the shared-jitter flag from prior_dict so it is robust to the
+    # module global not propagating into spawned pool workers — prior_dict
+    # always carries 'shared_noise' exactly when the noise model is shared.
+    shared = shared or ('shared_noise' in prior_dict)
+    order = _param_order(filts, use_norm, binary, shared)
     transforms = _free_param_transforms(prior_dict, coordinator, order)
     for i, transform in enumerate(transforms):
         u2[i] = transform(u2[i])

@@ -15,12 +15,9 @@ assert 'site-packages' not in astroARIADNE.__file__, astroARIADNE.__file__
 import astroARIADNE.sed_library as sl  # noqa: E402
 from astroARIADNE.fitter import Fitter  # noqa: E402
 
-import pandas as pd  # noqa: E402
-from isochrones.interp import DFInterpolator  # noqa: E402
-from astroARIADNE.config import gridsdir  # noqa: E402
 from extinction import fitzpatrick99  # noqa: E402
 
-GRID = DFInterpolator(pd.read_pickle(gridsdir + '/Phoenixv2_DF.pkl'))
+GRID = sl.load_grid('phoenix')
 FILTS = np.array(['2MASS_J', '2MASS_H', '2MASS_Ks', 'GaiaDR2v2_G'])
 WAVE = np.array([1.235, 1.662, 2.159, 0.64])
 

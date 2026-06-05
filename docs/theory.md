@@ -121,12 +121,41 @@ likelihood). ARIADNE's defaults:
 - **$T_{\mathrm{eff}}$** — a population prior built from a RAVE-derived
   temperature distribution (an empirical spline), or a spectroscopic prior when
   one is supplied.
-- **$\log g$, $[\mathrm{Fe/H}]$** — spectroscopic priors when available
-  (APOGEE > GALAH > LAMOST > RAVE > Hypatia), otherwise broad bounds.
+- **$\log g$** — a star-specific spectroscopic prior when available, otherwise a
+  MIST isochrone estimate, otherwise broad uniform bounds
+  $\mathcal{U}(3.5, 6.0)$.
+- **$[\mathrm{Fe/H}]$** — a spectroscopic prior when available, otherwise a
+  population normal $\mathcal{N}(-0.125, 0.234)$.
+- **spectroscopic source chain** — star-specific $T_{\mathrm{eff}}/\log g$ are
+  taken from the first survey that resolves the target,
+  PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6 > LAMOST DR11; $[\mathrm{Fe/H}]$
+  defaults to the Hypatia Catalog (Hinkel et al. 2014), falling back to that
+  same survey chain on a Hypatia miss.
 - **distance** — the Bailer-Jones geometric distance posterior.
 - **radius / normalisation, $A_V$** — uniform, with $A_V$ capped at the
   line-of-sight galactic maximum.
 - **jitter $s_i$** — broad, weakly informative.
+
+### Cool dwarfs
+
+The RAVE-derived $T_{\mathrm{eff}}$ spline and the broad $\log g$ bounds above
+are calibrated on FGK stars and misbehave for M dwarfs: the temperature prior
+biases them several hundred K hot, and the wide gravity prior leaves a spurious
+low-$\log g$ (giant) mode open. ARIADNE handles this automatically in two nested
+steps (`_default_priors` / `_cool_dwarf_flags`):
+
+- A **cool star** — Gaia colour $\mathrm{BP}-\mathrm{RP} > 1.8$, or Gaia
+  $T_{\mathrm{eff}} < 4000\ \mathrm{K}$ when colour is unavailable — gets a
+  uniform M/late-K temperature prior,
+  $T_{\mathrm{eff}} \sim \mathcal{U}(2300, 4200)\ \mathrm{K}$, in place of the
+  FGK population spline.
+- A **cool dwarf** — a cool star that is also on the main sequence, flagged by
+  absolute magnitude $M_G > 8$ (or luminosity $< 0.5\,L_\odot$ as a fallback) —
+  *additionally* gets a tight main-sequence gravity prior,
+  $\log g \sim \mathcal{N}(5.0, 0.25)$, which is what closes the giant mode.
+
+A star-specific spectroscopic $T_{\mathrm{eff}}/\log g$ (from the survey chain
+above) always overrides the automatic choice.
 
 Nested sampling draws from the prior by mapping a unit-cube variate $u\in[0,1]$
 through the inverse CDF (`prior_transform_dynesty`). ARIADNE substitutes
@@ -192,7 +221,96 @@ a single best-fitting atmosphere.
 
 ```{note}
 BMA only makes sense when the grids being averaged share the same prior volume
-and observable set, so their evidences are comparable. Limited-coverage or
-intrinsically standalone grids (e.g. Coelho, SPHINX-II, TLUSTY) are run on their
-own rather than mixed into the average — see {doc}`guide`.
+and observable set, so their evidences are comparable. ARIADNE enforces this by
+Teff-gating each grid to the regime where it is valid: the default ensemble
+(PHOENIX, BT-Settl/NextGen/Cond, Kurucz, Castelli-Kurucz, BOSZ and SPHINX) is
+filtered per target, so e.g. SPHINX contributes only below 4000 K and
+Kurucz/Castelli-Kurucz only above it. Grids that cannot satisfy the
+shared-observable-set requirement are kept out of the average and run on their
+own instead: Coelho (optical-only, so its red bands were extrapolated at build
+time) and TLUSTY (hot stars, which need their own uniform Teff prior).
 ```
+
+## Unresolved binaries (two-component SED)
+
+An unresolved binary contributes the **summed** flux of two stars that share a
+distance, line-of-sight extinction and (to the precision the photometry can
+distinguish) metallicity. ARIADNE's binary mode replaces the single-component
+forward model with
+
+$$
+F_i^{\mathrm{model}} =
+\left[\left(\frac{R_1}{d}\right)^{2} f_i(T_1, \log g_1, z)
+    + \left(\frac{R_2}{d}\right)^{2} f_i(T_2, \log g_2, z)\right]
+10^{-0.4\, A_V\, k_i},
+$$
+
+adding $(T_2, \log g_2, R_2)$ to $\theta$ while $d$, $A_V$ and $z$ stay shared
+(`model_grid`, `binary=True`). The two components are exchange-symmetric, which
+would split the posterior into two mirror modes; ARIADNE breaks the degeneracy by
+**folding the prior** to enforce $T_1 \ge T_2$ — the prior transform swaps the
+two component blocks whenever a draw violates the ordering
+(`prior_transform_dynesty` / `_binary_swap_indices`). Folding (rather than
+rejecting) keeps the prior volume — and therefore the evidence — clean, and it
+requires the two components to share priors, which the defaults guarantee.
+
+### The contrast constraint
+
+Photometry alone barely constrains a faint secondary, so binary mode **requires**
+at least one flux-ratio measurement — a magnitude difference
+$\Delta m_i = |m_2 - m_1|$ in some band (speckle/AO imaging, or Gaia). Each is a
+Gaussian term appended to the log-likelihood (`contrast_loglike`),
+
+$$
+\ln\mathcal{L}_{\Delta m} =
+-\frac{1}{2}\sum_i
+\left(\frac{\Delta m_i^{\mathrm{model}} - \Delta m_i}{\sigma_{\Delta m_i}}\right)^2,
+\qquad
+\Delta m_i^{\mathrm{model}} =
+2.5\left|\log_{10}\!\left[\left(\frac{R_2}{R_1}\right)^{2}
+\frac{f_i(T_2,\log g_2,z)}{f_i(T_1,\log g_1,z)}\right]\right|,
+$$
+
+in which the shared distance and extinction cancel — the contrast measures the
+intrinsic flux ratio. A **single** contrast band pins the band dilution but
+leaves $T_2$ and $R_2$ on a degenerate ridge; ARIADNE flags a prior-dominated
+secondary as `binary_secondary_unconstrained` when the recovered $T_2$ posterior
+scatter exceeds 15 % of its median ($\sigma_{T_2}/\mathrm{med}(T_2) > 0.15$),
+the usual signature of a single-band fit. Two bands of different colour break the
+degeneracy.
+
+### Did the SED need two stars?
+
+The contrast likelihood will always reward adding a second component, so a fit
+that includes it cannot be used to decide *whether* the source is a binary.
+ARIADNE answers that question with a separate, fair comparison: it re-fits both
+the single-star and the binary model on the **photometry only** (no contrast
+term), and reports the evidence difference
+
+$$
+\Delta\ln Z = \ln Z_{\mathrm{binary}}^{\mathrm{SED}} - \ln Z_{\mathrm{single}},
+$$
+
+in `binary_vs_single` (one such dict per grid, written into each
+`{grid}_out.pkl`). $\Delta\ln Z > 0$ means the broadband SED *by itself* prefers
+two temperatures; the automatic Occam factor of the evidence (see above)
+penalises the three extra parameters, so a positive value is a genuine detection
+rather than a consequence of the larger model.
+
+### Dilution
+
+The quantity most often wanted downstream is the **host-flux fraction** in each
+band — the fraction of the *received* (radius-weighted) flux contributed by the
+primary,
+
+$$
+D_i = \frac{R_1^{2} f_i(T_1,\log g_1,z)}
+           {R_1^{2} f_i(T_1,\log g_1,z) + R_2^{2} f_i(T_2,\log g_2,z)},
+$$
+
+the Furlan & Howell third-light correction needed to recover a transiting
+planet's true radius from a diluted transit depth (the common distance and
+extinction cancel in the ratio). It is reported per band in
+`out['binary_dilution']`, with full posterior traces (`dilution_<band>`), and
+under BMA those traces are averaged across grids so the dilution carries the
+model-systematic spread.

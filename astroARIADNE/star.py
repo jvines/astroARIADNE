@@ -16,7 +16,8 @@ from termcolor import colored
 
 from scipy.constants import h as _h, c as _c, k as _k
 
-from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands)
+from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands,
+                     irx_bands, GRID_BASENAMES)
 from .isochrone import estimate
 from .librarian import Librarian
 from .librarian._adapter import adapt_librarian
@@ -273,11 +274,18 @@ class Star:
                 self.mag_errs[filt_idx] = mag_dict[k][1]
 
                 filters.append(k)
-        self.filter_mask = np.where(self.used_filters == 1)[0]
-
-        # IRX filters
-        self.irx_filter_mask = np.array([])
+        # IRX filters: bands redward of ~5 um (config.irx_bands) are treated as
+        # excess, never fit. Reclassify any the librarian/adapter marked as used
+        # so they leave the photosphere fit and route to the irx set (mirrors
+        # add_mag). They are quantified post-fit, reach-gated to the in-play
+        # grid(s). No-op when no IR-excess band was fetched.
         self.irx_used_filters = np.zeros(self.filter_names.shape[0])
+        for i, f in enumerate(self.filter_names):
+            if f in irx_bands and self.used_filters[i] == 1:
+                self.used_filters[i] = 0
+                self.irx_used_filters[i] = 1
+        self.filter_mask = np.where(self.used_filters == 1)[0]
+        self.irx_filter_mask = np.where(self.irx_used_filters == 1)[0]
 
         # Get max Av
         if Av is None:
@@ -423,33 +431,22 @@ class Star:
         pass
 
     def load_grid(self, model):
-        """Load the model grid for interpolation."""
-        # Grid stuff
-        if model.lower() == 'phoenix':
-            gridname = gridsdir + '/model_grid_Phoenixv2.dat'
-        if model.lower() == 'btsettl':
-            gridname = gridsdir + '/model_grid_BT_Settl.dat'
-        if model.lower() == 'btnextgen':
-            gridname = gridsdir + '/model_grid_BT_NextGen.dat'
-        if model.lower() == 'btcond':
-            gridname = gridsdir + '/model_grid_BT_Cond.dat'
-        if model.lower() == 'ck04':
-            gridname = gridsdir + '/model_grid_CK04.dat'
-        if model.lower() == 'kurucz':
-            gridname = gridsdir + '/model_grid_Kurucz.dat'
-        if model.lower() == 'coelho':
-            gridname = gridsdir + '/model_grid_Coelho.dat'
-        if model.lower() == 'bosz':
-            gridname = gridsdir + '/model_grid_BOSZ.dat'
-        if model.lower() == 'sphinx':
-            gridname = gridsdir + '/model_grid_SPHINX.dat'
-        if model.lower() == 'tlusty':
-            gridname = gridsdir + '/model_grid_TLUSTY.dat'
+        """Load the model grid's parameter nodes (Teff/log g/[Fe/H]).
 
-        self.full_grid = np.loadtxt(gridname)
-        self.teff = self.full_grid[:, 0]
-        self.logg = self.full_grid[:, 1]
-        self.z = self.full_grid[:, 2]
+        Used by the plotter for plot-time node selection (it only ever takes
+        ``np.unique`` of these). Reads the HDF5 grid directly -- the legacy
+        ``model_grid_*.dat`` tables are gone; the .h5 carries the same axes,
+        with NaN-padded missing corners excluded via the finite-node mask.
+        """
+        from .sed_library import GridInterpolator
+        gi = GridInterpolator(f'{gridsdir}/{GRID_BASENAMES[model.lower()]}.h5')
+        lg, tf, fe = gi.index_columns                # (logg, teff, feh) axes
+        finite = np.isfinite(gi.grid).any(axis=-1)   # real (non-padded) nodes
+        LG, TF, FE = np.meshgrid(lg, tf, fe, indexing='ij')
+        self.teff = TF[finite]
+        self.logg = LG[finite]
+        self.z = FE[finite]
+        self.full_grid = np.column_stack([self.teff, self.logg, self.z])
         if self.verbose:
             print('Grid ' + model + ' loaded.')
 
@@ -555,7 +552,7 @@ class Star:
         mask = self.filter_names == filt
         self.mags[mask] = mag
         self.mag_errs[mask] = err
-        if filt not in self.filter_names[-5:]:
+        if filt not in irx_bands:
             self.used_filters[mask] = 1
             self.filter_mask = np.where(self.used_filters == 1)[0]
         else:

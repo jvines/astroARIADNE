@@ -12,6 +12,17 @@ gridsdir = str(_datafiles.joinpath('model_grids'))
 priorsdir = str(_datafiles.joinpath('prior'))
 filesdir = str(_datafiles)
 
+# Grid name -> on-disk basename. Grids are stored as ``{basename}.h5`` (a
+# version-stable HDF5 cube: axes + flux + filter names), not pandas pickles, so
+# they survive numpy/pandas upgrades. ``GridInterpolator`` (sed_library) loads
+# them; ``load_grid`` resolves a name to the file.
+GRID_BASENAMES = {
+    'phoenix': 'Phoenixv2', 'btsettl': 'BTSettl', 'btnextgen': 'BTNextGen',
+    'btcond': 'BTCond', 'ck04': 'CK04', 'kurucz': 'Kurucz', 'coelho': 'Coelho',
+    'bosz': 'BOSZ', 'sphinx': 'SPHINX', 'tlusty': 'TLUSTY', 'koester': 'Koester',
+    'newera': 'NewEra',
+}
+
 try:
     modelsdir = os.environ['ARIADNE_MODELS']
 except KeyError:
@@ -31,6 +42,11 @@ elif os.path.isfile(_spectra_cache_path):
 else:
     spectra_cache = None
 
+# Custom-filter library (mid/far-IR bands pyphot's bundled library lacks:
+# Spitzer MIPS, AKARI/IRC, IRAS, Herschel SPIRE PLW). Built once from SVO by
+# notebooks/build_custom_filters.py; loaded by phot_utils alongside pyphot.
+custom_filters_path = os.path.join(filesdir, 'custom_filters.h5')
+
 # pyphot filter names.
 filter_names = np.array([
        'GALEX_FUV', 'GALEX_NUV', 'STROMGREN_u', 'SkyMapper_u', 'SDSS_u',
@@ -43,7 +59,32 @@ filter_names = np.array([
        'PS1_z', 'SDSS_z', 'SkyMapper_z', 'PS1_y', '2MASS_J', '2MASS_H',
        '2MASS_Ks', 'WISE_RSR_W1', 'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
        'WISE_RSR_W2', 'WISE_RSR_W3', 'WISE_RSR_W4', 'HERSCHEL_PACS_BLUE',
-       'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED'
+       'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED',
+       # Mid/far-IR extension (>=5 um), all treated as IR-excess bands (see
+       # irx_bands below). Appended rather than wavelength-interleaved -- the
+       # SED plot sorts by effective wavelength, and excess membership is by the
+       # explicit irx_bands set, so position here is immaterial. SPIRE 250-500
+       # is TLUSTY-only at the grid level (reach-gated per fit).
+       'SPITZER_IRAC_58', 'SPITZER_IRAC_80', 'AKARI_IRC_S9W', 'IRAS_12',
+       'AKARI_IRC_L18W', 'IRAS_25', 'SPITZER_MIPS_24', 'IRAS_60',
+       'SPITZER_MIPS_70', 'IRAS_100', 'SPITZER_MIPS_160',
+       'HERSCHEL_SPIRE_PSW', 'HERSCHEL_SPIRE_PMW', 'HERSCHEL_SPIRE_PLW'
+])
+
+# IR-excess bands: redward of ~5 um, where warm-dust / debris-disk excess
+# appears. These are deliberately NOT fit (they would bias the photosphere on
+# exactly the stars of interest); add_mag routes them to the star's irx set and
+# they are quantified post-fit as excess -- gated to the bands every in-play
+# grid actually reaches (the rest are shown plot-only). Mirrors the >=5 um block
+# convolved into the grids (build_model_grids.py _IR_EXTENSION + TLUSTY SPIRE).
+irx_bands = frozenset([
+    'SPITZER_IRAC_58', 'SPITZER_IRAC_80',
+    'AKARI_IRC_S9W', 'AKARI_IRC_L18W',
+    'IRAS_12', 'IRAS_25', 'IRAS_60', 'IRAS_100',
+    'WISE_RSR_W3', 'WISE_RSR_W4',
+    'SPITZER_MIPS_24', 'SPITZER_MIPS_70', 'SPITZER_MIPS_160',
+    'HERSCHEL_PACS_BLUE', 'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED',
+    'HERSCHEL_SPIRE_PSW', 'HERSCHEL_SPIRE_PMW', 'HERSCHEL_SPIRE_PLW',
 ])
 
 # Native wavelength coverage (upper limit, in micron) of model grids whose
@@ -53,8 +94,11 @@ filter_names = np.array([
 # Grids absent from this dict are assumed to cover all filters.
 # Coelho 2014 spectra span ~0.25-0.9 um, so its IR photometry (2MASS, WISE,
 # Spitzer, Herschel) is not trustworthy.
+# Koester DA white-dwarf spectra span ~0.09-3.0 um; WISE W1/W2 and Spitzer IRAC
+# fall on the featureless Rayleigh-Jeans tail and are dropped (lossless).
 grid_wave_coverage = {
     'coelho': 0.9,
+    'koester': 3.0,
 }
 
 # termcolor colors.
@@ -63,7 +107,8 @@ colors = [
         'grey', 'magenta', 'cyan', 'white'
     ]
 
-# Isochrone mask array.
+# Isochrone mask array. Positionally aligned to filter_names; the 14 mid/far-IR
+# extension bands (the tail) are not isochrone bands, hence the trailing zeros.
 iso_mask = np.array([
     0, 0, 0, 0, 0,
     1, 0, 0, 0,
@@ -75,7 +120,9 @@ iso_mask = np.array([
     0, 0, 0, 0, 1, 1,
     1, 1, 0, 0,
     1, 0, 0, 0,
-    0, 0
+    0, 0,
+    0, 0, 0, 0, 0, 0, 0,        # IR extension (IRAC 58/80, AKARI, IRAS, MIPS)
+    0, 0, 0, 0, 0, 0, 0,        # ... and Herschel SPIRE
 ])
 
 # Filter bands for isochrones.

@@ -115,7 +115,11 @@ from ._qc import (
 # ── Band index maps ─────────────────────────────────────────────
 
 _2MASS_BAND_IDX = {"2MASS_J": 0, "2MASS_H": 1, "2MASS_Ks": 2}
-_WISE_BAND_IDX = {"WISE_RSR_W1": 0, "WISE_RSR_W2": 1}
+# W3/W4 index into the same AllWISE ph_qual string (qph) as W1/W2. They feed
+# IR-excess (config.irx_bands), not the photosphere fit, so they are routed to
+# the star's irx set downstream rather than constraining Teff/radius.
+_WISE_BAND_IDX = {"WISE_RSR_W1": 0, "WISE_RSR_W2": 1,
+                  "WISE_RSR_W3": 2, "WISE_RSR_W4": 3}
 
 
 # ── Catalog registry ────────────────────────────────────────────
@@ -144,6 +148,11 @@ _CATALOGS = {
         bands=(
             MagSpec("W1mag", "e_W1mag", "WISE_RSR_W1"),
             MagSpec("W2mag", "e_W2mag", "WISE_RSR_W2"),
+            # W3 (12 um) / W4 (22 um): all-sky IR-excess bands. Vega mags like
+            # W1/W2 (reuse the existing mag->flux path); QC via the same qph
+            # string (W3=idx 2, W4=idx 3). Routed to the star's irx set.
+            MagSpec("W3mag", "e_W3mag", "WISE_RSR_W3"),
+            MagSpec("W4mag", "e_W4mag", "WISE_RSR_W4"),
         ),
         xmatch_table="allwise",
         xmatch_id_cols=("AllWISE",),

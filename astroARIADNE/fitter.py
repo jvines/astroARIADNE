@@ -15,12 +15,10 @@ from tqdm import tqdm
 
 import extinction
 import astropy.units as u
-import pandas as pd
 import numpy as np
 import scipy.stats as st
 from numpy.random import choice
 from astropy.constants import sigma_sb
-from isochrones.interp import DFInterpolator
 from termcolor import colored
 
 from .config import (filesdir, gridsdir, priorsdir, filter_names, colors,
@@ -48,6 +46,9 @@ set_start_method('fork', force=True)
 # Fitter.initialize. Defaults keep single-star fits free of binary state.
 binary = False
 contrast = None
+# True when the noise model is a single shared jitter term (jitter='shared'),
+# so the prior transform builds one 'shared_noise' instead of per-band terms.
+jitter_shared = False
 
 
 def _fm07_rv(wave, a_v, r_v=3.1):
@@ -93,7 +94,9 @@ class Fitter:
     grid : str
         Atmosphere grid for a single-grid fit (e.g. ``'phoenix'``,
         ``'btsettl'``, ``'ck04'``, ``'kurucz'``, ``'coelho'``, ``'bosz'``,
-        ``'sphinx'``, ``'tlusty'``).
+        ``'sphinx'``, ``'tlusty'``, ``'newera'``, ``'koester'``). ``'koester'``
+        is a DA white-dwarf grid (standalone; pins [Fe/H]=0 and uses uniform
+        WD Teff/logg priors).
     bma : bool
         If ``True``, run Bayesian Model Averaging across several grids. This
         loads every model interpolator and fits all of them, so it is slower.
@@ -145,9 +148,27 @@ class Fitter:
         self.grid = 'phoenix'
         self.estimate_logg = False
         self.estimate_age = True
+        # Excess-noise (jitter) model. ``True`` (default): one jitter term per
+        # band — the most flexible buffer for underestimated/heterogeneous
+        # catalogue errors and model inadequacy, but N nuisance dimensions.
+        # ``'shared'``: a single jitter term broadcast across all bands — keeps
+        # the buffer (so the likelihood stays smooth) while collapsing those N
+        # dimensions to 1. ``False``: fix all jitter to 0 (catalogue errors
+        # only) — NOT recommended: removing the buffer makes the likelihood
+        # stiff (slower, not faster) and biases the stellar parameters.
+        self.jitter = True
         self.av_law = 'fitzpatrick'
         self.n_samples = None
         self.bma = False
+        # Default BMA ensemble (override via ``f.models``). Listing every grid
+        # is safe: ``initialize`` Teff-gates each one to its valid regime, so a
+        # grid inappropriate for the star is skipped automatically (e.g. SPHINX
+        # only contributes below 4000 K, CK04/Kurucz only above 4000 K,
+        # BT-NextGen/BT-Cond only below 4000 K). Coelho (optical-only) and
+        # TLUSTY (hot-star, needs its own uniform prior) are deliberately left
+        # out — they are standalone-only and must be requested explicitly.
+        self.models = ['phoenix', 'btsettl', 'btnextgen', 'btcond',
+                       'kurucz', 'ck04', 'bosz', 'sphinx']
         self.prior_setup = None
         self.sequential = True
         self.experimental = False
@@ -209,8 +230,8 @@ class Fitter:
             f"{type(self).__name__!r} has no configuration attribute "
             f"{name!r}. Check for a typo (e.g. 'bma' not 'bmaa'). Valid "
             f"config options: av_law, binary, bma, contrast, estimate_age, "
-            f"estimate_logg, experimental, grid, isochrone_dlogz, models, "
-            f"n_grid_jobs, n_samples, norm, out_folder, prior_setup, "
+            f"estimate_logg, experimental, grid, isochrone_dlogz, jitter, "
+            f"models, n_grid_jobs, n_samples, norm, out_folder, prior_setup, "
             f"sequential, setup, star, verbose, walks."
         )
 
@@ -291,36 +312,7 @@ class Fitter:
     def grid(self, grid):
         assert type(grid) == str
         self._grid = grid
-        if grid.lower() == 'phoenix':
-            with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'btsettl':
-            with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'btnextgen':
-            with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'btcond':
-            with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'ck04':
-            with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'kurucz':
-            with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'coelho':
-            with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'bosz':
-            with open(gridsdir + '/BOSZ_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'sphinx':
-            with open(gridsdir + '/SPHINX_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
-        if grid.lower() == 'tlusty':
-            with open(gridsdir + '/TLUSTY_DF.pkl', 'rb') as intp:
-                self._interpolator = DFInterpolator(pd.read_pickle(intp))
+        self._interpolator = load_grid(grid)
 
     @property
     def bma(self):
@@ -337,7 +329,13 @@ class Fitter:
 
     @property
     def models(self):
-        """Models to be used in BMA."""
+        """Models to be used in BMA.
+
+        Defaults to the full Teff-gated ensemble
+        ``['phoenix', 'btsettl', 'btnextgen', 'btcond', 'kurucz', 'ck04',
+        'bosz', 'sphinx']``; ``initialize`` skips any grid outside its valid
+        temperature range for the target. Assign a list to override.
+        """
         return self._bma_models
 
     @models.setter
@@ -626,7 +624,8 @@ class Fitter:
         up global variables.
         """
         global prior_dict, coordinator, fixed, order, star, use_norm, av_law
-        global binary, contrast
+        global binary, contrast, jitter_shared
+        jitter_shared = (getattr(self, 'jitter', True) == 'shared')
         self.start = time.time()
         err_msg = 'No star is detected. Please create an instance of Star.'
         if self.star is None:
@@ -695,7 +694,9 @@ class Fitter:
         npars = 6 if not self.norm else 5
         if binary:
             npars += 3  # teff2, logg2, rad2
-        npars += self.star.used_filters.sum()
+        # Noise model: one jitter term per band by default, or a single shared
+        # jitter term when ``jitter == 'shared'``.
+        npars += 1 if getattr(self, 'jitter', True) == 'shared' else self.star.used_filters.sum()
         npars = int(npars)
         self.coordinator = np.zeros(npars)  # 1 for fixed params
         self.fixed = np.zeros(npars)
@@ -706,6 +707,18 @@ class Fitter:
         self.default_priors = self._default_priors()
         self.create_priors_from_setup()
         prior_dict = self.priors
+
+        # Fast / bulk mode: deactivate the per-band excess-noise (jitter) terms
+        # by fixing every ``*_noise`` parameter to 0. This removes one sampling
+        # dimension per band (the jitter terms dominate the dimensionality of a
+        # well-covered SED) and makes the likelihood fall back to the catalogue
+        # errors alone — no likelihood change needed, the fixed-parameter
+        # machinery handles it. ``get_ndim`` below subtracts these from ndim.
+        if not self.jitter:
+            for i, p in enumerate(order):
+                if str(p).endswith('_noise'):
+                    self.coordinator[i] = 1
+                    self.fixed[i] = 0.0
 
         # Get dimensions.
         self.ndim = self.get_ndim()
@@ -762,7 +775,7 @@ class Fitter:
         ndim = 6 if not self.norm else 5
         if self.binary:
             ndim += 3  # teff2, logg2, rad2
-        ndim += self.star.used_filters.sum()
+        ndim += 1 if getattr(self, 'jitter', True) == 'shared' else self.star.used_filters.sum()
         ndim -= self.coordinator.sum()
         return int(ndim)
 
@@ -854,10 +867,16 @@ class Fitter:
             getattr(self.star, 'temp', None), getattr(self.star, 'lum', None),
             _bp_rp, _abs_g)
 
-        # Teff: hot-star grids (TLUSTY) need a wide uniform prior — the FGK
-        # population prior assigns ~zero probability above ~12000 K, so it
-        # cannot reach the O/B regime. Applied for standalone TLUSTY fits.
-        if (getattr(self, '_grid', '') or '').lower() == 'tlusty':
+        _grid_l = (getattr(self, '_grid', '') or '').lower()
+        # Teff: standalone grids that sit outside the FGK population prior need
+        # their own wide uniform prior. Koester white dwarfs span 5000-80000 K;
+        # TLUSTY hot stars 15-55 kK. The FGK population prior assigns ~zero
+        # probability there, so it cannot reach either regime.
+        if _grid_l == 'koester':
+            defaults['teff'] = st.uniform(loc=5000, scale=75000)  # 5-80 kK (WD)
+            self.prior_sources['teff'] = 'koester_wd_uniform'
+            logger.info('Using uniform Teff prior for the Koester WD grid')
+        elif _grid_l == 'tlusty':
             defaults['teff'] = st.uniform(loc=15000, scale=40000)  # 15-55 kK
             self.prior_sources['teff'] = 'tlusty_uniform'
             logger.info('Using uniform Teff prior for the TLUSTY hot-star grid')
@@ -879,7 +898,11 @@ class Fitter:
             logger.info('Using population Teff prior (no spectroscopic match)')
 
         # logg: spectroscopic, isochrone, or population prior
-        if _spec_has('logg'):
+        if _grid_l == 'koester':
+            defaults['logg'] = st.uniform(loc=6.5, scale=3.0)  # 6.5-9.5 (WD)
+            self.prior_sources['logg'] = 'koester_wd_uniform'
+            logger.info('Using uniform logg prior for the Koester WD grid')
+        elif _spec_has('logg'):
             defaults['logg'] = st.norm(loc=spec['logg'],
                                        scale=spec['logg_err'])
             self.prior_sources['logg'] = spec_source
@@ -903,7 +926,18 @@ class Fitter:
             logger.info('Using population logg prior')
 
         # [Fe/H]: spectroscopic or population prior
-        if _spec_has('feh'):
+        if _grid_l == 'koester':
+            # White dwarfs have no metallicity axis; the Koester grid carries a
+            # single dummy z=0 node, so pin z to it. The trilinear interpolator
+            # handles the resulting length-1 third axis as long as z is fixed at
+            # exactly that node (z index is 2 in both norm and non-norm orders).
+            z_idx = 2
+            self.coordinator[z_idx] = 1
+            self.fixed[z_idx] = 0.0
+            defaults['z'] = None
+            self.prior_sources['z'] = 'koester_fixed_zero'
+            logger.info('Pinning [Fe/H]=0 for the Koester WD grid (no z axis)')
+        elif _spec_has('feh'):
             defaults['z'] = st.norm(loc=spec['feh'], scale=spec['feh_err'])
             self.prior_sources['z'] = spec_source
             logger.info('Using %s [Fe/H] prior (star-specific)', spec_source)
@@ -924,8 +958,15 @@ class Fitter:
                 defaults['dist'] = st.uniform(loc=1, scale=3000)
                 self.prior_sources['dist'] = 'uniform_default'
             # Radius prior setup.
-            defaults['rad'] = st.uniform(loc=0.05, scale=100)
-            self.prior_sources['rad'] = 'uniform_default'
+            if _grid_l == 'koester':
+                # White dwarfs are ~0.004-0.02 R_sun; the main-sequence floor of
+                # 0.05 R_sun would exclude every WD radius. Use a degenerate
+                # range instead.
+                defaults['rad'] = st.uniform(loc=0.003, scale=0.047)  # 0.003-0.05
+                self.prior_sources['rad'] = 'koester_wd_uniform'
+            else:
+                defaults['rad'] = st.uniform(loc=0.05, scale=100)
+                self.prior_sources['rad'] = 'uniform_default'
         # Normalization prior setup.
         else:
             # up = 1 / 1e-30
@@ -951,18 +992,25 @@ class Fitter:
                 b, a = (up - mu) / sig, (low - mu) / sig
                 defaults['Av'] = st.truncnorm(loc=mu, scale=sig, a=a, b=b)
                 self.prior_sources['Av'] = 'dustmap'
-        # Noise model prior setup.
+        # Noise model prior setup. Per-band jitter by default; a single shared
+        # jitter term when ``jitter == 'shared'`` -- the likelihood broadcasts
+        # the one term across all bands, keeping the error/model-adequacy buffer
+        # while collapsing N nuisance dimensions to 1.
         mask = self.star.filter_mask
         flxs = self.star.flux[mask]
         errs = self.star.flux_er[mask]
-        for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
-            p_ = get_noise_name(filt) + '_noise'
-            mu = 0
-            sigma = flx_e * 10
-            b = (1 - flx) / flx_e
-            defaults[p_] = st.truncnorm(loc=mu, scale=sigma, a=0, b=b)
-            # defaults[p_] = st.uniform(loc=0, scale=5)
-            order = np.append(order, p_)
+        if getattr(self, 'jitter', True) == 'shared':
+            mflx, merr = float(np.median(flxs)), float(np.median(errs))
+            defaults['shared_noise'] = st.truncnorm(
+                loc=0, scale=merr * 10, a=0, b=(1 - mflx) / merr)
+            order = np.append(order, 'shared_noise')
+        else:
+            for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
+                p_ = get_noise_name(filt) + '_noise'
+                sigma = flx_e * 10
+                b = (1 - flx) / flx_e
+                defaults[p_] = st.truncnorm(loc=0, scale=sigma, a=0, b=b)
+                order = np.append(order, p_)
         return defaults
 
     def create_priors_from_setup(self):
@@ -973,9 +1021,12 @@ class Fitter:
         mask = self.star.filter_mask
         flxs = self.star.flux[mask]
         errs = self.star.flux_er[mask]
-        for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
-            p_ = get_noise_name(filt) + '_noise'
-            noise.append(p_)
+        if getattr(self, 'jitter', True) == 'shared':
+            noise = ['shared_noise']
+        else:
+            for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
+                p_ = get_noise_name(filt) + '_noise'
+                noise.append(p_)
         prior_out = 'Parameter\tPrior\tValues\n'
         if 'norm' in keys and ('rad' in keys or 'dist' in keys):
             er = PriorError('rad or dist', 1)
@@ -1189,7 +1240,7 @@ class Fitter:
             self._binary_model_comparison()
         elapsed_time = execution_time(self.start)
         end(self.coordinator, elapsed_time,
-            self.out_folder, self._engine, self.norm, )
+            self.out_folder, self._engine, self.norm, grid=self._grid)
         pass
 
     def fit_bma(self):
@@ -1582,8 +1633,111 @@ class Fitter:
         if not self.bma:
             with open(log_out, 'w') as logfile:
                 logfile.write(logdat)
+        try:
+            out['irx'] = self._compute_irx(out, [self._grid], av_law)
+        except Exception as e:                       # never break the save
+            logger.warning('IR-excess quantification skipped: %s', e)
+            out['irx'] = {}
         pickle.dump(out, open(out_file, 'wb'))
         pass
+
+    def _irx_theta(self, d):
+        """Pack a best-fit / posterior-sample dict into the physical theta
+        vector model_grid expects, in the same order the fit used."""
+        if self._norm:
+            order = ['teff', 'logg', 'z', 'norm', 'Av']
+        else:
+            order = ['teff', 'logg', 'z', 'dist', 'rad', 'Av']
+            if self.binary:
+                order += ['teff2', 'logg2', 'rad2']
+        return np.array([float(d[k]) for k in order])
+
+    def _compute_irx(self, out, grids, av_law):
+        """Quantify IR excess on the bands every in-play grid reaches.
+
+        The star's IR-excess bands (``config.irx_bands``, routed out of the
+        photosphere fit by ``Star``) are compared to the model predicted at the
+        best fit. Reach gating follows the BMA rule: a band is *quantified* only
+        if every in-play grid reaches it -- the common-reach set is the
+        intersection of the grids' ``finite_bands``. Bands the star has but that
+        lie beyond the common reach are recorded plot-only (model = NaN), so the
+        SED can still show them.
+
+        The model flux and its uncertainty per band are the (evidence-weighted,
+        for BMA) posterior-predictive: draws pick a grid by weight and a
+        posterior sample from that grid, then evaluate the model on that grid.
+        Reported per band: model, model_err, observed, excess = obs - model and
+        its significance sigma = excess / sqrt(obs_err^2 + model_err^2). A
+        '_summary' entry lists the quantified, plot-only and >=3 sigma bands.
+        """
+        star = self.star
+        mask = np.asarray(getattr(star, 'irx_filter_mask', []), dtype=int)
+        if mask.size == 0:
+            return {}
+        names = np.asarray(star.filter_names)
+        irx_filt = names[mask]
+        irx_wave = np.asarray(star.wave)[mask]
+        irx_obs = np.asarray(star.flux)[mask]
+        irx_obs_e = np.asarray(star.flux_er)[mask]
+
+        interps = {g: load_grid(g) for g in grids}
+        common = set.intersection(*[grid_irx_reach(g, i)
+                                    for g, i in interps.items()])
+
+        # Posterior mixture: (grid, weight, posterior_samples) per member.
+        if out.get('weights') and out.get('originals'):
+            members = [(g, float(out['weights'].get(g, 0.0)),
+                        out['originals'][g])
+                       for g in grids if g in out['originals']]
+        else:
+            members = [(grids[0], 1.0, out['posterior_samples'])]
+        wsum = sum(w for _, w, _ in members) or 1.0
+        members = [(g, w / wsum, ps) for g, w, ps in members]
+
+        rng = np.random.default_rng(0)
+        ndraw = 256
+        gpick = rng.choice(len(members), size=ndraw,
+                           p=[w for _, w, _ in members])
+
+        result = {}
+        for f, wv, fo, fe in zip(irx_filt, irx_wave, irx_obs, irx_obs_e):
+            f = str(f)
+            if f not in common:
+                result[f] = dict(wave=float(wv), obs=float(fo),
+                                 obs_err=float(fe), model=float('nan'),
+                                 model_err=float('nan'), excess=float('nan'),
+                                 sigma=float('nan'), quantified=False)
+                continue
+            band = np.array([f])
+            wl = np.array([float(wv)])
+            draws = np.empty(ndraw)
+            for d in range(ndraw):
+                g, _w, ps = members[gpick[d]]
+                n = len(ps['teff'])
+                j = int(rng.integers(n))
+                theta = self._irx_theta({k: ps[k][j] for k in ps
+                                         if hasattr(ps[k], '__len__')})
+                m = model_grid(theta, band, wl, interps[g], self._norm,
+                               av_law, binary=self.binary)
+                draws[d] = float(np.asarray(m).ravel()[0])
+            model = float(np.nanmean(draws))
+            model_err = float(np.nanstd(draws))
+            excess = float(fo) - model
+            denom = float(np.hypot(float(fe), model_err))
+            sigma = excess / denom if denom > 0 else float('nan')
+            result[f] = dict(wave=float(wv), obs=float(fo), obs_err=float(fe),
+                             model=model, model_err=model_err, excess=excess,
+                             sigma=sigma, quantified=True)
+        q = {k: v for k, v in result.items() if v['quantified']}
+        result['_summary'] = dict(
+            quantified=sorted(q),
+            plot_only=sorted(k for k, v in result.items()
+                             if k != '_summary' and not v['quantified']),
+            significant=sorted(k for k, v in q.items()
+                               if np.isfinite(v['sigma']) and v['sigma'] >= 3),
+            common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
+                             if q else float('nan')))
+        return result
 
     def save_bma(self, avgd):
         """Save BMA output and relevant information.
@@ -1891,6 +2045,11 @@ class Fitter:
             logfile.write(probdat)
         with open(synth_out, 'w') as logfile:
             logfile.write(synthdat)
+        try:
+            out['irx'] = self._compute_irx(out, list(self._grids), av_law)
+        except Exception as e:                       # never break the save
+            logger.warning('IR-excess quantification skipped: %s', e)
+            out['irx'] = {}
         pickle.dump(out, open(out_file, 'wb'))
         self.out = out
         # NetCDF is an optional ecosystem-interop export (needs arviz). Don't
@@ -1932,6 +2091,15 @@ class Fitter:
         for o in model_posteriors:
             evidences.append(o['global_lnZ'])
             post_samples.append(o['posterior_samples'])
+        # Resolve the sample count. ``n_samples`` defaults to the sentinel
+        # 'max' (set in ``initialize`` when the user leaves it unset); interpret
+        # it as the largest per-model posterior length. Without this, 'max'
+        # reaches ``np.zeros``/``choice`` below and raises "'str' object cannot
+        # be interpreted as an integer" — so a BMA run used to crash at the
+        # averaging step unless n_samples was set explicitly.
+        if not isinstance(nsamples, (int, np.integer)):
+            nsamples = max(len(v) for o in post_samples for v in o.values()
+                           if hasattr(v, '__len__'))
         # Per-model fit-health diagnostics + evidence errors (additive).
         per_model_diag = {}
         evidence_err = {}
@@ -2145,38 +2313,8 @@ class Fitter:
 
     @staticmethod
     def load_interpolator(model):
-        """Load a DFInterpolator."""
-        if model.lower() == 'phoenix':
-            with open(gridsdir + '/Phoenixv2_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'btsettl':
-            with open(gridsdir + '/BTSettl_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'btnextgen':
-            with open(gridsdir + '/BTNextGen_DF.pkl', 'rb') as inp:
-                df = DFInterpolator(pd.read_pickle(inp))
-        elif model.lower() == 'btcond':
-            with open(gridsdir + '/BTCond_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'ck04':
-            with open(gridsdir + '/CK04_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'kurucz':
-            with open(gridsdir + '/Kurucz_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'coelho':
-            with open(gridsdir + '/Coelho_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'bosz':
-            with open(gridsdir + '/BOSZ_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'sphinx':
-            with open(gridsdir + '/SPHINX_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        elif model.lower() == 'tlusty':
-            with open(gridsdir + '/TLUSTY_DF.pkl', 'rb') as intp:
-                df = DFInterpolator(pd.read_pickle(intp))
-        return df
+        """Load a grid interpolator by name."""
+        return load_grid(model)
 
     def _run_estimate_age(self, bf, unc, c='white'):
         """Estimate age using MIST isochrones.
@@ -2490,4 +2628,5 @@ def dynesty_log_like(cube):
 def pt_dynesty(cube):
     """Dynesty prior transform."""
     return prior_transform_dynesty(cube, flux, flux_er, filts, prior_dict,
-                                   coordinator, use_norm, binary=binary)
+                                   coordinator, use_norm, binary=binary,
+                                   shared=jitter_shared)

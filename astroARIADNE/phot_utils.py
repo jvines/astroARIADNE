@@ -7,12 +7,52 @@ It uses the module pyphot to get the fluxes and bandpasses of different
 broadband filters.
 """
 
+import os
+
 import astropy.constants as const
 import astropy.units as u
 import pyphot
 import numpy as np
 
+from .config import custom_filters_path
+
 _PYPHOT_LIB = pyphot.get_library()
+
+
+def _load_custom_filters():
+    """Build pyphot Filter objects for ARIADNE's custom (mid/far-IR) bands that
+    pyphot's bundled library lacks -- Spitzer MIPS, AKARI/IRC, IRAS and Herschel
+    SPIRE PLW. Curves and detector convention ship in Datafiles/custom_filters.h5
+    (built by notebooks/build_custom_filters.py). Returns {} if the file is
+    absent so the library degrades to the pyphot default instead of failing.
+    """
+    import h5py
+    from pyphot.ezunits import unit
+    out = {}
+    if not os.path.isfile(custom_filters_path):
+        return out
+    with h5py.File(custom_filters_path, 'r') as h:
+        for name in h:
+            g = h[name]
+            dt = g.attrs.get('dtype', 'photon')
+            un = g.attrs.get('unit', 'Angstrom')
+            dt = dt.decode() if isinstance(dt, bytes) else dt
+            un = un.decode() if isinstance(un, bytes) else un
+            out[name] = pyphot.Filter(
+                np.asarray(g['wavelength'][:], float) * unit['AA'],
+                np.asarray(g['transmission'][:], float),
+                name=name, dtype=dt, unit=un)
+    return out
+
+
+_CUSTOM_LIB = _load_custom_filters()
+
+
+def _get_filter(band):
+    """Filter lookup preferring ARIADNE's custom library, then pyphot's."""
+    if band in _CUSTOM_LIB:
+        return _CUSTOM_LIB[band]
+    return _PYPHOT_LIB[band]
 
 
 def extract_info(magnitudes, errors, filters):
@@ -103,7 +143,7 @@ def flux_to_mag(flux, flux_err, band):
 def get_zero_flux(band):
     """Look for the filter information in the pyphot library of filters."""
     # Load photometry filter library
-    filt = _PYPHOT_LIB[band]
+    filt = _get_filter(band)
     # Get Vega zero flux in erg / cm2 / s / um
     f0 = filt.Vega_zero_flux.to('erg/(um * cm ** 2 * s)').value
     return f0
@@ -112,7 +152,7 @@ def get_zero_flux(band):
 def get_effective_wavelength(band):
     """Get central wavelength of a specific filter in um."""
     # Load photometry filter library
-    filt = _PYPHOT_LIB[band]
+    filt = _get_filter(band)
     # Get central wavelength in um
     leff = filt.cl.to('um').value
     return leff
@@ -121,7 +161,7 @@ def get_effective_wavelength(band):
 def get_bandpass(band):
     """Get the bandpass of a specific filter in um."""
     # Load photometry filter library
-    filt = _PYPHOT_LIB[band]
+    filt = _get_filter(band)
     # Get lower and upper bandpass in um
     width = filt.width.to('um').value
     bp = width

@@ -218,7 +218,7 @@ def display_routine(engine, live_points, dlogz, ndim, bound=None, sample=None,
     pass
 
 
-def end(coordinator, elapsed_time, out_folder, engine, use_norm):
+def end(coordinator, elapsed_time, out_folder, engine, use_norm, grid=None):
     """Display end of run information."""
     c = random.choice(colors)
     _T = '\t\t\t'
@@ -231,15 +231,23 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
     if engine == 'Bayesian Model Averaging':
         res_dir = f'{out_folder}/BMA.pkl'
     else:
-        res_dir = f'{out_folder}/{engine}_out.pkl'
+        # Single-grid output is named by grid (``{grid}_out.pkl``), not by the
+        # sampling engine. Fall back to the engine name for backward compat.
+        res_dir = f'{out_folder}/{grid}_out.pkl' if grid else \
+            f'{out_folder}/{engine}_out.pkl'
     with closing(open(res_dir, 'rb')) as jar:
         out = pickle.load(jar)
 
     star = out['star']
     mask = star.filter_mask
-    for filt in star.filter_names[mask]:
-        p_ = get_noise_name(filt) + '_noise'
-        order = np.append(order, p_)
+    # Noise model: a single shared jitter term (jitter='shared') or one per
+    # band. Mirror whatever the fit used so the order matches the coordinator.
+    if 'shared_noise' in out['best_fit_averaged']:
+        order = np.append(order, 'shared_noise')
+    else:
+        for filt in star.filter_names[mask]:
+            p_ = get_noise_name(filt) + '_noise'
+            order = np.append(order, p_)
 
     # Display name mapping
     display_names = {
@@ -323,9 +331,13 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm):
             p2 = p3
         name = f'{p1} {p2}'
         med = out['best_fit_averaged'][p]
-        unc = out['uncertainties_averaged'][p]
-        ci = out['confidence_interval_averaged'][p]
-        print(colored(_fmt_row(name, med, unc, ci), c))
+        if not coordinator[i]:
+            unc = out['uncertainties_averaged'][p]
+            ci = out['confidence_interval_averaged'][p]
+            print(colored(_fmt_row(name, med, unc, ci), c))
+        else:
+            # Deactivated jitter (fixed at 0) — no uncertainty to show.
+            print(colored(_fmt_row(name, med), c))
 
     # Model weights / evidence
     print()

@@ -124,7 +124,14 @@ Or from the command line:
 python -c "from astroARIADNE.fetch import fetch_spectra_cache; fetch_spectra_cache()"
 ```
 
-No environment variables or additional setup required.
+Once downloaded the cache is found automatically. To use a cache stored
+elsewhere — a shared/NAS copy, or one you have extended with additional grids
+(e.g. BOSZ, SPHINX, TLUSTY) — point ARIADNE at it with the
+`ARIADNE_SPECTRA_CACHE` environment variable:
+
+```bash
+export ARIADNE_SPECTRA_CACHE=/path/to/spectra_cache.h5
+```
 
 ### Full Model Grids (Optional)
 
@@ -272,6 +279,15 @@ The starname is used purely for user identification later on, and the
 `gaia_id` is provided to make sure the automatic photometry retrieval collects
 the correct magnitudes, otherwise **ARIADNE** will try and get the `gaia_id` by
 itself using a cone search centered around the RA and DEC.
+
+**Convenience constructors.** If you already have the Gaia DR3 source id — or
+just the star's name — you can skip entering RA/Dec by hand and let **ARIADNE**
+resolve the coordinates for you:
+
+```python
+s = Star.from_gaia(5411736896952029568)   # coordinates from Gaia DR3 TAP
+s = Star.from_name('WASP-19')             # coordinates resolved via Simbad
+```
 
 Executing the previous block will start the photometry and stellar parameter
 retrieval routine. **ARIADNE** will query Gaia DR2 for an estimate on the
@@ -459,7 +475,9 @@ dynamic = False
 
 setup = [engine, nlive, dlogz, bound, sample, threads, dynamic]
 
-# Feel free to uncomment any unneeded/unwanted models
+# This is also ARIADNE's default ensemble, so setting `f.models` is optional —
+# a BMA run uses exactly this list if you don't override it. Comment out any
+# grid you don't want.
 models = [
 	'phoenix',
 	'btsettl',
@@ -467,7 +485,8 @@ models = [
 	'btcond',
 	'kurucz',
 	'ck04',
-	'bosz'      # MARCS+ATLAS9/Synspec, 2800-16000 K (BMA-capable)
+	'bosz',     # MARCS+ATLAS9/Synspec, 2800-16000 K (BMA-capable)
+	'sphinx'    # M dwarfs; only contributes at Teff < 4000 K
 ]
 
 f = Fitter()
@@ -480,25 +499,52 @@ f.models = models
 f.n_samples = 100000
 ```
 
-**Note:** While you can always select all 6 models, **ARIADNE** has an internal
+**Note:** While you can always select all 8 models, **ARIADNE** has an internal
 filter put in place in order to avoid having the user unintentionally bias the
 results. For stars with Teff > 4000 K BT-Settl, BT-NextGen and BT-Cond are
 identical and thus only BT-Settl is used, even if the three are selected. On the
 other hand, Kurucz and Castelli & Kurucz are known to work poorly on stars with
-Teff < 4000 K, thus they aren't used in that regime.
+Teff < 4000 K, thus they aren't used in that regime. Likewise SPHINX only covers
+M dwarfs, so it is used only below 4000 K and silently dropped above it. This is
+why listing every grid is safe — each one contributes only where it is valid.
 
-**Additional grids.** Three more grids ship with **ARIADNE**:
+**Additional grids.** Beyond the default ensemble, **ARIADNE** ships or supports
+these grids:
 
 | grid | regime | Teff (K) | use |
 | --- | --- | --- | --- |
 | `bosz` | FGK + warm | 2800–16000 | BMA member (independent MARCS+ATLAS9/Synspec physics) |
-| `sphinx` | M dwarfs | 2000–4000 | standalone |
+| `sphinx` | M dwarfs | 2000–4000 | BMA member (Teff-gated < 4000 K) — in the default ensemble |
 | `tlusty` | hot O/B (NLTE) | 15000–55000 | standalone |
+| `coelho` | FGK (optical-only) | ≥ 3500 | standalone |
+| `koester` | DA white dwarfs | 5000–80000 | standalone (no [Fe/H] axis; WD priors) |
+| `newera` | FGKM (modern opacities) | 2300–12000 | BMA member — **must be built first** (see below) |
 
-`bosz` can be added to the `models` list like any other (it is
-temperature-gated to its validity range). `sphinx` and `tlusty` are meant to be
-run **standalone** (see below); `tlusty` uses a wide uniform Teff prior because
-the FGK population prior cannot reach the hot-star regime.
+`bosz` and `sphinx` are part of the default BMA ensemble and are
+temperature-gated to their validity ranges (SPHINX contributes only below
+4000 K), so you can leave them in the `models` list for any target. `tlusty`
+and `coelho` are meant to be run **standalone** (see below): `tlusty` uses a
+wide uniform Teff prior because the FGK population prior cannot reach the
+hot-star regime, and `coelho` only covers the optical, so its redder
+photometry was extrapolated when the grid was built (ARIADNE drops those bands
+in a standalone fit, but BMA requires a shared band set, which is why it is not
+a BMA member).
+
+`koester` is a **DA white-dwarf** grid (Koester 2010): a perfectly rectilinear
+82 × 13 (Teff, log g) cube with **no metallicity axis** (a single pinned
+[Fe/H]=0 node). It runs standalone with white-dwarf-appropriate priors — uniform
+Teff over 5000–80000 K and uniform log g over 6.5–9.5 — and its ~3 µm red cutoff
+drops WISE/Spitzer (a featureless Rayleigh-Jeans tail there). It lets ARIADNE
+fit isolated white dwarfs and WD components, a regime no other grid reaches.
+
+`newera` is **PHOENIX-NewEra** (Husser et al. 2025), the modern-opacity
+successor to the bundled ACES PHOENIX grid, with rebuilt line lists and [M/H]
+down to −4.0. The grid is too large (tens of GB of spectra) to ship, so it is
+**not pre-built**: stage the spectra and build the DataFrame with
+`notebooks/download_newera.py` + `notebooks/build_model_grids.py newera`, then
+add `'newera'` to your `models` list. It is BMA-capable across the full FGKM
+range (it shares ACES's axes); take the α=0 slice, which the builder does
+automatically.
 
 ### Running a single model (standalone)
 
@@ -521,9 +567,29 @@ f.initialize()
 f.fit()                 # single-grid fit (not fit_bma)
 ```
 
-This is the right mode for the standalone grids: `sphinx` (M dwarfs),
-`tlusty` (hot stars), and `coelho` (optical-only). The output goes to the same
-files as a BMA run minus the model-averaging products.
+This is the right mode for the standalone-only grids `tlusty` (hot stars),
+`coelho` (optical-only) and `koester` (white dwarfs); `sphinx` can also be run
+this way for a pure M-dwarf fit, though it now participates in cool-star BMA by
+default. The output goes to the same files as a BMA run minus the
+model-averaging products. For `koester`, ARIADNE automatically switches to
+white-dwarf priors (uniform Teff 5000–80000 K, uniform log g 6.5–9.5, a
+WD-appropriate radius range) and pins `[Fe/H]=0` (the grid has no metallicity
+axis), so a WD fit needs nothing beyond `f.grid = 'koester'`. Validated on the
+DA standard GD 71 (recovered Teff/log g/radius/distance all consistent with the
+literature).
+
+Two caveats specific to white dwarfs, both inherent to broadband SED fitting
+rather than to the grid:
+
+- **Constrain `Av` for nearby WDs.** ARIADNE's default `Av` prior runs up to the
+  *full* line-of-sight dust maximum, which for a nearby WD (tens of pc) is far
+  more extinction than the star actually sees. The Teff–`Av` degeneracy then
+  biases Teff hot. Pin it — `f.prior_setup = {..., 'Av': ('fixed', 0.0)}` (or a
+  tight prior from a 3-D dust map) — for stars within ~100 pc.
+- **Hot WDs need UV.** Above ~25000 K the optical SED is nearly Rayleigh–Jeans,
+  so Teff and radius trade off unless GALEX (or other UV) photometry pins the
+  far-UV slope. Add it with `Star.add_mag` when the catalogue crossmatch misses
+  it (bright standards are often GALEX-saturated).
 
 **Grid wavelength coverage.** Some grids do not span the full set of filters
 **ARIADNE** supports. The Coelho 2014 grid, in particular, only covers the
@@ -549,12 +615,13 @@ evidences to be comparable — so Coelho should only be used standalone.
   isochrone age/mass fit (the dominant cost of a BMA run, parallelised across
   `threads`). Raising it trades age/mass precision for speed.
 
-We allow the use of four different extinction laws:
+We allow the use of five different extinction laws, set via `f.av_law`:
 
-- fitzpatrick
-- cardelli
-- odonnell
-- calzetti
+- fitzpatrick (Fitzpatrick 1999; the default)
+- cardelli (Cardelli, Clayton & Mathis 1989)
+- odonnell (O'Donnell 1994)
+- calzetti (Calzetti et al. 2000)
+- fm07 (Fitzpatrick & Massa 2007)
 
 The next step is setting up the priors to use:
 
@@ -575,11 +642,35 @@ The default prior for Teff is an empirical prior drawn from the RAVE survey
 temperatures distribution, the distance prior is drawn from the
 [Bailer-Jones](https://ui.adsabs.harvard.edu/abs/2021AJ....161..147B/abstract)
 distance estimate from Gaia EDR3, and the radius has a flat prior ranging from
-0.5 to 20 R$_\odot$. The default prior for the metallicity `z` and log g are
-also their respective distributions from the RAVE survey, the default prior for
-Av is a flat prior that ranges from 0 to the maximum of line-of-sight as per the
-SFD map, finally the excess noise parameters all have gaussian priors centered
-around their respective uncertainties.
+0.5 to 20 R$_\odot$. The default prior for the metallicity `z` is a population
+normal `N(−0.125, 0.234)` dex, and the default log g prior is uniform on
+3.5–6.0 dex (replaced by an isochrone `N(logg, σ)` estimate when MIST provides
+one). The default prior for Av is a flat prior that ranges from 0 to the maximum
+of line-of-sight as per the SFD map, finally the excess noise parameters all
+have gaussian priors centered around their respective uncertainties.
+
+In all cases a star-specific spectroscopic prior takes precedence over these
+defaults: Teff/log g are drawn from the survey chain
+PASTEL → APOGEE DR17 → GALAH DR3 → RAVE DR6 → LAMOST DR11 (first match wins),
+and [Fe/H] defaults to the Hypatia Catalog (Hinkel et al. 2014), falling back to
+that survey chain on a Hypatia miss.
+
+**Cool dwarfs (automatic M-dwarf priors).** The population Teff/log g priors
+above are tuned to FGK stars and mishandle M dwarfs — the Teff prior pulls them
+several hundred K hot, and the broad log g prior admits a spurious giant
+solution. **ARIADNE** therefore handles cool stars automatically, in two steps:
+
+- **Cool stars** — flagged by Gaia colour BP−RP > 1.8 (falling back to a Gaia
+  Teff < 4000 K when colour is unavailable) — get an M/late-K **uniform Teff
+  prior**, `U(2300, 4200)` K, instead of the FGK population prior.
+- **Cool dwarfs** — cool stars that are *also* on the main sequence, flagged by
+  absolute magnitude M_G > 8 (falling back to luminosity < 0.5 L⊙) —
+  *additionally* get a tight main-sequence **`N(5.0, 0.25)` log g prior**, which
+  is what keeps the broadband fit from drifting into the giant solution.
+
+This needs no configuration. A spectroscopic Teff/log g — the kind the librarian
+attaches to the `Star` from survey catalogues, not a value you set by hand in
+`prior_setup` — always takes precedence over both automatic choices.
 
 We offer customization on the priors as well, those are listed in the following
 table.
@@ -632,6 +723,57 @@ f.fit_bma()
 
 Now we wait for our results!
 
+## Unresolved binaries (SB2 mode)
+
+If a target is a known (or suspected) unresolved binary, **ARIADNE** can fit the
+SED as the **sum of two stellar components** sharing distance, extinction and
+metallicity. Turn it on with `f.binary = True`. The mode **requires at least one
+flux-ratio (contrast) constraint** — a magnitude difference Δm = |m₂ − m₁|
+measured in a band (e.g. from speckle/AO imaging, or Gaia) — because the
+secondary is otherwise degenerate. It also runs only in the explicit
+radius/distance parametrisation, so it needs a **real parallax-based distance**
+(it refuses `use_norm` mode). Supply each contrast with `add_contrast`:
+
+```python
+f = Fitter()
+f.star = s
+f.setup = ['dynesty', 500, 0.5, 'multi', 'rwalk', 4, False]
+f.bma = False
+f.grid = 'phoenix'                      # single grid, or f.bma=True + f.models
+f.binary = True
+f.add_contrast('SDSS_g', 5.64, 0.05)    # Δmag and its 1σ in a blue band
+f.add_contrast('2MASS_Ks', 2.73, 0.05)  # ...and a red one
+f.prior_setup = {
+    'teff': ('default'), 'logg': ('default'), 'z': ('default'),
+    'dist': ('default'), 'rad': ('default'), 'Av': ('default'),
+}
+f.initialize()
+f.fit()                                 # or f.fit_bma() for a BMA-binary fit
+```
+
+The model adds the secondary's `teff2`, `logg2` and `rad2` (with `teff1 ≥ teff2`
+enforced); the primary keeps the usual names. Things to know:
+
+- **One contrast band pins the *dilution* but not the secondary Teff.** With a
+  single Δm the secondary lies on a `teff2`/`rad2` ridge; **ARIADNE** flags a
+  prior-dominated secondary in `out['binary_secondary_unconstrained']` (set when
+  the Teff₂ posterior scatter exceeds 15 % of its median). Two contrast bands of
+  *different colour* constrain the secondary properly (recovered to ~1 % on
+  synthetic two-band tests).
+- **The main deliverable is the per-band host-flux fraction**, the received-flux
+  ratio (R₁²f₁)/(R₁²f₁ + R₂²f₂) — the Furlan & Howell planet-radius dilution /
+  third-light correction — in `out['binary_dilution']` (and as `dilution_<band>`
+  posterior traces). With BMA those traces are averaged across grids, so the
+  dilution carries model-systematic uncertainty.
+- **A fair model comparison runs automatically.** After the fit, **ARIADNE** fits
+  *both* the single-star and the binary model on the *same photometry* (no
+  contrast term) and reports the **SED-only** Bayesian evidence in
+  `out['binary_vs_single']`: does the photometry alone favour two temperatures
+  (`delta_lnZ > 0`), independent of the contrast detection. This adds two extra
+  fits, so it roughly triples the run time.
+- `plot_SED()` overlays both components and their sum, with the usual gray
+  posterior-draw band.
+
 ## Visualization
 
 After the fitting has finished, we need to visualize our results. **ARIADNE**
@@ -656,7 +798,7 @@ Now we only need to specify the results file location and the output folder
 for the plots!
 
 ```python
-in_file = out_folder + 'BMA_out.pkl'
+in_file = out_folder + 'BMA.pkl'
 plots_out_folder = 'your plots folder here'
 ```
 
@@ -699,12 +841,14 @@ the recommended BMA (Bayesian Model Averaging) approach.
 After **ARIADNE** has finished running, it will output a series of files and
 plots showing the results of the fit and other information.
 
-The most important file is the `best_fit.dat` which contains the best fiting
-parameters with the 1 sigma error bars and the 3 sigma confidence interval.
-Then there are pickle files for each of the used models plus a last one for the
-BMA, these contain raw information about the results. There is a `prior.dat`
-file that shows the priors used and a `mags.dat` file with the used magnitudes
-and filters.
+The most important file holds the best-fitting parameters with their 1σ error
+bars and 3σ confidence intervals. A single-grid run writes it as `best_fit.dat`;
+a BMA run instead writes two — `best_fit_sample.dat` (from the evidence-weighted
+resampled posterior) and `best_fit_average.dat` (from the supersampled weighted
+average). Then there are pickle files for each of the used models
+(`{grid}_out.pkl`) plus a last one for the BMA (`BMA.pkl`); these contain raw
+information about the results. There is a `prior.dat` file that shows the priors
+used and a `mags.dat` file with the used magnitudes and filters.
 
 Another important output are the plots. Inside the plots folder you can find
 `CORNER.png/pdf` with the cornerplot (the plot showing the distribution of the
@@ -741,6 +885,48 @@ In the example below the star is a clean ~5500 K blackbody and the WISE W2
 point (circled in red) shows a clear infrared excess above the fit:
 
 ![Blackbody QC](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/SED_blackbody.png)
+
+### Fit-health diagnostics
+
+Every fit now records a purely diagnostic health summary (it never alters the
+fit) and prints it after the run. Each grid's pickle carries an `out['diagnostics']`
+dict with:
+
+- `logz` / `logzerr` — the grid's log-evidence and its error.
+- `eff_samples` — the Kish effective sample size of the importance weights; a
+  low value flags an under-sampled, unreliable posterior.
+- `dlogz_final` — the last log-evidence increment, a convergence proxy.
+- `edge_flags` — any of `teff`/`logg`/`z` whose posterior median sits within 2 %
+  of a grid boundary, i.e. the fit is pegged against the edge of the model grid
+  and its (tight) error bar should not be trusted.
+
+A BMA run aggregates these into `out['per_model_diagnostics']` (keyed by grid)
+plus `out['evidences_err']`, and prints a **PER-GRID FIT HEALTH** table so you
+can see at a glance which grids converged cleanly and which railed against an
+edge.
+
+### Binary-fit outputs
+
+When run in [SB2 mode](#unresolved-binaries-sb2-mode), each **per-grid pickle**
+(`{grid}_out.pkl`) carries extra keys on top of the usual single-star parameters
+(which now include `teff2`, `logg2`, `rad2` for the secondary):
+
+- `binary` — `True`, so downstream tools and the plotter know to treat the fit
+  as two-component.
+- `binary_dilution` — per-band received-flux fraction (R₁²f₁)/(R₁²f₁ + R₂²f₂),
+  the Furlan & Howell dilution / third-light correction. The same quantity is
+  also stored band-by-band as `dilution_<band>` posterior traces, which (unlike
+  the dict) propagate into `BMA.pkl` and are therefore grid-averaged under BMA.
+- `binary_secondary_unconstrained` — `True` when the secondary Teff posterior is
+  prior-dominated, i.e. its relative scatter `std(Teff₂)/median(Teff₂) > 0.15`
+  (the usual outcome of supplying only one contrast band).
+- `binary_vs_single` — the automatic SED-only model comparison: a dict (one per
+  grid) with `lnZ_binary_sed`, `lnZ_single` and `delta_lnZ` (binary minus
+  single). `delta_lnZ > 0` means the photometry alone favours two temperatures.
+
+These binary keys live in the per-grid pickles; under BMA only the grid-averaged
+`dilution_<band>` traces are carried into `BMA.pkl`. The SED plot overlays both
+stellar components and their sum.
 
 
 ## NetCDF Export (Ecosystem Interop)

@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0] - 2026-05-31
 
 ### Added
+- Koester DA white-dwarf grid (`grid='koester'`; Koester 2010, via SVO). A
+  perfectly rectilinear 82×13 (Teff 5000–80000 K, log g 6.5–9.5) cube with no
+  metallicity axis — built with a single pinned `[Fe/H]=0` node that the
+  trilinear interpolator handles as a degenerate third axis. Runs standalone
+  with white-dwarf priors (uniform Teff/log g, a WD-appropriate radius range
+  reaching below the main-sequence 0.05 R_sun floor, `[Fe/H]` fixed), and a 3 µm
+  red cutoff (`grid_wave_coverage['koester']`) drops WISE/Spitzer. Lets ARIADNE
+  fit isolated white dwarfs / WD components, a regime no other grid reaches.
+  Validated on the DA standard GD 71. Build with `notebooks/download_koester.py`
+  + `build_model_grids.py koester`.
+- PHOENIX-NewEra grid support (`grid='newera'`; Husser et al. 2025), the
+  modern-opacity ACES successor (rebuilt line lists, `[M/H]` to −4.0),
+  BMA-capable across the full FGKM range. The spectra are too large to ship, so
+  the grid is wired but not pre-built: stage and build it with
+  `notebooks/download_newera.py` + `build_model_grids.py newera` (the builder
+  pins the α=0 slice). The reader is verified against a real NewEra HSR file.
+- BMA now ships with a default model ensemble (`phoenix`, `btsettl`,
+  `btnextgen`, `btcond`, `kurucz`, `ck04`, `bosz`, `sphinx`), so `Fitter.bma =
+  True` no longer requires hand-setting `Fitter.models` — a BMA run with no
+  `models` set previously raised. SPHINX is now part of that default, Teff-gated
+  to the M-dwarf regime (< 4000 K) by the existing per-grid temperature filter,
+  so it contributes to cool-star fits and is silently dropped for warmer stars.
+  Coelho (optical-only) and TLUSTY (hot-star) remain standalone-only and must be
+  requested explicitly. Listing every grid stays safe because each is gated to
+  the temperature range where it is valid.
 - Unresolved-binary / SB2 fitting mode (`Fitter.binary = True`). The forward
   model sums two stellar components (`teff2/logg2/rad2` added) sharing distance,
   extinction and metallicity, with `teff1 >= teff2` enforced in the prior
@@ -47,11 +72,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typo guard on `Fitter` config: assigning an unknown public attribute (e.g.
   `f.bmaa = True` instead of `f.bma`) now raises `AttributeError` instead of
   silently creating a dead attribute and running the wrong kind of fit.
+- **IR-excess measurement**, reach-gated across grids. The mid/far-IR bands are
+  treated as excess bands (not photosphere-fit bands) and quantified post-fit:
+  per band, the model vs observed flux and a significance
+  `(obs − model) / √(obs_err² + model_err²)` against the evidence-weighted
+  posterior-predictive model. A band is quantified only where *every* in-play
+  grid reaches it — single fit → that grid; BMA → the intersection of the
+  ensemble's (reliability-capped) reach — and redder bands are shown plot-only.
+  Stored in `out['irx']`.
+- The atmosphere grids are **reconvolved out to the mid/far-IR**, each to its own
+  true spectral reach (BT-Settl/NextGen/Cond ~150 µm, TLUSTY to SPIRE 250 µm,
+  CK04/Kurucz 160 µm, SPHINX ~70 µm, BOSZ to MIPS 24). A transmission-area NaN
+  guard self-clamps every band to where the spectrum actually covers it, so each
+  grid carries the common band set with NaN beyond its reach.
+- A **custom-filter library** (`Datafiles/custom_filters.h5`, built from the SVO
+  Filter Profile Service by `notebooks/build_custom_filters.py`) supplies the
+  mid/far-IR passbands pyphot lacks — Spitzer MIPS 24/70/160, AKARI/IRC S9W &
+  L18W, IRAS 12/25/60/100, Herschel SPIRE PLW — in their energy (bolometer)
+  convention, loaded alongside the pyphot library by `phot_utils`.
+- The librarian now fetches **AllWISE W3 (12 µm) and W4 (22 µm)** and routes them
+  to the IR-excess set, so excess is measured automatically for any star with
+  AllWISE photometry (`qph` upper-limits rejected, Vega mags like W1/W2).
 
 ### Changed
 - Bayesian Model Averaging weights: the evidence softmax now shifts by the
   maximum log-evidence instead of the minimum, preventing `exp()` overflow to
   `nan` weights when one grid dominates by a large margin (Δln Z ≳ 709).
+- **Model grids are now stored as HDF5 flux cubes** (`<Name>.h5`) instead of
+  pandas-pickled DataFrames (`<Name>_DF.pkl`). The interpolator reads the cube
+  directly, so the grids no longer depend on the pandas/pickle version they were
+  written with and survive numpy/pandas upgrades; pandas is no longer imported
+  on the fit path.
 
 ### Removed
 - **The `'multinest'` sampling engine has been removed** (deprecated in 1.5.0).
@@ -59,8 +110,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine and is faster. `engine='multinest'` now raises a clear error, and
   `pymultinest` is no longer imported. **Breaking change** for any code that
   passed `engine='multinest'`.
+- The legacy human-readable `model_grid_<Name>.dat` grid tables (~90 MB) are
+  gone; `Star.load_grid` now reads the grid axes from the HDF5 cube instead.
 
 ### Fixed
+- Single-grid fits crashed at the end-of-run summary: `end()` read the output
+  back as `{engine}_out.pkl` (e.g. `dynesty_out.pkl`) while `save()` writes it
+  as `{grid}_out.pkl`. `end()` now reads the grid-named pickle. The results were
+  always written correctly; only the final summary raised.
 - `_make_transform` (prior transform) read only keyword arguments, so a
   positionally-constructed prior (`truncnorm(a, b, loc, scale)`) raised a
   `KeyError` and `norm(mu, sigma)` silently became a standard normal. It now
