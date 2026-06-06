@@ -81,14 +81,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ensemble's (reliability-capped) reach — and redder bands are shown plot-only.
   `out['irx']['_summary']` aggregates this into catalogue columns: an excess χ²,
   the number of ≥3σ bands, a `has_excess` flag, and — when ≥2 positive bands are
-  available — a characterization of the excess under two hypotheses: a
-  single-temperature **debris-disk blackbody** (`t_dust`, fractional excess
-  luminosity `l_dust_over_lstar`) and a **cool unresolved companion** (a grid
-  photosphere of free `teff2`/radius). The two fits' χ² discriminate by SED
-  shape (a disk peaks in the mid-IR; a companion is on its Rayleigh-Jeans tail),
-  giving an `excess_class` of `disk` / `companion` / `ambiguous` and a
-  `delta_chi2`. Stored per band in `out['irx']`; the `SEDPlotter(ir_excess=True)`
-  SED overlays the fitted disk blackbody and labels the classification.
+  available — **Bayesian model selection** over three hypotheses for the excess:
+  no excess (null), a **debris-disk blackbody** (`t_dust`, fractional excess
+  luminosity `l_dust_over_lstar`), and a **cool unresolved companion** (a grid
+  photosphere of free `teff2`/radius). Each hypothesis' Bayesian evidence is
+  integrated by direct 2-D quadrature over physical priors (exact at this
+  dimensionality), giving posterior model probabilities `p_none` / `p_disk` /
+  `p_companion`, an `excess_class`, the disk-vs-companion log Bayes factor, and
+  marginal parameter posteriors (mean ± std). This is the evidence-based
+  analogue of ARIADNE's BMA — the Occam-penalised null wins on noise, where a χ²
+  comparison would force a spurious disk or companion. Stored per band in
+  `out['irx']`; `SEDPlotter(ir_excess=True)` overlays the fitted disk blackbody
+  and labels the classification.
 - The atmosphere grids are **reconvolved out to the mid/far-IR**, each to its own
   true spectral reach (BT-Settl/NextGen/Cond ~150 µm, TLUSTY to SPIRE 250 µm,
   CK04/Kurucz 160 µm, SPHINX ~70 µm, BOSZ to MIPS 24). A transmission-area NaN

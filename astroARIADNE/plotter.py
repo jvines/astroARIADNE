@@ -643,8 +643,8 @@ class SEDPlotter:
                        s=self.scatter_size, facecolor='none', zorder=3, lw=3)
             # Overlay the fitted excess characterization + classification.
             fit = getattr(self, 'irx_fit', None)
-            bb = (fit or {}).get('blackbody')
-            if bb:
+            bb = (fit or {}).get('disk')
+            if bb and fit.get('excess_class') in ('disk', 'ambiguous'):
                 from scipy.constants import h as _h, c as _c, k as _kB
                 lam_um = np.geomspace(5.0, max(self.irx_wave.max() * 1.5, 50.0),
                                       200)

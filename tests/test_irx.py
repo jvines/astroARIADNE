@@ -115,7 +115,7 @@ def test_quantified_excess_significance():
         # aggregate stats
         assert s1['has_excess'] is True and s1['n_significant'] == 1
         assert s1['excess_chi2'] > 25                 # sigma>5 -> chi2>25
-        assert s1['blackbody'] is None                # 1 band can't fit a BB
+        assert s1['disk'] is None                     # 1 band -> no selection
         assert r0['_summary']['has_excess'] is False
     finally:
         fmod.load_grid = orig
@@ -194,56 +194,53 @@ def test_reliability_gating_respects_coverage():
     assert not (grid_irx_reach('coelho', coelho) & set(irx_bands))
 
 
-def test_disk_vs_companion_discrimination():
-    """Inject a cool companion vs a debris-disk blackbody at a real grid's IR
-    bands; the classifier recovers each (Teff2 vs T_dust) and labels it."""
+def test_excess_model_selection():
+    """Bayesian model selection on injected excesses (real grid IR bands):
+    a cool companion, a debris disk, and pure noise each win the right model,
+    with parameters recovered from the marginal posteriors."""
     from scipy.constants import h, c, k as kB
     from astroARIADNE.sed_library import load_grid, model_grid
     from astroARIADNE.phot_utils import get_effective_wavelength
-    from astroARIADNE.fitter import (_fit_excess_blackbody,
-                                     _fit_excess_companion,
-                                     _discriminate_excess)
+    from astroARIADNE.fitter import _excess_model_selection
     g = load_grid('btsettl')
-    taxis = g.index_columns[1]
+    ta = g.index_columns[1]
     names = np.array(['WISE_RSR_W3', 'AKARI_IRC_L18W', 'WISE_RSR_W4',
                       'SPITZER_MIPS_24', 'IRAS_60', 'SPITZER_MIPS_70',
                       'HERSCHEL_PACS_GREEN', 'SPITZER_MIPS_160'])
     waves = np.array([get_effective_wavelength(b) for b in names])
     dist = 30.0
 
-    def classify(F):
-        E = 0.05 * F
-        bb = _fit_excess_blackbody(waves, F, E, dist, 1.0)
-        comp = _fit_excess_companion(names, waves, F, E, g, 0.0, 0.0, dist,
-                                     False, _avlaw, taxis.min(), taxis.max())
-        return _discriminate_excess(bb, comp), bb, comp
+    def sel(F, E):
+        return _excess_model_selection(names, waves, F, E, g, 0., 0., dist, 1.0,
+                                       False, _avlaw, 6000., ta.min(), ta.max())
 
-    # cool companion (Teff2 = 3000 K) -> labelled 'companion', Teff2 recovered
+    # companion (Teff2 = 3000 K) -> P(companion) dominant, Teff2 recovered
     Fc = np.asarray(model_grid(np.array([3000., 4.8, 0., dist, 0.3, 0.]),
                                names, waves, g, False, _avlaw)).ravel()
-    (cls, d), bb, comp = classify(Fc)
-    assert cls == 'companion', (cls, d)
-    assert abs(comp['teff2'] - 3000) < 200
+    r = sel(Fc, 0.05 * Fc)
+    assert r['excess_class'] == 'companion'
+    assert r['p_companion'] > 0.9
+    assert abs(r['companion']['teff2'] - 3000) < 300
 
-    # debris disk (150 K blackbody) -> labelled 'disk', T_dust recovered
+    # debris disk (150 K) -> P(disk) dominant, T_dust + L_dust/L* recovered
     def planck_um(lam, T):
         ll = lam * 1e-6
         return (2 * h * c ** 2 / ll ** 5) / np.expm1(h * c / (ll * kB * T)) \
             * 1e-3
     Fd = 2e-16 * planck_um(waves, 150.0)
-    (cls, d), bb, comp = classify(Fd)
-    assert cls == 'disk', (cls, d)
-    assert abs(bb['t_dust'] - 150) < 20
+    r = sel(Fd, 0.05 * Fd)
+    assert r['excess_class'] == 'disk'
+    assert r['p_disk'] > 0.9
+    assert abs(r['disk']['t_dust'] - 150) < 25
 
-
-def test_discriminate_helper_edge_cases():
-    from astroARIADNE.fitter import _discriminate_excess
-    assert _discriminate_excess(None, None)[0] is None
-    assert _discriminate_excess({'fit_chi2': 1.0}, None)[0] == 'disk'
-    assert _discriminate_excess(None, {'fit_chi2': 1.0})[0] == 'companion'
-    # near-tie -> ambiguous
-    assert _discriminate_excess({'fit_chi2': 5.0},
-                                {'fit_chi2': 5.5})[0] == 'ambiguous'
+    # pure noise (no excess) -> the Occam-penalised null wins, not a spurious
+    # disk/companion (the whole point of evidence over chi^2)
+    rng = np.random.default_rng(1)
+    E = np.full(len(names), 1e-15)
+    Fn = rng.normal(0, 1e-15, len(names))
+    r = sel(Fn, E)
+    assert r['excess_class'] == 'none'
+    assert r['p_none'] > 0.5
 
 
 if __name__ == '__main__':

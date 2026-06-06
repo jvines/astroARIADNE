@@ -114,70 +114,130 @@ def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
                 omega_sr=Omega, n_bands=int(m.sum()), fit_chi2=chi2)
 
 
-def _fit_excess_companion(names, waves_um, excess, excess_err, interp, z, av,
-                          dist_pc, use_norm, av_law, teff_lo, teff_hi,
-                          logg2=4.8):
-    """Fit the IR excess as a cool unresolved stellar companion: a grid
-    photosphere of free ``Teff2`` and radius (``logg2`` fixed, sharing the
-    primary's ``z``/``Av``). Returns ``{teff2, rad2, fit_chi2, n_bands}`` or
-    ``None`` (<2 positive bands / grid can't be evaluated).
+def _excess_model_selection(names, waves_um, excess, excess_err, interp,
+                            z, av, dist_pc, lum_lsun, use_norm, av_law,
+                            teff_primary, grid_teff_lo, grid_teff_hi):
+    """Bayesian model selection on the IR excess.
 
-    This is the alternative hypothesis to ``_fit_excess_blackbody``: across the
-    mid-IR a cool star sits on its Rayleigh-Jeans tail (monotonic), whereas a
-    debris-disk blackbody peaks there -- so the two fits' chi^2 discriminate.
+    Compares three hypotheses for the excess fluxes by their Bayesian evidence:
+    no excess (null, 0 parameters), a **debris-disk blackbody** (free dust
+    temperature ``T`` and fractional luminosity ``L_dust/L_*``), and a **cool
+    unresolved companion** (free ``Teff2`` and radius ``R2``, a grid photosphere
+    sharing the primary's z/Av). The evidence integrals are done by direct 2-D
+    quadrature over physical priors -- at two dimensions this is exact and
+    noise-free, so it is preferable to nested sampling (which would only add
+    Monte-Carlo error). This is the evidence-based analogue of ARIADNE's BMA,
+    replacing a chi^2 point comparison: posterior model probabilities fall out
+    as ``Z_i / sum Z`` (equal model priors), with the common data normalisation
+    cancelling. Also returns marginal parameter posteriors (mean +/- std).
+
+    Priors: log-uniform ``T`` in [30, 1500] K (silicates sublimate hotter) and
+    ``L_dust/L_*`` in [1e-7, 1e-1]; uniform ``Teff2`` in
+    [2300 K, min(grid, T_primary)] (a companion is cooler than the primary) and
+    log-uniform ``R2`` in [0.03, 1] R_sun. Returns ``None`` if <2 finite bands
+    or distance/luminosity are unknown.
     """
-    names = np.asarray(names)
+    from scipy.constants import h as H, c as C, k as KB, sigma as SB
     w = np.asarray(waves_um, float)
     F = np.asarray(excess, float)
     E = np.asarray(excess_err, float)
-    m = (F > 0) & np.isfinite(F) & np.isfinite(E) & (E > 0)
-    if m.sum() < 2:
+    sel = np.isfinite(F) & np.isfinite(E) & (E > 0)
+    if sel.sum() < 2 or not dist_pc or dist_pc <= 0 \
+            or not lum_lsun or lum_lsun <= 0:
         return None
-    names, w, F, E = names[m], w[m], F[m], E[m]
-    lo, hi = max(float(teff_lo), 2300.0), min(float(teff_hi), 6000.0)
-    if hi <= lo or (not use_norm and (not dist_pc or dist_pc <= 0)):
-        return None
-    wts = 1.0 / E ** 2
-    best = None                                        # (chi2, Teff2, scale)
-    for T2 in np.linspace(lo, hi, 80):
-        if use_norm:
-            theta = np.array([T2, logg2, z, 1.0, av])
-        else:
-            theta = np.array([T2, logg2, z, dist_pc, 1.0, av])
-        funit = np.asarray(
-            model_grid(theta, names, w, interp, use_norm, av_law)).ravel()
-        if not np.all(np.isfinite(funit)) or np.all(funit <= 0):
-            continue
-        scale = float(np.sum(F * funit * wts) / np.sum(funit * funit * wts))
-        if scale <= 0:
-            continue
-        chi2 = float(np.sum(((F - scale * funit) * np.sqrt(wts)) ** 2))
-        if best is None or chi2 < best[0]:
-            best = (chi2, float(T2), scale)
-    if best is None:
-        return None
-    chi2, T2, scale = best
-    out = dict(teff2=T2, fit_chi2=chi2, n_bands=int(m.sum()))
-    if not use_norm:
-        out['rad2'] = float(np.sqrt(scale))            # R_sun (rad=1 -> rad2^2)
-    return out
+    names = np.asarray(names)[sel]
+    w, F, E = w[sel], F[sel], E[sel]
+    lam = w * 1e-6
+    inv2 = 1.0 / E ** 2
+    d_cm = dist_pc * 3.0856775815e18
+    l_star = lum_lsun * 3.828e33
 
+    chi2_null = float(np.sum(F ** 2 * inv2))             # model = 0
 
-def _discriminate_excess(bb, comp, thresh=2.0):
-    """Disk vs companion from the two excess fits' chi^2 (both 2-parameter, on
-    the same bands). Returns ``(label, delta_chi2)`` where delta = comp - disk
-    (positive favours the disk); within ``thresh`` of zero is 'ambiguous'.
-    """
-    if bb is None and comp is None:
-        return None, float('nan')
-    if comp is None:
-        return 'disk', float('nan')
-    if bb is None:
-        return 'companion', float('nan')
-    d = comp['fit_chi2'] - bb['fit_chi2']
-    if abs(d) < thresh:
-        return 'ambiguous', d
-    return ('disk' if d > 0 else 'companion'), d
+    # Disk grid: log-uniform (T, L_dust/L_*). Omega(T,L) inverts the validated
+    # L_dust = 4 d^2 Omega sigma T^4 * 1e3 chain.
+    Tg = np.geomspace(30.0, 1500.0, 64)
+    Lg = np.geomspace(1e-7, 1e-1, 64)
+    chi2_disk = np.empty((Tg.size, Lg.size))
+    omega_grid = np.empty((Tg.size, Lg.size))
+    for i, T in enumerate(Tg):
+        B = (2 * H * C ** 2 / lam ** 5) \
+            / np.expm1(H * C / (lam * KB * T)) * 1e-3     # erg/s/cm^2/um/sr
+        Omega = Lg * l_star / (4 * d_cm ** 2 * SB * T ** 4 * 1e3)
+        mod = Omega[:, None] * B[None, :]
+        chi2_disk[i] = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
+        omega_grid[i] = Omega
+
+    # Companion grid: uniform Teff2 (linear) x log-uniform R2 (log). Grid flux
+    # is computed once per Teff2 (rad=1) and scaled by R2^2.
+    t_hi = min(float(grid_teff_hi),
+               float(teff_primary) if teff_primary else 6000.0)
+    t_lo = max(float(grid_teff_lo), 2300.0)
+    comp_ok = t_hi > t_lo + 1.0
+    if comp_ok:
+        T2g = np.linspace(t_lo, t_hi, 64)
+        R2g = np.geomspace(0.03, 1.0, 64)
+        chi2_comp = np.full((T2g.size, R2g.size), np.inf)
+        for i, T2 in enumerate(T2g):
+            theta = (np.array([T2, 4.8, z, 1.0, av]) if use_norm
+                     else np.array([T2, 4.8, z, dist_pc, 1.0, av]))
+            funit = np.asarray(
+                model_grid(theta, names, w, interp, use_norm, av_law)).ravel()
+            if not np.all(np.isfinite(funit)) or np.all(funit <= 0):
+                continue
+            mod = (R2g ** 2)[:, None] * funit[None, :]
+            chi2_comp[i] = np.sum((F[None, :] - mod) ** 2 * inv2[None, :],
+                                  axis=1)
+    else:
+        T2g = R2g = None
+        chi2_comp = np.array([[np.inf]])
+
+    # Evidence = mean likelihood over the (prior-uniform) grid; subtract the
+    # global min chi^2 for numerical stability (cancels in the ratios).
+    m0 = min(chi2_null, float(np.min(chi2_disk)), float(np.min(chi2_comp)))
+    z_null = float(np.exp(-(chi2_null - m0) / 2))
+    wd = np.exp(-(chi2_disk - m0) / 2)
+    wc = np.exp(-(chi2_comp - m0) / 2)
+    z_disk = float(np.mean(wd))
+    z_comp = float(np.mean(wc)) if comp_ok else 0.0
+    tot = z_null + z_disk + z_comp
+    p_none, p_disk, p_comp = z_null / tot, z_disk / tot, z_comp / tot
+
+    wdn = wd / wd.sum()
+    TT, LL = np.meshgrid(Tg, Lg, indexing='ij')
+    t_dust = float(np.sum(wdn * TT))
+    ld = float(np.sum(wdn * LL))
+    disk = dict(
+        t_dust=t_dust, t_dust_err=float(np.sqrt(np.sum(wdn * (TT - t_dust) ** 2))),
+        l_dust_over_lstar=ld,
+        l_dust_over_lstar_err=float(np.sqrt(np.sum(wdn * (LL - ld) ** 2))),
+        omega_sr=float(np.sum(wdn * omega_grid)))
+    companion = None
+    if comp_ok and np.isfinite(wc).any() and wc.sum() > 0:
+        wcn = wc / wc.sum()
+        T2M, R2M = np.meshgrid(T2g, R2g, indexing='ij')
+        teff2 = float(np.sum(wcn * T2M))
+        rad2 = float(np.sum(wcn * R2M))
+        companion = dict(
+            teff2=teff2,
+            teff2_err=float(np.sqrt(np.sum(wcn * (T2M - teff2) ** 2))),
+            rad2=rad2,
+            rad2_err=float(np.sqrt(np.sum(wcn * (R2M - rad2) ** 2))))
+
+    pm = max(p_none, p_disk, p_comp)
+    if p_none == pm:
+        cls = 'none'
+    elif p_disk >= p_comp and p_disk / (p_disk + p_comp) > 0.75:
+        cls = 'disk'
+    elif p_comp > p_disk and p_comp / (p_disk + p_comp) > 0.75:
+        cls = 'companion'
+    else:
+        cls = 'ambiguous'
+    lnbf = (float(np.log(z_disk) - np.log(z_comp))
+            if (z_disk > 0 and z_comp > 0) else float('nan'))
+    return dict(p_none=p_none, p_disk=p_disk, p_companion=p_comp,
+                excess_class=cls, disk=disk, companion=companion,
+                lnbf_disk_companion=lnbf, n_bands=int(sel.sum()))
 
 
 class Fitter:
@@ -1850,27 +1910,24 @@ class Fitter:
         # Aggregate deviation from the photosphere across the IR bands.
         chi2 = float(np.nansum(
             [v['sigma'] ** 2 for v in q.values() if np.isfinite(v['sigma'])]))
-        # Characterize the excess two ways and discriminate. (a) Debris-disk
-        # blackbody -> dust temperature + fractional excess luminosity. (b) Cool
-        # unresolved companion -> a grid photosphere of free Teff2/radius. Which
-        # fits the excess SED better (chi^2) says disk vs companion.
+        # Characterize the excess by Bayesian model selection over three
+        # hypotheses -- no excess (null), a debris-disk blackbody, and a cool
+        # unresolved companion -- returning posterior model probabilities and
+        # marginal parameter posteriors (the evidence-based analogue of BMA).
         bf = out.get('best_fit_averaged', {})
         waves = [v['wave'] for v in q.values()]
         exc = [v['excess'] for v in q.values()]
         errs = [float(np.hypot(v['obs_err'], v['model_err']))
                 for v in q.values()]
-        bb = _fit_excess_blackbody(waves, exc, errs,
-                                   getattr(star, 'dist', None), bf.get('lum'))
-        comp = None
+        ms = {}
         if members:
             gname = max(members, key=lambda mm: mm[1])[0]   # highest weight
             taxis = interps[gname].index_columns[1]         # teff axis
-            comp = _fit_excess_companion(
+            ms = _excess_model_selection(
                 list(q), waves, exc, errs, interps[gname],
                 float(bf.get('z', 0.0)), float(bf.get('Av', 0.0)),
-                getattr(star, 'dist', None), self._norm, av_law,
-                float(taxis.min()), float(taxis.max()))
-        excess_class, dchi2 = _discriminate_excess(bb, comp)
+                getattr(star, 'dist', None), bf.get('lum'), self._norm, av_law,
+                bf.get('teff'), float(taxis.min()), float(taxis.max())) or {}
         result['_summary'] = dict(
             quantified=sorted(q),
             plot_only=sorted(k for k, v in result.items()
@@ -1879,10 +1936,13 @@ class Fitter:
             n_significant=len(sig),
             has_excess=bool(len(sig) >= 1),
             excess_chi2=chi2,
-            blackbody=bb,
-            companion=comp,
-            excess_class=excess_class,
-            delta_chi2=dchi2,
+            excess_class=ms.get('excess_class'),
+            p_none=ms.get('p_none'),
+            p_disk=ms.get('p_disk'),
+            p_companion=ms.get('p_companion'),
+            lnbf_disk_companion=ms.get('lnbf_disk_companion'),
+            disk=ms.get('disk'),
+            companion=ms.get('companion'),
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
                              if q else float('nan')))
         return result
