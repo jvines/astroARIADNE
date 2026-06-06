@@ -114,6 +114,72 @@ def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
                 n_bands=int(m.sum()), fit_chi2=chi2)
 
 
+def _fit_excess_companion(names, waves_um, excess, excess_err, interp, z, av,
+                          dist_pc, use_norm, av_law, teff_lo, teff_hi,
+                          logg2=4.8):
+    """Fit the IR excess as a cool unresolved stellar companion: a grid
+    photosphere of free ``Teff2`` and radius (``logg2`` fixed, sharing the
+    primary's ``z``/``Av``). Returns ``{teff2, rad2, fit_chi2, n_bands}`` or
+    ``None`` (<2 positive bands / grid can't be evaluated).
+
+    This is the alternative hypothesis to ``_fit_excess_blackbody``: across the
+    mid-IR a cool star sits on its Rayleigh-Jeans tail (monotonic), whereas a
+    debris-disk blackbody peaks there -- so the two fits' chi^2 discriminate.
+    """
+    names = np.asarray(names)
+    w = np.asarray(waves_um, float)
+    F = np.asarray(excess, float)
+    E = np.asarray(excess_err, float)
+    m = (F > 0) & np.isfinite(F) & np.isfinite(E) & (E > 0)
+    if m.sum() < 2:
+        return None
+    names, w, F, E = names[m], w[m], F[m], E[m]
+    lo, hi = max(float(teff_lo), 2300.0), min(float(teff_hi), 6000.0)
+    if hi <= lo or (not use_norm and (not dist_pc or dist_pc <= 0)):
+        return None
+    wts = 1.0 / E ** 2
+    best = None                                        # (chi2, Teff2, scale)
+    for T2 in np.linspace(lo, hi, 80):
+        if use_norm:
+            theta = np.array([T2, logg2, z, 1.0, av])
+        else:
+            theta = np.array([T2, logg2, z, dist_pc, 1.0, av])
+        funit = np.asarray(
+            model_grid(theta, names, w, interp, use_norm, av_law)).ravel()
+        if not np.all(np.isfinite(funit)) or np.all(funit <= 0):
+            continue
+        scale = float(np.sum(F * funit * wts) / np.sum(funit * funit * wts))
+        if scale <= 0:
+            continue
+        chi2 = float(np.sum(((F - scale * funit) * np.sqrt(wts)) ** 2))
+        if best is None or chi2 < best[0]:
+            best = (chi2, float(T2), scale)
+    if best is None:
+        return None
+    chi2, T2, scale = best
+    out = dict(teff2=T2, fit_chi2=chi2, n_bands=int(m.sum()))
+    if not use_norm:
+        out['rad2'] = float(np.sqrt(scale))            # R_sun (rad=1 -> rad2^2)
+    return out
+
+
+def _discriminate_excess(bb, comp, thresh=2.0):
+    """Disk vs companion from the two excess fits' chi^2 (both 2-parameter, on
+    the same bands). Returns ``(label, delta_chi2)`` where delta = comp - disk
+    (positive favours the disk); within ``thresh`` of zero is 'ambiguous'.
+    """
+    if bb is None and comp is None:
+        return None, float('nan')
+    if comp is None:
+        return 'disk', float('nan')
+    if bb is None:
+        return 'companion', float('nan')
+    d = comp['fit_chi2'] - bb['fit_chi2']
+    if abs(d) < thresh:
+        return 'ambiguous', d
+    return ('disk' if d > 0 else 'companion'), d
+
+
 class Fitter:
     """The Fitter class handles the fitting routines and parameter estimation.
 
@@ -1784,14 +1850,27 @@ class Fitter:
         # Aggregate deviation from the photosphere across the IR bands.
         chi2 = float(np.nansum(
             [v['sigma'] ** 2 for v in q.values() if np.isfinite(v['sigma'])]))
-        # Characterize the excess as a single-temperature blackbody (debris
-        # disk) -> dust temperature + fractional excess luminosity L_dust/L_*.
-        lum = out.get('best_fit_averaged', {}).get('lum')
-        bb = _fit_excess_blackbody(
-            [v['wave'] for v in q.values()],
-            [v['excess'] for v in q.values()],
-            [float(np.hypot(v['obs_err'], v['model_err'])) for v in q.values()],
-            getattr(star, 'dist', None), lum)
+        # Characterize the excess two ways and discriminate. (a) Debris-disk
+        # blackbody -> dust temperature + fractional excess luminosity. (b) Cool
+        # unresolved companion -> a grid photosphere of free Teff2/radius. Which
+        # fits the excess SED better (chi^2) says disk vs companion.
+        bf = out.get('best_fit_averaged', {})
+        waves = [v['wave'] for v in q.values()]
+        exc = [v['excess'] for v in q.values()]
+        errs = [float(np.hypot(v['obs_err'], v['model_err']))
+                for v in q.values()]
+        bb = _fit_excess_blackbody(waves, exc, errs,
+                                   getattr(star, 'dist', None), bf.get('lum'))
+        comp = None
+        if members:
+            gname = max(members, key=lambda mm: mm[1])[0]   # highest weight
+            taxis = interps[gname].index_columns[1]         # teff axis
+            comp = _fit_excess_companion(
+                list(q), waves, exc, errs, interps[gname],
+                float(bf.get('z', 0.0)), float(bf.get('Av', 0.0)),
+                getattr(star, 'dist', None), self._norm, av_law,
+                float(taxis.min()), float(taxis.max()))
+        excess_class, dchi2 = _discriminate_excess(bb, comp)
         result['_summary'] = dict(
             quantified=sorted(q),
             plot_only=sorted(k for k, v in result.items()
@@ -1801,6 +1880,9 @@ class Fitter:
             has_excess=bool(len(sig) >= 1),
             excess_chi2=chi2,
             blackbody=bb,
+            companion=comp,
+            excess_class=excess_class,
+            delta_chi2=dchi2,
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
                              if q else float('nan')))
         return result

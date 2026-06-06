@@ -194,6 +194,58 @@ def test_reliability_gating_respects_coverage():
     assert not (grid_irx_reach('coelho', coelho) & set(irx_bands))
 
 
+def test_disk_vs_companion_discrimination():
+    """Inject a cool companion vs a debris-disk blackbody at a real grid's IR
+    bands; the classifier recovers each (Teff2 vs T_dust) and labels it."""
+    from scipy.constants import h, c, k as kB
+    from astroARIADNE.sed_library import load_grid, model_grid
+    from astroARIADNE.phot_utils import get_effective_wavelength
+    from astroARIADNE.fitter import (_fit_excess_blackbody,
+                                     _fit_excess_companion,
+                                     _discriminate_excess)
+    g = load_grid('btsettl')
+    taxis = g.index_columns[1]
+    names = np.array(['WISE_RSR_W3', 'AKARI_IRC_L18W', 'WISE_RSR_W4',
+                      'SPITZER_MIPS_24', 'IRAS_60', 'SPITZER_MIPS_70',
+                      'HERSCHEL_PACS_GREEN', 'SPITZER_MIPS_160'])
+    waves = np.array([get_effective_wavelength(b) for b in names])
+    dist = 30.0
+
+    def classify(F):
+        E = 0.05 * F
+        bb = _fit_excess_blackbody(waves, F, E, dist, 1.0)
+        comp = _fit_excess_companion(names, waves, F, E, g, 0.0, 0.0, dist,
+                                     False, _avlaw, taxis.min(), taxis.max())
+        return _discriminate_excess(bb, comp), bb, comp
+
+    # cool companion (Teff2 = 3000 K) -> labelled 'companion', Teff2 recovered
+    Fc = np.asarray(model_grid(np.array([3000., 4.8, 0., dist, 0.3, 0.]),
+                               names, waves, g, False, _avlaw)).ravel()
+    (cls, d), bb, comp = classify(Fc)
+    assert cls == 'companion', (cls, d)
+    assert abs(comp['teff2'] - 3000) < 200
+
+    # debris disk (150 K blackbody) -> labelled 'disk', T_dust recovered
+    def planck_um(lam, T):
+        ll = lam * 1e-6
+        return (2 * h * c ** 2 / ll ** 5) / np.expm1(h * c / (ll * kB * T)) \
+            * 1e-3
+    Fd = 2e-16 * planck_um(waves, 150.0)
+    (cls, d), bb, comp = classify(Fd)
+    assert cls == 'disk', (cls, d)
+    assert abs(bb['t_dust'] - 150) < 20
+
+
+def test_discriminate_helper_edge_cases():
+    from astroARIADNE.fitter import _discriminate_excess
+    assert _discriminate_excess(None, None)[0] is None
+    assert _discriminate_excess({'fit_chi2': 1.0}, None)[0] == 'disk'
+    assert _discriminate_excess(None, {'fit_chi2': 1.0})[0] == 'companion'
+    # near-tie -> ambiguous
+    assert _discriminate_excess({'fit_chi2': 5.0},
+                                {'fit_chi2': 5.5})[0] == 'ambiguous'
+
+
 if __name__ == '__main__':
     import warnings
     warnings.filterwarnings('ignore')
