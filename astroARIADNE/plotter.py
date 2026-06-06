@@ -177,6 +177,9 @@ class SEDPlotter:
                 irx_mask = self.star.irx_filter_mask
                 irx_filt = self.star.filter_names[irx_mask]
                 irx_wave = self.star.wave[irx_mask]
+                # the IR-excess characterization (disk/companion fit) from the
+                # fit output, for the SED overlay; may be absent on old pickles.
+                self.irx_fit = (out.get('irx') or {}).get('_summary')
             for filt, flx, flx_e in zip(filters, flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = np.append(self.order, p_)
@@ -638,6 +641,33 @@ class SEDPlotter:
                        marker=self.marker_model,
                        edgecolors=self.marker_colors_model_irx,
                        s=self.scatter_size, facecolor='none', zorder=3, lw=3)
+            # Overlay the fitted excess characterization + classification.
+            fit = getattr(self, 'irx_fit', None)
+            bb = (fit or {}).get('blackbody')
+            if bb:
+                from scipy.constants import h as _h, c as _c, k as _kB
+                lam_um = np.geomspace(5.0, max(self.irx_wave.max() * 1.5, 50.0),
+                                      200)
+                lam = lam_um * 1e-6
+                bp = (2 * _h * _c ** 2 / lam ** 5) \
+                    / np.expm1(_h * _c / (lam * _kB * bb['t_dust'])) * 1e-3
+                ax.plot(lam_um, bb['omega_sr'] * bp * lam_um, ls='--', lw=2,
+                        color=self.irx_error_color, zorder=2,
+                        label=f"disk BB {bb['t_dust']:.0f} K")
+            if fit and fit.get('excess_class'):
+                cls = fit['excess_class']
+                comp = fit.get('companion') or {}
+                if cls == 'disk' and bb:
+                    note = (f"IR excess: disk  T$_d$={bb['t_dust']:.0f} K  "
+                            f"L$_d$/L$_*$={bb['l_dust_over_lstar']:.1e}")
+                elif cls == 'companion' and comp:
+                    note = (f"IR excess: companion  "
+                            f"T$_{{eff,2}}$={comp['teff2']:.0f} K")
+                else:
+                    note = f"IR excess: {cls}"
+                ax.annotate(note, xy=(0.97, 0.05), xycoords='axes fraction',
+                            ha='right', va='bottom', fontsize=11,
+                            color=self.irx_error_color)
 
         # Residual plot
         ax_r.axhline(y=0, lw=2, ls='--', c='k', alpha=.7)

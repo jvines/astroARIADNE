@@ -87,7 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   photosphere of free `teff2`/radius). The two fits' χ² discriminate by SED
   shape (a disk peaks in the mid-IR; a companion is on its Rayleigh-Jeans tail),
   giving an `excess_class` of `disk` / `companion` / `ambiguous` and a
-  `delta_chi2`. Stored per band in `out['irx']`.
+  `delta_chi2`. Stored per band in `out['irx']`; the `SEDPlotter(ir_excess=True)`
+  SED overlays the fitted disk blackbody and labels the classification.
 - The atmosphere grids are **reconvolved out to the mid/far-IR**, each to its own
   true spectral reach (BT-Settl/NextGen/Cond ~150 µm, TLUSTY to SPIRE 250 µm,
   CK04/Kurucz 160 µm, SPHINX ~70 µm, BOSZ to MIPS 24). A transmission-area NaN

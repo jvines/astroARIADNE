@@ -111,7 +111,7 @@ def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
     l_dust = 4.0 * np.pi * d_cm ** 2 * f_dust          # erg/s
     l_star = lum_lsun * 3.828e33                        # erg/s
     return dict(t_dust=T, l_dust_over_lstar=float(l_dust / l_star),
-                n_bands=int(m.sum()), fit_chi2=chi2)
+                omega_sr=Omega, n_bands=int(m.sum()), fit_chi2=chi2)
 
 
 def _fit_excess_companion(names, waves_um, excess, excess_err, interp, z, av,
