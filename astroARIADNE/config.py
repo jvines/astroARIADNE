@@ -96,9 +96,17 @@ irx_bands = frozenset([
 # Spitzer, Herschel) is not trustworthy.
 # Koester DA white-dwarf spectra span ~0.09-3.0 um; WISE W1/W2 and Spitzer IRAC
 # fall on the featureless Rayleigh-Jeans tail and are dropped (lossless).
+# Castelli-Kurucz / Kurucz (ATLAS9) extend to 160 um but are densely sampled
+# only to ~10 um (~9 wavelength points beyond, one in 10-15 um), so the mid-IR
+# band convolutions (W3 onward) are sparse-sampling artefacts -- their photo-
+# spheric W3/W4 come out ~2x the value the densely-sampled grids (BT-Settl, BOSZ)
+# and a blackbody agree on. Capped at 8.5 um: IRAC 5.8/8.0 (which match BT-Settl
+# to 1%) survive; AKARI 9 (already 18% off) and the unreliable W3+ are dropped.
 grid_wave_coverage = {
     'coelho': 0.9,
     'koester': 3.0,
+    'ck04': 8.5,
+    'kurucz': 8.5,
 }
 
 # termcolor colors.
