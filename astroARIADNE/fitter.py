@@ -1891,8 +1891,11 @@ class Fitter:
                 g, _w, ps = members[gpick[d]]
                 n = len(ps['teff'])
                 j = int(rng.integers(n))
-                theta = self._irx_theta({k: ps[k][j] for k in ps
-                                         if hasattr(ps[k], '__len__')})
+                # fixed parameters (e.g. a pinned Av) are stored as scalars, not
+                # posterior arrays -- take the scalar; index the rest by draw.
+                theta = self._irx_theta(
+                    {k: (ps[k][j] if hasattr(ps[k], '__len__') else ps[k])
+                     for k in ps})
                 m = model_grid(theta, band, wl, interps[g], self._norm,
                                av_law, binary=self.binary)
                 draws[d] = float(np.asarray(m).ravel()[0])
