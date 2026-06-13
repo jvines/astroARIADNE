@@ -322,8 +322,9 @@ def _bb_gate_teff(star):
 # distinct from any cool companion, so the frozen-primary residual fit is
 # unbiased and keeps better null specificity; below it (mid/late-M and cooler)
 # the host can absorb the companion and the joint fit is needed. ~4000 K spans
-# all M dwarfs while excluding K and warmer.
-COOL_HOST_GATE_K = 4000.0
+# all M dwarfs while excluding K and warmer. Override via the env var
+# ARIADNE_COOL_HOST_GATE (e.g. 0 to force the frozen-primary path everywhere).
+COOL_HOST_GATE_K = float(os.environ.get('ARIADNE_COOL_HOST_GATE', 4000.0))
 
 
 def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
