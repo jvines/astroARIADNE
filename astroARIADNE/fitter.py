@@ -317,10 +317,21 @@ def _bb_gate_teff(star):
     return t_bb
 
 
+# Host-temperature ceiling for the joint primary+companion marginalisation in
+# the IRX companion hypothesis. Above this the host (FGK/WD) is spectrally
+# distinct from any cool companion, so the frozen-primary residual fit is
+# unbiased and keeps better null specificity; below it (mid/late-M and cooler)
+# the host can absorb the companion and the joint fit is needed. ~4000 K spans
+# all M dwarfs while excluding K and warmer.
+COOL_HOST_GATE_K = 4000.0
+
+
 def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                             z, av, dist_pc, lum_lsun, use_norm, av_law,
                             teff_primary, fit_names=None, fit_waves=None,
-                            fit_errs=None, rad_primary=None):
+                            fit_errs=None, rad_primary=None, prim_ig=None,
+                            logg_primary=None, teff_primary_err=None,
+                            rad_primary_err=None, exc_obs=None, fit_obs=None):
     """Bayesian model selection on the IR excess.
 
     Compares three hypotheses for the excess fluxes by their Bayesian evidence:
@@ -479,7 +490,117 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
         r2_hi = max(float(rad_primary), 0.12)
     R2g = np.geomspace(0.03, r2_hi, 64)
     t_hi_max = float(teff_primary) if teff_primary else 6000.0
-    comp_per_grid = []   # (gname, T2g, chi2[64, 64])
+    # --- Joint primary marginalisation (de-biases the companion Teff2) ---
+    # The frozen-primary residual fit lets a COOL host photosphere absorb the
+    # companion: the base SED fit, run on the near-IR fit bands the companion
+    # also lights up, inflates the primary radius to soak up that flux, so the
+    # residual the companion grid then fits is biased and Teff2 pins (~1700 K on
+    # an M8 host, regardless of truth). Here the primary (teff1, rad1) is instead
+    # re-marginalised against the FULL band set jointly with the companion: the
+    # optical fit bands anchor the primary (it cannot inflate without breaking
+    # them) and the companion explains the IR excess. rad1 enters the flux
+    # linearly (model ~ rad1^2), so its amplitude A1 is profiled in closed form
+    # per node; teff1 is gridded. Debris disks are far-IR (orthogonal to the
+    # primary's optical/near-IR), so this marginalisation factorises for them
+    # into a common volume V_prim -- multiplied into z_null/z_disk/z_disk2 below,
+    # it cancels in disk-vs-disk ratios and only re-weights disk-vs-companion.
+    # Falls back to the frozen-primary residual fit when the primary grid or the
+    # observed fluxes are unavailable (e.g. the WD/Koester path).
+    #
+    # GATED TO COOL HOSTS (teff_primary < COOL_HOST_GATE_K): absorption only
+    # happens when the host photosphere overlaps the companion in temperature
+    # (both cool), i.e. mid/late-M and cooler primaries. On WARM (FGK) and WD
+    # hosts the cool companion is spectrally distinct, the frozen primary cannot
+    # absorb it, and the extra (teff1, rad1) freedom of the joint fit only adds
+    # noise-fitting flexibility -- which costs NULL specificity (a clean solar
+    # twin drifting to 'ambiguous') and perturbs WD+BD companion Teff2. So warm
+    # and WD hosts stay on the validated frozen-primary path; only cool hosts,
+    # where the bias is real, get the joint marginalisation.
+    joint = (prim_ig is not None and have_fit and exc_obs is not None
+             and fit_obs is not None and teff_primary
+             and np.isfinite(teff_primary) and float(teff_primary) > 0
+             and float(teff_primary) < COOL_HOST_GATE_K)
+    V_prim = 1.0
+    Tg1 = np.array([float(teff_primary) if teff_primary else 0.0])
+    def _scalar_err(e, default):
+        # posterior uncertainties are stored as asymmetric (lower, upper) pairs;
+        # collapse to a single positive scalar (the wider side) for the grid span.
+        try:
+            arr = np.atleast_1d(np.asarray(e, float))
+            arr = arr[np.isfinite(arr) & (arr > 0)]
+            return float(np.max(arr)) if arr.size else float(default)
+        except (TypeError, ValueError):
+            return float(default)
+
+    if joint:
+        obs_e = np.asarray(exc_obs, float)[sel]          # obs flux, excess bands
+        obs_f = np.asarray(fit_obs, float)[okf]          # obs flux, fit bands
+        te = float(teff_primary)
+        ts = _scalar_err(teff_primary_err, 0.03 * te)
+        pta = np.asarray(prim_ig.index_columns[1], float)   # primary Teff axis
+        t1_lo = max(te - 4 * ts, float(np.min(pta)))
+        t1_hi = min(te + 4 * ts, float(np.max(pta)))
+        Tg1 = (np.linspace(t1_lo, t1_hi, 11) if t1_hi > t1_lo + 1.0
+               else np.array([te]))
+        lg1 = float(logg_primary) if logg_primary is not None else 4.5
+        zg1 = float(z)
+        pcol_e = np.array([b in prim_ig.column_index for b in names])
+        pcol_f = np.array([b in prim_ig.column_index for b in fn_b])
+        Pe = np.zeros((Tg1.size, names.size))            # primary unit flux,
+        Pf = np.zeros((Tg1.size, fn_b.size))             # excess + fit bands
+        for k, t1 in enumerate(Tg1):
+            th = (np.array([t1, lg1, zg1, 1.0, av]) if use_norm
+                  else np.array([t1, lg1, zg1, dist_pc, 1.0, av]))
+            if pcol_e.any():
+                ve = np.asarray(model_grid(th, names[pcol_e], w[pcol_e],
+                                           prim_ig, use_norm, av_law)).ravel()
+                Pe[k, pcol_e] = np.where(np.isfinite(ve), ve, 0.0)
+            if pcol_f.any():
+                vf = np.asarray(model_grid(th, fn_b[pcol_f], fw[pcol_f],
+                                           prim_ig, use_norm, av_law)).ravel()
+                Pf[k, pcol_f] = np.where(np.isfinite(vf), vf, 0.0)
+        # rad1^2 (A1) clamp from the primary radius posterior.
+        if rad_primary is not None and np.isfinite(rad_primary) \
+                and rad_primary > 0:
+            r1 = float(rad_primary)
+            r1s = _scalar_err(rad_primary_err, 0.2 * r1)
+            a1_lo = max(r1 - 4 * r1s, 0.3 * r1) ** 2
+            a1_hi = (r1 + 4 * r1s) ** 2
+        else:
+            a1_lo, a1_hi = 1e-6, 1e6
+        # Primary-only fit-band chi^2 profile over teff1 (A1 profiled) -> V_prim
+        # (the primary nuisance volume the disk/null hypotheses also integrate).
+        den_f = np.sum(Pf ** 2 * finv2, axis=1)          # per teff1 node
+        num0_f = np.sum(obs_f[None, :] * Pf * finv2, axis=1)
+        chi2_p = np.full(Tg1.size, np.inf)
+        for k in range(Tg1.size):
+            if den_f[k] <= 0:
+                continue
+            a1 = min(max(num0_f[k] / den_f[k], a1_lo), a1_hi)
+            chi2_p[k] = float(np.sum((obs_f - a1 * Pf[k]) ** 2 * finv2))
+        c_fit = float(np.min(chi2_p)) if np.isfinite(chi2_p).any() else 0.0
+        V_prim = float(np.mean(np.exp(-(chi2_p - c_fit) / 2)))
+        # Pre-summed primary terms for the joint A1 profile (teff1-only).
+        num0 = (np.sum(obs_e[None, :] * Pe * inv2, axis=1)
+                + np.sum(obs_f[None, :] * Pf * finv2, axis=1))
+        den = den_f + np.sum(Pe ** 2 * inv2, axis=1)
+        # Re-optimised NULL (the R2 -> 0 limit of the joint companion), on the
+        # SAME [(fit - c_fit) + excess] scale as the companion chi^2. The null
+        # MUST get the same primary (teff1, rad1) re-optimisation the companion
+        # does -- otherwise the companion beats a clean photosphere purely by
+        # re-fitting the primary the frozen null cannot (a false-positive
+        # companion on null hosts; VB10 went none -> ambiguous without this).
+        a1n = np.clip(np.where(den > 0, num0 / np.where(den > 0, den, 1.0),
+                               np.nan), a1_lo, a1_hi)
+        chi2_null_re = np.full(Tg1.size, np.inf)
+        for k in range(Tg1.size):
+            if not np.isfinite(a1n[k]):
+                continue
+            cf_k = float(np.sum((obs_f - a1n[k] * Pf[k]) ** 2 * finv2))
+            ce_k = float(np.sum((obs_e - a1n[k] * Pe[k]) ** 2 * inv2))
+            chi2_null_re[k] = (cf_k - c_fit) + ce_k
+
+    comp_per_grid = []   # (gname, T2g, Tg1, chi2[nT1, 64, 64])
     for gname_g, ig in cool_interps:
         la, ta, fa = ig.index_columns
         t_lo = float(np.min(ta))
@@ -495,7 +616,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
         z_g = float(fa[int(np.argmin(np.abs(np.asarray(fa) - z)))])
         lg_g = float(la[int(np.argmin(np.abs(np.asarray(la) - 5.0)))])
         T2g = np.linspace(t_lo, t_hi, 64)
-        chi2 = np.full((T2g.size, R2g.size), np.inf)
+        chi2 = np.full((Tg1.size, T2g.size, R2g.size), np.inf)
         names_all = np.concatenate([names, fn_b]) if have_fit else names
         w_all = np.concatenate([w, fw]) if have_fit else w
         # Bands the BD grids carry no column for (they stop at ~30 um; the
@@ -526,40 +647,77 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             funit = funit_all[:len(names)]
             if not np.all(np.isfinite(funit)) or np.all(funit <= 0):
                 continue
-            mod = (R2g ** 2)[:, None] * funit[None, :]
-            chi2[i] = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
-            if have_fit:
-                cf = funit_all[len(names):]
-                okc = np.isfinite(cf) & (cf > 0)
-                if okc.any():
-                    chi2[i] += (R2g ** 4) * float(
-                        np.sum(cf[okc] ** 2 * finv2[okc]))
+            if joint:
+                # Companion fit-band flux (rad=1); zero where the cool grid has
+                # no column (already RJ/Wien-filled above for far-IR/blue).
+                cf_b = funit_all[len(names):] if have_fit \
+                    else np.zeros(fn_b.size)
+                cf_b = np.where(np.isfinite(cf_b), cf_b, 0.0)
+                R2sq = R2g ** 2
+                cP = (np.sum(funit[None, :] * Pe * inv2, axis=1)
+                      + np.sum(cf_b[None, :] * Pf * finv2, axis=1))   # per t1
+                for k in range(Tg1.size):
+                    if not np.isfinite(den[k]) or den[k] <= 0:
+                        continue
+                    a1 = (num0[k] - R2sq * cP[k]) / den[k]          # per R2
+                    a1 = np.clip(a1, a1_lo, a1_hi)
+                    me = a1[:, None] * Pe[k][None, :] \
+                        + R2sq[:, None] * funit[None, :]
+                    mf = a1[:, None] * Pf[k][None, :] \
+                        + R2sq[:, None] * cf_b[None, :]
+                    ce = np.sum((obs_e[None, :] - me) ** 2 * inv2[None, :],
+                                axis=1)
+                    cfit = np.sum((obs_f[None, :] - mf) ** 2 * finv2[None, :],
+                                  axis=1)
+                    chi2[k, i] = (cfit - c_fit) + ce      # Delta-fit + excess
+            else:
+                mod = (R2g ** 2)[:, None] * funit[None, :]
+                c0 = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
+                if have_fit:
+                    cf = funit_all[len(names):]
+                    okc = np.isfinite(cf) & (cf > 0)
+                    if okc.any():
+                        c0 = c0 + (R2g ** 4) * float(
+                            np.sum(cf[okc] ** 2 * finv2[okc]))
+                chi2[0, i] = c0
         if np.isfinite(chi2).any():
-            comp_per_grid.append((gname_g, T2g, chi2))
+            comp_per_grid.append((gname_g, T2g, Tg1, chi2))
     comp_ok = len(comp_per_grid) > 0
 
     # Evidence = mean likelihood over the (prior-uniform) grids; subtract the
     # global min chi^2 for numerical stability (cancels in the ratios).
-    chi2_comp_min = min((float(np.min(c)) for _, _, c in comp_per_grid),
+    chi2_comp_min = min((float(np.min(c)) for _, _, _, c in comp_per_grid),
                         default=np.inf)
     chi2_d2_min = (float(np.min(chi2_disk2)) if chi2_disk2 is not None
                    else np.inf)
-    m0 = min(chi2_null, float(np.min(chi2_disk)), chi2_comp_min, chi2_d2_min)
-    z_null = float(np.exp(-(chi2_null - m0) / 2))
+    # In joint mode the null is the re-optimised primary (R2 -> 0 companion);
+    # otherwise the frozen-primary residual. V_prim is the primary (teff1, rad1)
+    # nuisance volume the companion integrates explicitly (its teff1 axis); the
+    # far-IR disk hypotheses do not interact with the primary, so they pick it
+    # up as a common factor.
+    null_joint = joint and np.isfinite(chi2_null_re).any()
+    null_ref = float(np.min(chi2_null_re)) if null_joint else chi2_null
+    m0 = min(null_ref, float(np.min(chi2_disk)), chi2_comp_min, chi2_d2_min)
+    if null_joint:
+        z_null = float(np.mean(np.exp(-(chi2_null_re - m0) / 2)))
+    else:
+        z_null = float(np.exp(-(chi2_null - m0) / 2)) * V_prim
     with np.errstate(invalid='ignore'):
         wd = np.where(np.isfinite(chi2_disk),
                       np.exp(-(chi2_disk - m0) / 2), 0.0)
     # Mean over the prior SUPPORT (the L<=L_max(T) region), not the full grid.
-    z_disk = float(wd.sum() / max(np.isfinite(chi2_disk).sum(), 1))
+    z_disk = float(wd.sum() / max(np.isfinite(chi2_disk).sum(), 1)) * V_prim
     z_disk2 = 0.0
     wd2 = None
     if chi2_disk2 is not None and np.isfinite(chi2_disk2).any():
         ordered = np.isfinite(chi2_disk2)
         wd2 = np.where(ordered, np.exp(-(chi2_disk2 - m0) / 2), 0.0)
-        z_disk2 = float(wd2.sum() / ordered.sum())   # mean over the prior half
-    # Per-grid companion evidence; the hypothesis evidence is their mean.
+        z_disk2 = float(wd2.sum() / ordered.sum()) * V_prim   # prior half mean
+    # Per-grid companion evidence; the hypothesis evidence is their mean. The
+    # companion chi^2 is [teff1, Teff2, R2]; the mean over all three axes is the
+    # primary-marginalised companion evidence (Occam-commensurable with V_prim).
     z_comp_g = [float(np.mean(np.exp(-(c - m0) / 2)))
-                for _, _, c in comp_per_grid]
+                for _, _, _, c in comp_per_grid]
     z_comp = float(np.mean(z_comp_g)) if comp_ok else 0.0
     tot = z_null + z_disk + z_disk2 + z_comp
     p_none, p_disk, p_comp = z_null / tot, z_disk / tot, z_comp / tot
@@ -604,8 +762,10 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
         # across-grid disagreement -- the model uncertainty the BMA exposes.
         gp = []   # (gname, t2, t2var, r2, r2var, z_g, samples)
         _rng = np.random.default_rng(0)
-        for (gname_g, T2g, c), zg in zip(comp_per_grid, z_comp_g):
-            wc = np.exp(-(c - m0) / 2)
+        for (gname_g, T2g, _Tg1, c), zg in zip(comp_per_grid, z_comp_g):
+            # c is [teff1, Teff2, R2]; marginalise the primary teff1 axis to get
+            # the (Teff2, R2) posterior weights for this grid.
+            wc = np.exp(-(c - m0) / 2).sum(axis=0)
             s = float(wc.sum())
             if not np.isfinite(s) or s <= 0:
                 continue
@@ -2816,12 +2976,21 @@ class Fitter:
                     except (TypeError, ValueError):
                         infl[_i] = 0.0
                 fkw = dict(fit_names=fn_fit, fit_waves=star.wave[fmask],
-                           fit_errs=np.sqrt(fe_fit ** 2 + infl ** 2))
+                           fit_errs=np.sqrt(fe_fit ** 2 + infl ** 2),
+                           fit_obs=np.asarray(star.flux[fmask], float))
+            # Joint primary marginalisation inputs (de-bias the companion Teff2
+            # on cool hosts): the primary grid, its logg, and the teff/rad
+            # posterior widths let the companion path re-fit (teff1, rad1)
+            # against the full SED instead of inheriting the absorbed photosphere.
+            unc = out.get('uncertainties_averaged', {}) or {}
             ms = _excess_model_selection(
                 list(q), waves, exc, errs, cool,
                 float(bf.get('z', 0.0)), float(bf.get('Av', 0.0)),
                 getattr(star, 'dist', None), bf.get('lum'), self._norm, av_law,
-                bf.get('teff'), rad_primary=bf.get('rad'), **fkw) or {}
+                bf.get('teff'), rad_primary=bf.get('rad'),
+                prim_ig=interps.get(gname), logg_primary=bf.get('logg'),
+                teff_primary_err=unc.get('teff'), rad_primary_err=unc.get('rad'),
+                exc_obs=[v['obs'] for v in q.values()], **fkw) or {}
         # Least-squares single-temperature blackbody fit to the measured
         # excess. This is the curve used by the SED+IRX model overlay: it
         # threads the excess by construction, whereas the evidence-marginalized
