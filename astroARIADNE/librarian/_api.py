@@ -409,6 +409,12 @@ class Librarian:
         self._search_radius = radius * u.arcsec
         self._coord = SkyCoord(ra=ra, dec=dec, unit="deg")
         self._ignore = set(ignore)
+        # Spectro-photometry provenance lists -- always valid lists so a
+        # skipped/failed fetch (or a cache snapshot taken before they were
+        # set, which _save_cache stores as None) cannot poison the adapter.
+        self._xp_filled = []
+        self._spherex_added = []
+        self._cassis_added = []
         # [Fe/H] prior configuration.
         #   feh_source: "hypatia" → Hypatia for [Fe/H] (survey fallback on miss),
         #               surveys for Teff/logg; "survey" → surveys only.

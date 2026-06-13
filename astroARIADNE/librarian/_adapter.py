@@ -173,6 +173,6 @@ def adapt_librarian(lib) -> AdaptedStar:
         kic=lib._kic_id,
         rave_params=lib.rave_params,
         spectroscopic_params=lib.spectroscopic_params,
-        xp_filled=tuple(b for b in getattr(lib, '_xp_filled', ())
+        xp_filled=tuple(b for b in (getattr(lib, '_xp_filled', ()) or ())
                         if b in ariadne_mags),
     )
