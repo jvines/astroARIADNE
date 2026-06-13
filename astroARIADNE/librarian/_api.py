@@ -10,6 +10,7 @@ Ported from astroARIADNE with cleaner declarative structure.
 __all__ = ["Librarian"]
 
 import logging
+import os
 import warnings
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.ma as ma
 from astropy.coordinates import SkyCoord
+from astropy.time import Time
 import astropy.units as u
 from astroquery.gaia import Gaia
 from astroquery.mast import Catalogs
@@ -58,6 +60,28 @@ class MagSpec:
     col: str
     err_col: str
     pyphot: str
+    # None -> the column holds a Vega/AB magnitude (default). 'Jy'/'mJy'/'uJy'
+    # -> a flux density, converted via Librarian._add_flux (far-IR catalogs).
+    flux_unit: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FluxSpec:
+    """One flux-density band (Jy/mJy/uJy) within a far-IR catalog.
+
+    Converted to a magnitude on intake via Librarian._add_flux. Carries the
+    far-IR quirks: a per-band quality predicate, the IRAS percent-error
+    convention, and an optional VizieR sub-table (Herschel splits one catalog
+    into one table per band).
+    """
+
+    col: str
+    err_col: str
+    pyphot: str
+    flux_unit: str = "Jy"
+    err_is_percent: bool = False          # IRAS: e_Fnu_* is % relative, not Jy
+    qual: Callable | None = None          # (row) -> bool, per-band quality
+    table: str | None = None              # VizieR sub-table (multi-table cats)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,9 +124,13 @@ def _tap_query(service, query, timeout=_QUERY_TIMEOUT):
 
 
 from ._qc import (
+    _akari_qual,
     _col,
+    _iras_qual,
     _qc_2mass_band,
     _qc_galex_band,
+    _qc_hppsc,
+    _qc_hspsc,
     _qc_mag,
     _qc_ps1,
     _qc_sdss,
@@ -120,6 +148,15 @@ _2MASS_BAND_IDX = {"2MASS_J": 0, "2MASS_H": 1, "2MASS_Ks": 2}
 # the star's irx set downstream rather than constraining Teff/radius.
 _WISE_BAND_IDX = {"WISE_RSR_W1": 0, "WISE_RSR_W2": 1,
                   "WISE_RSR_W3": 2, "WISE_RSR_W4": 3}
+
+# Mean observation epochs (decimal year) for the positionally-fetched IR
+# catalogs. Used to proper-motion-propagate the Gaia position before a cone-
+# search fallback, so high-PM stars (whose catalog-epoch positions sit many
+# arcsec from J2016) are still recovered. AllWISE: mission mean (MJD ~55400 =
+# 2010.56). 2MASS: survey mean (~1999.3).
+_CATALOG_EPOCH = {"2MASS": 1999.3, "Wise": 2010.56,
+                  "AKARI_IRC": 2006.5, "AKARI_FIS": 2006.5, "IRAS": 1983.5,
+                  "HPPSC": 2011.0, "HSPSC": 2011.0}
 
 
 # ── Catalog registry ────────────────────────────────────────────
@@ -256,6 +293,73 @@ _CONE_ONLY_FALLBACK = {
     "SkyMapper": ("II/379", ("ObjectId", "object_id")),
 }
 
+# Far-IR Jy/mJy-native catalogs. Fetched positionally (no Gaia best_neighbour)
+# via _fetch_flux_catalog, PM-propagated to each catalog's epoch (see
+# _CATALOG_EPOCH -- IRAS is 1983.5, so the offset is large for high-PM stars).
+# All bands are IR-excess bands (config.irx_bands): evaluated post-fit, never
+# constraining Teff/radius. Value = (CatalogDef, cone radius arcsec, max
+# accepted match separation arcsec). The radius tracks the beam: tiny for
+# AKARI IRC, ~1.5' for IRAS' big far-IR beam. max_sep tracks the catalog's
+# positional accuracy (+margin): a nearest-row match farther out is a field
+# source, not the star -- accepting it injects a fake IR excess (a
+# 48x-photosphere PACS 100 um "detection" of GJ 1214 motivated the cut).
+# AKARI FIS bands ARE wired (config + grids); Spitzer SEIP has its own
+# IRSA-TAP fetcher (_fetch_spitzer).
+_FAR_IR_CATALOGS = {
+    "AKARI_IRC": (CatalogDef(
+        vizier_id="II/297/irc",
+        bands=(
+            FluxSpec("S09", "e_S09", "AKARI_IRC_S9W", "Jy",
+                     qual=_akari_qual("q_S09")),
+            FluxSpec("S18", "e_S18", "AKARI_IRC_L18W", "Jy",
+                     qual=_akari_qual("q_S18")),
+        )), 6.0, 3.0),
+    "AKARI_FIS": (CatalogDef(
+        vizier_id="II/298/fis",
+        bands=(
+            FluxSpec("S65", "e_S65", "AKARI_FIS_N60", "Jy",
+                     qual=_akari_qual("q_S65")),
+            FluxSpec("S90", "e_S90", "AKARI_FIS_WIDE_S", "Jy",
+                     qual=_akari_qual("q_S90")),
+            FluxSpec("S140", "e_S140", "AKARI_FIS_WIDE_L", "Jy",
+                     qual=_akari_qual("q_S140")),
+            FluxSpec("S160", "e_S160", "AKARI_FIS_N160", "Jy",
+                     qual=_akari_qual("q_S160")),
+        )), 40.0, 12.0),
+    "IRAS": (CatalogDef(
+        vizier_id="II/125/main",
+        bands=(
+            FluxSpec("Fnu_12", "e_Fnu_12", "IRAS_12", "Jy",
+                     err_is_percent=True, qual=_iras_qual("q_Fnu_12")),
+            FluxSpec("Fnu_25", "e_Fnu_25", "IRAS_25", "Jy",
+                     err_is_percent=True, qual=_iras_qual("q_Fnu_25")),
+            FluxSpec("Fnu_60", "e_Fnu_60", "IRAS_60", "Jy",
+                     err_is_percent=True, qual=_iras_qual("q_Fnu_60")),
+            FluxSpec("Fnu_100", "e_Fnu_100", "IRAS_100", "Jy",
+                     err_is_percent=True, qual=_iras_qual("q_Fnu_100")),
+        )), 90.0, 45.0),
+    "HPPSC": (CatalogDef(
+        vizier_id="VIII/106",
+        bands=(
+            FluxSpec("Flux", "snrnoise", "HERSCHEL_PACS_BLUE", "mJy",
+                     qual=_qc_hppsc, table="VIII/106/hppsc070"),
+            FluxSpec("Flux", "snrnoise", "HERSCHEL_PACS_GREEN", "mJy",
+                     qual=_qc_hppsc, table="VIII/106/hppsc100"),
+            FluxSpec("Flux", "snrnoise", "HERSCHEL_PACS_RED", "mJy",
+                     qual=_qc_hppsc, table="VIII/106/hppsc160"),
+        )), 12.0, 5.0),
+    "HSPSC": (CatalogDef(
+        vizier_id="VIII/112",
+        bands=(
+            FluxSpec("F250", "s_F250", "HERSCHEL_SPIRE_PSW", "mJy",
+                     qual=_qc_hspsc, table="VIII/112/spsc250"),
+            FluxSpec("F350", "s_F350", "HERSCHEL_SPIRE_PMW", "mJy",
+                     qual=_qc_hspsc, table="VIII/112/spsc350"),
+            FluxSpec("F500", "s_F500", "HERSCHEL_SPIRE_PLW", "mJy",
+                     qual=_qc_hspsc, table="VIII/112/spsc500"),
+        )), 25.0, 10.0),
+}
+
 # ── Constants ────────────────────────────────────────────────────
 
 _PLX_ZEROPOINT = 0.037  # Lindegren+21 parallax zero-point (mas)
@@ -319,6 +423,13 @@ class Librarian:
         self._ids: dict[str, str | int | None] = {}
         self._parallax: float | None = None
         self._parallax_e: float | None = None
+        # Gaia proper motion + reference epoch, for PM-propagating the search
+        # position to a catalog's epoch (high-PM crossmatch recovery).
+        self._pmra: float | None = None
+        self._pmdec: float | None = None
+        self._gaia_ra: float | None = None
+        self._gaia_dec: float | None = None
+        self._gaia_ref_epoch: float = 2016.0
         self._teff: float | None = None
         self._teff_e: float | None = None
         self._radius_flame: float | None = None
@@ -336,6 +447,26 @@ class Librarian:
         self._kic_id: int | None = None
         self.Av: float | None = None
 
+        # Per-source result cache: re-running the same star skips every
+        # network call. The key folds in the inputs AND a hash of the
+        # librarian package source, so any librarian code change invalidates
+        # the cache automatically.
+        self._cache_path = self._result_cache_path()
+        if self._cache_path and os.path.exists(self._cache_path):
+            try:
+                self._restore_cache()
+                from termcolor import colored
+                print(colored(
+                    '\t\t*** Librarian: per-source cache hit -- no catalogs '
+                    'queried (delete ~/.astroARIADNE/librarian to force a '
+                    'refetch). ***', 'cyan'))
+                if verbose:
+                    self._print_summary()
+                return
+            except Exception as e:
+                logger.warning('librarian cache restore failed (%s); '
+                               'refetching', e)
+
         self._resolve_gaia_id()
         self._query_gaia_params()
         self._query_crossmatches()
@@ -344,9 +475,81 @@ class Librarian:
         self._impute_zero_errors()
         self._query_spectroscopic_priors()
         self._query_extinction()
+        if self._cache_path:
+            try:
+                self._save_cache()
+            except Exception as e:
+                logger.warning('librarian cache save failed: %s', e)
 
         if verbose:
             self._print_summary()
+
+    # ── per-source result cache ──────────────────────────────────
+
+    # Everything the query sequence mutates; symmetric save/restore.
+    _CACHE_FIELDS = (
+        '_magnitudes', '_gaia_id', '_ids', '_parallax', '_parallax_e',
+        '_pmra', '_pmdec', '_gaia_ra', '_gaia_dec', '_gaia_ref_epoch',
+        '_teff', '_teff_e', '_radius_flame', '_radius_flame_e',
+        '_luminosity', '_luminosity_e', '_mass', '_mass_e', '_age', '_age_e',
+        '_distance', '_distance_e', '_spectroscopic_params', '_tic_id',
+        '_kic_id', 'Av', '_xp_filled', '_spherex_added', '_cassis_added',
+    )
+
+    @staticmethod
+    def _package_hash():
+        import hashlib
+        d = os.path.dirname(os.path.abspath(__file__))
+        h = hashlib.md5()
+        for fn in sorted(os.listdir(d)):
+            if fn.endswith('.py'):
+                with open(os.path.join(d, fn), 'rb') as fh:
+                    h.update(fh.read())
+        # The cached result also depends on the band registry and filter
+        # library (e.g. SPHEREx super-band windows): a new band silently
+        # missing from every cached star is worse than a refetch.
+        pkg = os.path.dirname(d)
+        for extra in (os.path.join(pkg, 'config.py'),
+                      os.path.join(pkg, 'Datafiles', 'custom_filters.h5')):
+            try:
+                with open(extra, 'rb') as fh:
+                    h.update(fh.read())
+            except OSError:
+                pass
+        return h.hexdigest()[:12]
+
+    def _result_cache_path(self):
+        import hashlib
+        key = repr((round(self.ra, 6), round(self.dec, 6), self._gaia_id,
+                    tuple(sorted(self._ignore)), self._feh_source,
+                    self._hypatia_statistic, self._hypatia_uncertainty,
+                    self._hypatia_solarnorm, self._feh_floor,
+                    float(self._search_radius.value),
+                    self._package_hash()))
+        name = hashlib.md5(key.encode()).hexdigest()[:16]
+        d = os.path.join(os.path.expanduser('~'), '.astroARIADNE',
+                         'librarian')
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            return None
+        return os.path.join(d, f'{name}.pkl')
+
+    def _save_cache(self):
+        import pickle
+        state = {f: getattr(self, f, None) for f in self._CACHE_FIELDS}
+        tmp = self._cache_path + '.tmp'
+        with open(tmp, 'wb') as fh:
+            pickle.dump(state, fh)
+        os.replace(tmp, self._cache_path)
+
+    def _restore_cache(self):
+        import pickle
+        with open(self._cache_path, 'rb') as fh:
+            state = pickle.load(fh)
+        for f in self._CACHE_FIELDS:
+            if f in state:
+                setattr(self, f, state[f])
 
     # ── Gaia ID resolution ───────────────────────────────────────
 
@@ -396,6 +599,12 @@ class Librarian:
             logger.warning("Gaia DR3 source %d not found", self._gaia_id)
             return
         main = main_cats[0][0]
+
+        # Proper motion + Gaia position, for PM-propagated cone fallbacks.
+        self._pmra = _col(main, "pmRA")     # mas/yr, already *cos(dec)
+        self._pmdec = _col(main, "pmDE")
+        self._gaia_ra = _col(main, "RA_ICRS")
+        self._gaia_dec = _col(main, "DE_ICRS")
 
         # FLAME astrophysical parameters table
         ap_cats = _with_timeout(
@@ -667,6 +876,30 @@ class Librarian:
                 continue
             self._fetch_standard(cat_name, _CATALOGS[cat_name], cats, ext_id)
 
+        # Proper-motion-propagated cone fallback for the IR catalogs. The bulk
+        # cone above is centred on the input coordinates; for high-PM stars the
+        # 2MASS (~1999) and AllWISE (~2010) sources sit many arcsec away and are
+        # missed, and AllWISE frequently has no Gaia best_neighbour at all
+        # (Gaia's own crossmatch drops the displaced source). Re-fetch any
+        # still-missing 2MASS/WISE bands from a tight cone at the position
+        # propagated to each catalog's epoch.
+        for cat_name in ("2MASS", "Wise"):
+            if cat_name in self._ignore:
+                continue
+            cat_def = _CATALOGS[cat_name]
+            if all(b.pyphot in self._magnitudes for b in cat_def.bands):
+                continue
+            self._fetch_by_cone(cat_name, cat_def)
+
+        # Jy-native far-IR catalogs (IRAS, AKARI, Herschel) -> IR-excess bands.
+        if "far_ir" not in self._ignore:
+            self._fetch_far_ir()
+        if "Spitzer" not in self._ignore:
+            try:
+                self._fetch_spitzer()
+            except Exception as e:
+                logger.warning("Spitzer SEIP fetch failed: %s", e)
+
         if "TESS" not in self._ignore:
             self._fetch_tess()
         if "APASS" not in self._ignore:
@@ -679,6 +912,54 @@ class Librarian:
             self._fetch_mermilliod()
         if "STROMGREN" not in self._ignore:
             self._fetch_stromgren()
+
+        # Gaia XP synthetic gap-filling runs LAST: it needs the complete
+        # observed band inventory to know which wavelengths are uncovered
+        # (and first-write-wins means real photometry always beats it).
+        if "XP" not in self._ignore:
+            try:
+                self._fetch_xp_synth()
+            except Exception as e:
+                logger.warning("XP synthetic gap-filling failed: %s", e)
+
+        # DESI/BOSS optical spectro-photometry: the FAINT-end continuation
+        # of the XP gap-filling ladder (G > 16, where XP stops firing).
+        # DESI before BOSS: denser MWS sample, better-behaved fluxing.
+        if "DESI" not in self._ignore:
+            try:
+                self._fetch_optspec("DESI")
+            except Exception as e:
+                logger.warning("DESI optspec fill skipped: %s", e)
+        if "BOSS" not in self._ignore:
+            try:
+                self._fetch_optspec("BOSS")
+            except Exception as e:
+                logger.warning("BOSS optspec fill skipped: %s", e)
+
+        # SPHEREx QR2 super-band spectro-photometry (independent of XP;
+        # results are cached per source, so only the first Star pays the
+        # extraction cost).
+        if "SPHEREX" not in self._ignore:
+            try:
+                self._fetch_spherex()
+            except Exception as e:
+                logger.warning("SPHEREx extraction failed: %s", e)
+
+        # CASSIS / Spitzer-IRS low-res super-band spectro-photometry (5-38 um,
+        # all IR-excess bands). One cone search, cached per position.
+        if "CASSIS" not in self._ignore:
+            try:
+                self._fetch_cassis()
+            except Exception as e:
+                logger.warning("CASSIS/IRS extraction failed: %s", e)
+
+        # IUE/INES UV spectro-photometry: the GALEX anchor for bright stars
+        # (GALEX saturates at FUV/NUV ~ 14; IUE observed exactly those).
+        if "IUE" not in self._ignore:
+            try:
+                self._fetch_iue()
+            except Exception as e:
+                logger.warning("IUE/INES synthesis failed: %s", e)
 
     def _fetch_standard(self, cat_name, cat_def, cats, ext_id):
         """Fetch photometry from VizieR results, filtered by crossmatched ID."""
@@ -753,6 +1034,253 @@ class Librarian:
 
             err_f = float(err_v) if err_v is not None else 0.02
             self._add_mag(band.pyphot, float(mag_v), err_f)
+
+    def _pm_available(self):
+        """True when a finite Gaia proper motion is on hand (propagation to
+        other catalog epochs is then trustworthy)."""
+        try:
+            return bool(self._pmra is not None and self._pmdec is not None
+                        and np.isfinite(float(self._pmra))
+                        and np.isfinite(float(self._pmdec)))
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _match_sep_arcsec(cat, row):
+        """Separation of a VizieR match row in arcsec from the ``_r`` column
+        (unit taken from the table metadata; None when unavailable)."""
+        try:
+            unit = cat['_r'].unit or u.arcsec
+            return float((float(row['_r']) * unit).to(u.arcsec).value)
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _propagated_coord(self, epoch_year):
+        """Gaia position proper-motion-propagated to ``epoch_year`` (decimal
+        year). Falls back to the input coordinate when PM is unavailable --
+        callers that crossmatch epoch-distant catalogs must check
+        :meth:`_pm_available` first (the far-IR fetcher skips loudly)."""
+        if not self._pm_available():
+            return self._coord
+        ra = self._gaia_ra if self._gaia_ra is not None else self.ra
+        dec = self._gaia_dec if self._gaia_dec is not None else self.dec
+        kw = dict(
+            ra=float(ra) * u.deg, dec=float(dec) * u.deg,
+            pm_ra_cosdec=float(self._pmra) * u.mas / u.yr,
+            pm_dec=float(self._pmdec) * u.mas / u.yr,
+            obstime=Time(self._gaia_ref_epoch, format="decimalyear"),
+        )
+        if self._parallax is not None and float(self._parallax) > 0:
+            kw["distance"] = (1000.0 / float(self._parallax)) * u.pc
+        return SkyCoord(**kw).apply_space_motion(
+            Time(epoch_year, format="decimalyear"))
+
+    def _fetch_by_cone(self, cat_name, cat_def):
+        """Fetch a catalog from a tight cone at the PM-propagated position.
+
+        Fallback for catalogs missed by the primary path -- either because the
+        Gaia best_neighbour table is empty (e.g. AllWISE for a high-PM star) or
+        because the source moved out of the input-position cone. Matches by
+        crossmatched ID when one is available, otherwise the nearest source to
+        the propagated position; the same per-band QC as the primary path
+        guards against false matches. Idempotent: never overwrites a band the
+        primary path already attached.
+        """
+        if cat_def.vizier_id is None:
+            return
+        epoch = _CATALOG_EPOCH.get(cat_name)
+        coord = (self._propagated_coord(epoch) if epoch is not None
+                 else self._coord)
+        result = _with_timeout(
+            Vizier.query_region, coord,
+            radius=self._search_radius, catalog=cat_def.vizier_id,
+        )
+        if not result:
+            logger.info("No PM-propagated cone data for %s", cat_name)
+            return
+        try:
+            cat = result[cat_def.vizier_id]
+            cat.sort("_r")
+        except (TypeError, KeyError):
+            return
+
+        # Prefer the crossmatched ID if we have one and it lands in the cone,
+        # else the nearest source to the propagated position.
+        row = cat[0]
+        ext_id = self._ids.get(cat_name)
+        if ext_id is not None:
+            id_cols = cat_def.xmatch_id_cols or ()
+            col_name = next((c for c in id_cols if c in cat.colnames), None)
+            if col_name is not None:
+                matched = cat[cat[col_name] == ext_id]
+                if len(matched):
+                    row = matched[0]
+
+        # Catalog-level QC (same predicates as the primary path).
+        if cat_def.qc is not None and not cat_def.qc(row):
+            logger.info("%s failed catalog QC (cone fallback)", cat_name)
+            return
+        if cat_name == "Wise" and not _qc_wise_extended(row):
+            logger.info("WISE source is extended (cone fallback), skipping")
+            return
+
+        for band in cat_def.bands:
+            if band.pyphot in self._magnitudes:
+                continue
+            if band.pyphot in _2MASS_BAND_IDX:
+                if not _qc_2mass_band(row, _2MASS_BAND_IDX[band.pyphot]):
+                    continue
+            if band.pyphot in _WISE_BAND_IDX:
+                if not _qc_wise_band(row, _WISE_BAND_IDX[band.pyphot]):
+                    continue
+            mag_v = _col(row, band.col)
+            err_v = _col(row, band.err_col)
+            if band.flux_unit is not None:
+                self._add_flux(band.pyphot, mag_v, err_v, band.flux_unit)
+                continue
+            if not _qc_mag(mag_v, err_v):
+                continue
+            err_f = float(err_v) if err_v is not None else 0.02
+            self._add_mag(band.pyphot, float(mag_v), err_f)
+        logger.info("Recovered %s via PM-propagated cone fallback", cat_name)
+
+    def _fetch_far_ir(self):
+        """Fetch the Jy-native far-IR catalogs (IRAS, AKARI, Herschel).
+
+        These have no Gaia best_neighbour, report F_nu in Jy/mJy rather than
+        magnitudes, and span epochs from 1983.5 (IRAS) to ~2011 (Herschel), so
+        each is fetched positionally at its PM-propagated epoch. Their bands are
+        IR-excess bands; missing/low-quality bands are simply skipped.
+        """
+        for cat_name, (cat_def, radius, max_sep) in _FAR_IR_CATALOGS.items():
+            if cat_name in self._ignore:
+                continue
+            if all(b.pyphot in self._magnitudes for b in cat_def.bands):
+                continue
+            try:
+                self._fetch_flux_catalog(cat_name, cat_def, radius, max_sep)
+            except Exception as e:
+                logger.warning("Far-IR fetch failed for %s: %s", cat_name, e)
+
+    def _fetch_flux_catalog(self, cat_name, cat_def, radius, max_sep=None):
+        """Fetch one Jy-native catalog at the PM-propagated catalog epoch.
+
+        Handles per-band quality predicates, the IRAS percent-error convention,
+        and multi-table catalogs (Herschel splits one VizieR catalog into one
+        sub-table per band). Each accepted band is converted Jy->mag by
+        :meth:`_add_flux`. ``max_sep`` (arcsec) rejects nearest-row matches
+        beyond the catalog's positional accuracy -- field sources masquerading
+        as the star inject fake IR excesses, the worst possible failure for
+        the IRX endpoint.
+        """
+        epoch = _CATALOG_EPOCH.get(cat_name)
+        if epoch is not None and not self._pm_available():
+            # The star may sit arcmin from its catalog-epoch position
+            # (IRAS is 33 yr before Gaia); nearest-row matching at the
+            # unpropagated position would risk attaching a random field
+            # source. Loud skip instead of a silent wrong answer.
+            from termcolor import colored
+            print(colored(
+                '\t\t*** far-IR catalog %s SKIPPED: Gaia proper motion '
+                'unavailable, cannot propagate to the %s catalog epoch. '
+                'Re-run when the Gaia query succeeds, or pass the band '
+                'manually via add_mag. ***' % (cat_name, epoch), 'yellow'))
+            logger.warning("far-IR %s skipped: no proper motion", cat_name)
+            return
+        coord = (self._propagated_coord(epoch) if epoch is not None
+                 else self._coord)
+        result = _with_timeout(
+            Vizier.query_region, coord,
+            radius=radius * u.arcsec, catalog=cat_def.vizier_id,
+        )
+        if not result:
+            logger.info("No far-IR data for %s", cat_name)
+            return
+        for band in cat_def.bands:
+            if band.pyphot in self._magnitudes:
+                continue
+            tbl = band.table or cat_def.vizier_id
+            try:
+                cat = result[tbl]
+            except (TypeError, KeyError):
+                continue
+            if len(cat) == 0:
+                continue
+            cat.sort("_r")
+            row = cat[0]
+            sep = self._match_sep_arcsec(cat, row)
+            if max_sep is not None and sep is not None and sep > max_sep:
+                from termcolor import colored
+                print(colored(
+                    '\t\t*** %s %s match REJECTED: nearest source is '
+                    '%.1f" from the propagated position (> %.0f" catalog '
+                    'accuracy) -- field source, not the star. ***'
+                    % (cat_name, band.pyphot, sep, max_sep), 'yellow'))
+                continue
+            if band.qual is not None and not band.qual(row):
+                continue
+            flux = _col(row, band.col)
+            err = _col(row, band.err_col)
+            if band.err_is_percent and flux is not None and err is not None:
+                try:
+                    err = abs(float(flux)) * float(err) / 100.0
+                except (TypeError, ValueError):
+                    err = None
+            self._add_flux(band.pyphot, flux, err, band.flux_unit)
+        logger.info("Queried far-IR catalog %s", cat_name)
+
+    def _fetch_spitzer(self):
+        """Spitzer Enhanced Imaging Products (SEIP): IRAC 3.6-8.0 + MIPS 24.
+
+        Not usable on VizieR (only a 1000-row excerpt); the full 42M-source
+        list is IRSA catalog 'slphotdr4', queried via IRSA TAP. Fluxes are in
+        uJy. Bright stars saturate IRAC, so per-band saturation (softsatflag)
+        and detection (fluxtype==1) cuts are mandatory. PM-propagated to the
+        cryo-mission epoch (~2007).
+        """
+        # (col prefix, pyphot, flux suffix, has soft-saturation flag)
+        bands = [
+            ("i1", "SPITZER_IRAC_36", "f_ap1", True),
+            ("i2", "SPITZER_IRAC_45", "f_ap1", True),
+            ("i3", "SPITZER_IRAC_58", "f_ap1", True),
+            ("i4", "SPITZER_IRAC_80", "f_ap1", True),
+            ("m1", "SPITZER_MIPS_24", "f_psf", False),
+        ]
+        if all(p in self._magnitudes for _, p, _, _ in bands):
+            return
+        try:
+            from astroquery.ipac.irsa import Irsa
+        except Exception:
+            return
+        coord = self._propagated_coord(2007.0)
+        res = _with_timeout(
+            Irsa.query_region, coord, catalog="slphotdr4",
+            spatial="Cone", radius=self._search_radius,
+        )
+        if res is None or len(res) == 0:
+            logger.info("No Spitzer SEIP data")
+            return
+        # Nearest source to the propagated position.
+        if "ra" in res.colnames and "dec" in res.colnames:
+            sep = coord.separation(
+                SkyCoord(res["ra"], res["dec"], unit="deg"))
+            row = res[int(np.argmin(sep))]
+        else:
+            row = res[0]
+        for prefix, pyphot, fsfx, has_sat in bands:
+            if pyphot in self._magnitudes:
+                continue
+            ftype = _col(row, f"{prefix}_fluxtype")
+            if ftype is None or int(ftype) != 1:        # 1 = real >=3-sigma flux
+                continue
+            if has_sat:
+                sat = _col(row, f"{prefix}_softsatflag")
+                if sat is None or int(sat) != 0:        # saturated/nonlinear
+                    continue
+            flux = _col(row, f"{prefix}_{fsfx}")
+            err = _col(row, f"{prefix}_d{fsfx}")
+            self._add_flux(pyphot, flux, err, "uJy")
+        logger.info("Queried Spitzer SEIP (IRSA slphotdr4)")
 
     def _fetch_tess(self):
         """Query TESS TIC via MAST, crossmatched on Gaia ID."""
@@ -853,7 +1381,13 @@ class Librarian:
                 self._add_mag(band.pyphot, float(mag_v), err_f)
 
     def _fetch_galex(self):
-        """Query GALEX via VizieR XMatch with Gaia DR3."""
+        """Query GALEX via VizieR XMatch with Gaia DR3.
+
+        Falls back to a proper-motion-propagated cone against the GUVcat
+        (II/335) when the J2016-position XMatch misses: GALEX's mean epoch is
+        ~2007, so a high-PM star (e.g. a nearby WD at ~1 arcsec/yr) sits many
+        arcsec from its Gaia position and the 3 arcsec match fails.
+        """
         region = CircleSkyRegion(self._coord, radius=self._search_radius)
         xm = _with_timeout(
             XMatch.query,
@@ -863,25 +1397,49 @@ class Librarian:
             area=region,
         )
         try:
-            if xm is None or len(xm) == 0:
+            if xm is not None and len(xm) > 0:
+                xm.sort("angDist")
+                src_mask = xm["Source"] == self._gaia_id
+                if src_mask.sum() > 0:
+                    row = xm[src_mask][0]
+                    for band in _CATALOGS["GALEX"].bands:
+                        if band.pyphot in self._magnitudes:
+                            continue
+                        if not _qc_galex_band(row, band.pyphot):
+                            continue
+                        mag_v = _col(row, band.col)
+                        err_v = _col(row, band.err_col)
+                        if _qc_mag(mag_v, err_v):
+                            err_f = (float(err_v) if err_v is not None
+                                     else 0.02)
+                            self._add_mag(band.pyphot, float(mag_v), err_f)
+            if ('GALEX_FUV' in self._magnitudes
+                    and 'GALEX_NUV' in self._magnitudes):
                 return
-
-            xm.sort("angDist")
-            src_mask = xm["Source"] == self._gaia_id
-            if src_mask.sum() == 0:
+            # PM-propagated cone fallback (GUVcat II/335; FUVmag/NUVmag).
+            coord = self._propagated_coord(2007.0)
+            res = _with_timeout(
+                Vizier.query_region, coord,
+                radius=self._search_radius, catalog='II/335/galex_ais',
+            )
+            if not res:
                 return
-            row = xm[src_mask][0]
-
-            for band in _CATALOGS["GALEX"].bands:
-                if band.pyphot in self._magnitudes:
+            cat = res['II/335/galex_ais']
+            cat.sort('_r')
+            row = cat[0]
+            for pyphot, mc, ec in (("GALEX_FUV", "FUVmag", "e_FUVmag"),
+                                   ("GALEX_NUV", "NUVmag", "e_NUVmag")):
+                if pyphot in self._magnitudes:
                     continue
-                if not _qc_galex_band(row, band.pyphot):
+                if not _qc_galex_band(row, pyphot):
                     continue
-                mag_v = _col(row, band.col)
-                err_v = _col(row, band.err_col)
+                mag_v = _col(row, mc)
+                err_v = _col(row, ec)
                 if _qc_mag(mag_v, err_v):
                     err_f = float(err_v) if err_v is not None else 0.02
-                    self._add_mag(band.pyphot, float(mag_v), err_f)
+                    self._add_mag(pyphot, float(mag_v), err_f)
+                    logger.info('GALEX %s recovered via PM-propagated cone',
+                                pyphot)
         except Exception as e:
             logger.warning("GALEX XMatch query failed: %s", e)
 
@@ -1017,6 +1575,422 @@ class Librarian:
                 logger.warning("Stromgren XMatch failed for %s: %s", cat2, e)
 
     # ── Spectroscopic parameters ─────────────────────────────────
+
+    # Gaia XP synthetic photometry, restricted to GaiaXPy's STANDARDIZED
+    # systems (zero points tied to external references; the raw synthetic
+    # systems carry ~1% un-corrected offsets). Every target band below is
+    # already in ARIADNE's filter registry and already convolved in every
+    # model grid, so this costs nothing downstream. Mag conventions match
+    # mag_to_flux's per-band dispatch: SDSS_*/PS1_* are AB there and the
+    # gaiaxpy SDSS/PS1 systems are AB-native; the rest are Vega on both
+    # sides. u/U bands are deliberately absent: XP carries documented
+    # systematics blueward of 400 nm.
+    _XP_SYSTEMS = {
+        # iteration order = fill priority (narrow/diagnostic systems first)
+        'StromgrenStd': {'v': 'STROMGREN_v', 'b': 'STROMGREN_b',
+                         'y': 'STROMGREN_y'},
+        'JkcStd': {'B': 'GROUND_JOHNSON_B', 'V': 'GROUND_JOHNSON_V',
+                   'R': 'GROUND_COUSINS_R', 'I': 'GROUND_COUSINS_I'},
+        'SdssStd': {'g': 'SDSS_g', 'r': 'SDSS_r', 'i': 'SDSS_i',
+                    'z': 'SDSS_z'},
+        'Panstarrs1Std': {'gp': 'PS1_g', 'rp': 'PS1_r', 'ip': 'PS1_i',
+                          'zp': 'PS1_z', 'yp': 'PS1_y'},
+    }
+    # QC-ONLY systems: never used to fill, only to validate observed catalog
+    # bands against same-source XP synthetics (non-standardized accuracy is
+    # ample at the >1 mag wrong-crossmatch threshold). SkyMapper's split
+    # detections for high-PM stars were slipping through every other check
+    # because it had no QC coverage (SCR 1845: i band 1 mag faint).
+    _XP_QC_SYSTEMS = {
+        'SkyMapper': {'u': 'SkyMapper_u', 'v': 'SkyMapper_v',
+                      'g': 'SkyMapper_g', 'r': 'SkyMapper_r',
+                      'i': 'SkyMapper_i', 'z': 'SkyMapper_z'},
+    }
+    _XP_GAP_LOGLAM = 0.05   # "covered": an observed band within 5% in log-lam
+    _XP_MAX_G = 16.0        # XP hockey-stick regime begins around G ~ 16
+    _XP_MIN_UM = 0.40       # documented BP systematics blueward of 400 nm
+    _XP_MAX_ERR = 0.05      # mag; reject noisy synthetic bands
+    _XP_SYS_FLOOR = 0.010   # mag; standardized-system absolute accuracy
+    # For very red stars (mid-M and later) the blue-band synthetics are
+    # outside the FGK calibration color range (Paunzen b-y <= 0.8) and in
+    # XP's documented weak regime (sparse red-source standardization):
+    # SCR 1845 (M8.5) got B/g/y fills 20-60% off, which tilted the whole
+    # photosphere fit. Restrict fills to lam >= 0.6 um when BP-RP > 2.5.
+    _XP_RED_BPRP = 2.5
+    _XP_RED_MIN_UM = 0.60
+    # The ultra-broad Gaia bands never count as wavelength coverage: G spans
+    # 0.33-1.0 um, so its effective wavelength would spuriously "cover" the
+    # V/r region (and BP/RP likewise g/i) for every Gaia star, defeating the
+    # gap-filling entirely.
+    _XP_COVERAGE_EXCLUDE = frozenset(
+        ('Gaia_G', 'Gaia_BP', 'Gaia_RP',
+         'GaiaDR2v2_G', 'GaiaDR2v2_BP', 'GaiaDR2v2_RP'))
+    # Calibration onto ARIADNE's catalog conventions (synth - obs medians,
+    # corrected additively; the measured robust scatter becomes the per-band
+    # error floor where it exceeds _XP_SYS_FLOOR):
+    # - Stromgren (135 Paunzen+15 stars, 2026-06): v -66 +/- 36 mmag,
+    #   b -63 +/- 14, y -4 +/- 10 -- the GaiaXPy absolute Stromgren_Std
+    #   calibration vs the index-reconstruction convention
+    #   (v = m1 + 2(b-y) + y) ARIADNE's Stromgren catalogs use.
+    # - JKC (98 Landolt-2013 standards, 2026-06): B +6 +/- 15, V +6 +/- 10
+    #   mmag (near-circular: gaiaxpy JKC_Std is itself Landolt-standardized,
+    #   so these measure the standardization residual). CAVEAT: B carries a
+    #   +16 mmag/mag color trend redward -- the constant holds for the
+    #   FGK-dominated calibration range only; the _XP_RED_BPRP / _XP_RED_MIN_UM
+    #   gates already block B fills for very red stars.
+    # - SDSS (Ivezic Stripe-82 standards, bright end r 14-15.5, 2026-06):
+    #   z -10 +/- 12 mmag (a known GSPC red-band residual; the Stripe-82
+    #   standards and ARIADNE's VizieR DR12 fetch are the same native-SDSS
+    #   system, so the correction keeps fills and catalog rows mutually
+    #   consistent); g/r/i offsets < 5 mmag (left at 0, floors only).
+    # - PS1 (single NGP calibration field, DR1 MeanObject, 2026-06):
+    #   g -6 +/- 9, i -5 +/- 6 mmag; other bands < 5 mmag. PS1 floors stay
+    #   on _XP_SYS_FLOOR (their 6-9 mmag single-field scatter does not
+    #   sample PS1's field-to-field zero-point variation).
+    # None of these should be extrapolated past BP-RP ~ 2.4 (every system
+    # drifts "synth fainter" redward; the red gates cover this).
+    _XP_MAG_OFFSET = {'STROMGREN_v': +0.066, 'STROMGREN_b': +0.063,
+                      'GROUND_JOHNSON_B': -0.006, 'GROUND_JOHNSON_V': -0.006,
+                      'SDSS_z': +0.010, 'PS1_g': +0.006, 'PS1_i': +0.005}
+    _XP_BAND_FLOOR = {'STROMGREN_v': 0.036, 'STROMGREN_b': 0.017,
+                      'STROMGREN_y': 0.013,
+                      'GROUND_JOHNSON_B': 0.016, 'GROUND_COUSINS_R': 0.013,
+                      'GROUND_COUSINS_I': 0.013,
+                      'SDSS_g': 0.014, 'SDSS_i': 0.012, 'SDSS_z': 0.013}
+
+    def _fetch_xp_synth(self):
+        """Fill optical coverage gaps with Gaia XP synthetic photometry.
+
+        Generates standardized-system synthetic magnitudes from the XP
+        continuous spectrum (GaiaXPy, full coefficient-covariance error
+        propagation with the empirical error correction) and adds ONLY the
+        registry bands whose wavelength is not already covered by observed
+        photometry. Real measurements always win: this runs after every
+        catalog fetcher and `_add_mag` is first-write-wins; the log-lambda
+        gap rule additionally stops the synthetic bands from stacking up
+        next to an observed band of a different system.
+        """
+        from termcolor import colored
+        if self._gaia_id is None:
+            return
+        # Gaia photometry lives under the librarian-internal name (the
+        # adapter renames to GaiaDR2v2_* later); check both defensively.
+        g_entry = (self._magnitudes.get('Gaia_G')
+                   or self._magnitudes.get('GaiaDR2v2_G'))
+        if g_entry is None or g_entry[0] > self._XP_MAX_G:
+            logger.info('XP gap-filling skipped: G magnitude missing or '
+                        'fainter than %.1f', self._XP_MAX_G)
+            return
+        try:
+            from gaiaxpy import generate, PhotometricSystem
+        except ImportError:
+            logger.warning('gaiaxpy not installed; XP gap-filling skipped '
+                           '(pip install gaiaxpy)')
+            return
+        from ..phot_utils import get_effective_wavelength
+
+        ps = [PhotometricSystem.Stromgren_Std, PhotometricSystem.JKC_Std,
+              PhotometricSystem.SDSS_Std, PhotometricSystem.PanSTARRS1_Std,
+              PhotometricSystem.Sky_Mapper]      # QC-only (never filled)
+        df = _with_timeout(generate, [str(self._gaia_id)],
+                           photometric_system=ps, error_correction=True,
+                           save_file=False)
+        if df is None or not len(df):
+            logger.info('no XP continuous spectrum for %s; gap-filling '
+                        'skipped', self._gaia_id)
+            return
+        row = df.iloc[0]
+
+        # QC pass first: XP synthetics are epoch-2016 Gaia measurements of
+        # the SAME source, so an observed catalog band that disagrees with
+        # its own XP synthetic by > 1 mag is a wrong/split crossmatch (the
+        # high-proper-motion disease: PS1/SDSS mean objects split fast
+        # movers) or a blend -- no survey calibration or stellar variability
+        # short of a Mira explains 1 mag. Drop it; the fill loop below then
+        # treats the band as uncovered and the XP value takes its place.
+        # Threshold is PM-aware: for ordinary stars 1.0 mag (nothing short
+        # of a Mira explains more), but a star moving > 1"/yr smears across
+        # the multi-epoch mean objects of ground surveys (SkyMapper/PS1/
+        # SDSS split or trail its detections -- SCR 1845's SkyMapper riz
+        # came out 0.45-0.97 mag faint and anchored the whole fit wrong),
+        # while the XP synthetic is a single-epoch measurement of the same
+        # source. 0.25 mag of disagreement is already damning there.
+        _pm = np.hypot(float(getattr(self, '_pmra', None) or 0.0),
+                       float(getattr(self, '_pmdec', None) or 0.0))
+        qc_thr = 0.25 if _pm > 1000.0 else 1.0
+        qc_maps = {**self._XP_SYSTEMS, **self._XP_QC_SYSTEMS}
+        for sys_label, bands in qc_maps.items():
+            for gband, target in bands.items():
+                ent = self._magnitudes.get(target)
+                synth = row.get(f'{sys_label}_mag_{gband}')
+                if ent is None or synth is None or not np.isfinite(synth):
+                    continue
+                if abs(ent[0] - (float(synth)
+                                 + self._XP_MAG_OFFSET.get(target, 0.0))) \
+                        > qc_thr:
+                    del self._magnitudes[target]
+                    print(colored(
+                        f'\t\t*** {target} catalog mag {ent[0]:.2f} is '
+                        f'>{qc_thr:.2f} mag from its XP synthetic '
+                        f'{float(synth):.2f} -- wrong/split crossmatch '
+                        '(high-PM?); dropped. ***', 'yellow'))
+
+        obs_loglam = []
+        for b in self._magnitudes:
+            if b in self._XP_COVERAGE_EXCLUDE:
+                continue
+            try:
+                lam = get_effective_wavelength(b)
+            except Exception:
+                continue
+            if np.isfinite(lam) and lam > 0:
+                obs_loglam.append(np.log(lam))
+        obs_loglam = np.asarray(obs_loglam)
+
+        filled = []
+        for sys_label, bands in self._XP_SYSTEMS.items():
+            for gband, target in bands.items():
+                if target in self._magnitudes:
+                    continue
+                mag = row.get(f'{sys_label}_mag_{gband}')
+                if mag is None or not np.isfinite(mag):
+                    continue
+                err = row.get(f'{sys_label}_mag_error_{gband}')
+                if err is None or not np.isfinite(err):
+                    fl = row.get(f'{sys_label}_flux_{gband}')
+                    fe = row.get(f'{sys_label}_flux_error_{gband}')
+                    err = (1.0857 * fe / fl
+                           if (fl is not None and fe is not None
+                               and np.isfinite(fl) and np.isfinite(fe)
+                               and fl > 0) else None)
+                if err is None or not np.isfinite(err) \
+                        or err > self._XP_MAX_ERR:
+                    continue
+                lam = get_effective_wavelength(target)
+                min_um = self._XP_MIN_UM
+                bp = self._magnitudes.get('Gaia_BP',
+                                          self._magnitudes.get('GaiaDR2v2_BP'))
+                rp = self._magnitudes.get('Gaia_RP',
+                                          self._magnitudes.get('GaiaDR2v2_RP'))
+                if bp is not None and rp is not None \
+                        and (bp[0] - rp[0]) > self._XP_RED_BPRP:
+                    min_um = self._XP_RED_MIN_UM
+                if not np.isfinite(lam) or lam < min_um:
+                    continue
+                if obs_loglam.size and np.min(
+                        np.abs(np.log(lam) - obs_loglam)) \
+                        < self._XP_GAP_LOGLAM:
+                    continue
+                mag = float(mag) + self._XP_MAG_OFFSET.get(target, 0.0)
+                floor = self._XP_BAND_FLOOR.get(target, self._XP_SYS_FLOOR)
+                self._add_mag(target, mag, float(np.hypot(err, floor)))
+                # A filled band covers its wavelength too -- stops a second
+                # synthetic system from stacking a near-duplicate next to it.
+                obs_loglam = np.append(obs_loglam, np.log(lam))
+                filled.append(target)
+        self._xp_filled = filled
+        if filled:
+            print(colored(
+                '\t\t*** Gaia XP synthetic photometry filled '
+                f'{len(filled)} uncovered band(s): {", ".join(filled)} '
+                '(disable with ignore=["XP"]) ***', 'cyan'))
+
+    # DESI/BOSS optical spectro-photometry fill: the faint-end continuation
+    # of the XP ladder. Only fires for G > _OPTSPEC_MIN_G (XP owns the
+    # bright end with calibrated standardized-system synthetics; fibre
+    # spectro-photometry is not zero-point calibrated to the same level).
+    _OPTSPEC_MIN_G = 16.0
+    _OPTSPEC_MAX_ERR = 0.05
+    # Per-(release, band) zero-points/floors: a calibration campaign per
+    # data release (the XP-campaign template) populates these. Until then
+    # offsets stay 0 and every fill carries the conservative system floor
+    # measured live against PS1 (18 DESI-DR1 MWS stars, rms 0.070 mag,
+    # per-band means within 0.06 -- a blue-to-red flux-cal tilt).
+    _OPTSPEC_MAG_OFFSET = {}
+    _OPTSPEC_BAND_FLOOR = {}
+    _OPTSPEC_SYS_FLOOR = 0.07
+
+    def _fetch_optspec(self, which):
+        """Synthesize optical photometry from DESI/BOSS spectra (G > 16).
+
+        Same gap rule and Gaia-band exclusion as the XP fill; only the
+        synthetic-mag source differs (a real flux-calibrated spectrum
+        convolved through the registry curves instead of GaiaXPy). Fills are
+        recorded in ``_xp_filled`` -- they are spectrophotometry, so
+        ``Fitter.spectra = False`` must drop them with the XP fills.
+        """
+        from termcolor import colored
+        from . import _optspec
+        from ..phot_utils import get_effective_wavelength
+        g = (self._magnitudes.get('Gaia_G')
+             or self._magnitudes.get('GaiaDR2v2_G'))
+        if g is None or float(g[0]) <= self._OPTSPEC_MIN_G:
+            return
+        coord = self._propagated_coord(2017.0)   # DESI/BOSS epochs ~2015-21
+        fetch = _optspec.fetch_desi if which == 'DESI' else _optspec.fetch_boss
+        sid = f'{which.lower()}_{self._gaia_id}' if self._gaia_id else None
+        spec = fetch(float(coord.ra.deg), float(coord.dec.deg),
+                     source_id=sid)
+        if spec is None:
+            return
+        wave, flux, ivar = spec
+        # XP gap rule, verbatim: a band already observed/filled within
+        # _XP_GAP_LOGLAM in log-lambda blocks a synthetic at that wavelength.
+        obs_loglam = []
+        for b in self._magnitudes:
+            if b in self._XP_COVERAGE_EXCLUDE:
+                continue
+            try:
+                lam = get_effective_wavelength(b)
+            except Exception:
+                continue
+            if np.isfinite(lam) and lam > 0:
+                obs_loglam.append(np.log(lam))
+        obs_loglam = np.asarray(obs_loglam)
+        syn = _optspec.synth_phot(wave, flux, ivar,
+                                  _optspec.default_fill_bands())
+        filled = []
+        for band in sorted(syn, key=get_effective_wavelength):
+            mag, err = syn[band]
+            if band in self._magnitudes or err > self._OPTSPEC_MAX_ERR:
+                continue
+            lam = get_effective_wavelength(band)
+            if obs_loglam.size and np.min(np.abs(np.log(lam) - obs_loglam)) \
+                    < self._XP_GAP_LOGLAM:
+                continue
+            mag += self._OPTSPEC_MAG_OFFSET.get((which, band), 0.0)
+            floor = self._OPTSPEC_BAND_FLOOR.get(
+                (which, band), self._OPTSPEC_SYS_FLOOR)
+            self._add_mag(band, float(mag), float(np.hypot(err, floor)))
+            obs_loglam = np.append(obs_loglam, np.log(lam))
+            filled.append(band)
+        if filled:
+            if not hasattr(self, '_xp_filled') or self._xp_filled is None:
+                self._xp_filled = []
+            self._xp_filled = list(self._xp_filled) + filled
+            print(colored(
+                f'\t\t*** {which} spectro-photometry filled '
+                f'{len(filled)} band(s): {", ".join(filled)} '
+                f'(disable with ignore=["{which}"]) ***', 'cyan'))
+
+    _IRS_EPOCH = 2006.0          # mid Spitzer IRS cryo mission (2003-2009)
+
+    def _fetch_cassis(self):
+        """CASSIS/IRS low-res super-band photometry at the PM-propagated
+        position. Extraction + binning live in ``_cassis``. All IRS bands are
+        >= 5 um, so ``_add_mag`` routes them straight to the star's IR-excess
+        set (config.irx_bands); none enter the fit."""
+        from termcolor import colored
+        from . import _cassis
+        c = self._propagated_coord(self._IRS_EPOCH)
+        res = _cassis.fetch_spectrum(float(c.ra.deg), float(c.dec.deg))
+        if res is None:
+            logger.info('CASSIS: no IRS low-res spectrum at this position')
+            return
+        lam, f, e = res
+        added = []
+        for band, (mag, mag_e, n) in _cassis.superband_mags(lam, f, e).items():
+            if band not in self._magnitudes:
+                self._add_mag(band, mag, mag_e)      # irx_bands -> excess set
+                added.append(f'{band}({n})')
+        self._cassis_added = added
+        if added:
+            print(colored(
+                '\t\t*** CASSIS/IRS spectro-photometry added '
+                f'{len(added)} IR super-band(s): {", ".join(added)} '
+                '(disable with ignore=["CASSIS"]) ***', 'cyan'))
+
+    # GALEX 10%-nonlinearity (saturation) limits, Morrissey et al. 2007:
+    # FUV 13.73, NUV 13.85 -- rounded to 14 with margin. A catalog GALEX mag
+    # BRIGHTER than this is unreliable; IUE replaces it.
+    _IUE_SAT_FUV = 14.0
+    _IUE_SAT_NUV = 14.0
+    _IUE_EPOCH = 1987.0          # mid IUE mission (1978-1996)
+
+    def _fetch_iue(self):
+        """Synthesize GALEX FUV/NUV from IUE/INES spectra for bright stars.
+
+        Fires only when a GALEX band is absent OR present but brighter than
+        the saturation limit (then the catalog value is unreliable and the
+        IUE synthesis REPLACES it, loudly). Unsaturated catalog GALEX is
+        never touched."""
+        from termcolor import colored
+        from . import _iue
+        fuv = self._magnitudes.get('GALEX_FUV')
+        nuv = self._magnitudes.get('GALEX_NUV')
+        need = {
+            'GALEX_FUV': fuv is None or float(fuv[0]) < self._IUE_SAT_FUV,
+            'GALEX_NUV': nuv is None or float(nuv[0]) < self._IUE_SAT_NUV,
+        }
+        if not any(need.values()):
+            return
+        c = self._propagated_coord(self._IUE_EPOCH)
+        res = _iue.fetch_spectrum(float(c.ra.deg), float(c.dec.deg))
+        if res is None:
+            return
+        syn = _iue.synth_galex(*res)
+        for band, (mag, err) in syn.items():
+            if not need.get(band):
+                continue
+            cur = self._magnitudes.get(band)
+            if cur is not None:
+                del self._magnitudes[band]
+                print(colored(
+                    f'\t\t*** {band} = {float(cur[0]):.2f} is brighter than '
+                    'the GALEX saturation limit -- REPLACED by the IUE/INES '
+                    f'synthesis ({mag:.2f} +/- {err:.2f}) ***', 'yellow'))
+            else:
+                print(colored(
+                    f'\t\t*** {band} filled from IUE/INES: {mag:.2f} +/- '
+                    f'{err:.2f} (disable with ignore=["IUE"]) ***', 'cyan'))
+            self._add_mag(band, float(mag), float(err))
+
+    # SPHEREx usable point-source window in Vega Ks (saturation flags begin
+    # ~9; all-sky 5-sigma depth ~16.5 at 2 um).
+    _SPX_KS_BRIGHT = 8.5
+    _SPX_KS_FAINT = 16.5
+    _SPX_EPOCH = 2025.9          # mid-QR2; PM offsets within +-0.55 yr << 1 px
+
+    def _fetch_spherex(self):
+        """SPHEREx QR2 super-band photometry at the PM-propagated position.
+
+        Extraction + binning live in ``_spherex``; this guard-rails it: a
+        Gaia id and a 2MASS Ks inside the usable brightness window are
+        required (brighter saturates, fainter drowns). The four <= 2.4 um
+        bands enter the fit; the red bands are routed to the IR-excess set
+        by ``Star.add_mag``-equivalent logic downstream (irx_bands).
+        """
+        from termcolor import colored
+        if self._gaia_id is None:
+            return
+        ks = self._magnitudes.get('2MASS_Ks')
+        if ks is None:
+            logger.info('SPHEREx skipped: no 2MASS Ks to check the '
+                        'brightness window')
+            return
+        if not (self._SPX_KS_BRIGHT <= ks[0] <= self._SPX_KS_FAINT):
+            logger.info('SPHEREx skipped: Ks=%.2f outside the usable window '
+                        '(%.1f-%.1f)', ks[0], self._SPX_KS_BRIGHT,
+                        self._SPX_KS_FAINT)
+            return
+        from . import _spherex
+        c = self._propagated_coord(self._SPX_EPOCH)
+        lam, f, e = _spherex.extract_spectrum(
+            float(c.ra.deg), float(c.dec.deg), int(self._gaia_id))
+        if not len(lam):
+            logger.info('SPHEREx: no clean exposures for this position')
+            return
+        added = []
+        for band, (mag, mag_e, n) in _spherex.superband_mags(lam, f, e).items():
+            if band not in self._magnitudes:
+                self._add_mag(band, mag, mag_e)
+                added.append(f'{band}({n})')
+        self._spherex_added = added
+        if added:
+            print(colored(
+                '\t\t*** SPHEREx QR2 spectro-photometry added '
+                f'{len(added)} super-band(s): {", ".join(added)} '
+                '(disable with ignore=["SPHEREX"]) ***', 'cyan'))
 
     def _query_spectroscopic_priors(self):
         """Assemble spectroscopic priors (Teff, logg, [Fe/H]).
@@ -1345,6 +2319,48 @@ class Librarian:
         """Add magnitude. First-write-wins (catalog priority by query order)."""
         if pyphot_name not in self._magnitudes:
             self._magnitudes[pyphot_name] = (mag, err)
+
+    def _add_flux(self, pyphot_name, flux, err, unit):
+        """Add a flux-density measurement (Jy/mJy/uJy) by converting it to a
+        magnitude via the band's effective wavelength and zero-flux, then
+        deferring to :meth:`_add_mag`.
+
+        The far-IR catalogs (IRAS, AKARI, Spitzer, Herschel) report F_nu in
+        janskys rather than Vega/AB magnitudes; this is the single intake point
+        that turns them into the librarian's internal (mag, err) form. The
+        conversion round-trips exactly with the Star's mag->flux step
+        (flux = zero_flux * 10**(-0.4 mag)).
+        """
+        from ..phot_utils import get_zero_flux, get_effective_wavelength
+        if flux is None:
+            return
+        try:
+            flux = float(flux)
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite(flux) or flux <= 0:
+            return
+        fac = {"Jy": 1.0, "mJy": 1e-3, "uJy": 1e-6,
+               "µJy": 1e-6, "10-3Jy": 1e-3}.get(unit)
+        if fac is None:
+            logger.warning("Unknown flux unit %r for %s", unit, pyphot_name)
+            return
+        lam = get_effective_wavelength(pyphot_name)
+        z0 = get_zero_flux(pyphot_name)
+        if not (np.isfinite(lam) and np.isfinite(z0) and z0 > 0):
+            return
+        f_lambda = ((flux * fac) * u.Jy).to(
+            u.erg / u.s / u.cm**2 / u.um,
+            equivalencies=u.spectral_density(lam * u.um)).value
+        mag = -2.5 * np.log10(f_lambda / z0)
+        try:
+            e = float(err)
+        except (TypeError, ValueError):
+            e = None
+        # Flux error -> magnitude error: dm = 1.0857 * sigma_F / F.
+        emag = (1.0857 * e / flux) if (e is not None and np.isfinite(e)
+                                       and e > 0) else 0.05
+        self._add_mag(pyphot_name, mag, emag)
 
     def _print_summary(self):
         import random

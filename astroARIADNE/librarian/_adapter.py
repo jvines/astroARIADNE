@@ -98,6 +98,10 @@ class AdaptedStar:
     kic: int | None
     rave_params: dict | None
     spectroscopic_params: dict | None
+    # Bands that came from spectro-photometry (XP synthetic fills, and later
+    # SPHEREx) rather than catalog measurements -- lets the Fitter drop them
+    # when ``Fitter.spectra = False``.
+    xp_filled: tuple = ()
 
 
 def _scalar(pair, missing):
@@ -169,4 +173,6 @@ def adapt_librarian(lib) -> AdaptedStar:
         kic=lib._kic_id,
         rave_params=lib.rave_params,
         spectroscopic_params=lib.spectroscopic_params,
+        xp_filled=tuple(b for b in getattr(lib, '_xp_filled', ())
+                        if b in ariadne_mags),
     )

@@ -60,11 +60,64 @@ def _qc_wise_band(row, band_idx):
 
 
 def _qc_wise_extended(row):
-    """WISE extended source flag. Returns False if extended."""
+    """WISE extended-source flag (AllWISE ext_flg / ``ex``). Reject only
+    genuinely extended morphologies (ext_flg >= 2). ext_flg == 1 is point-source
+    morphology that merely has a 2MASS-XSC positional association (bright nearby
+    stars routinely pick one up); its point-source photometry is reliable, so it
+    is kept. A missing flag is kept."""
     ex = _col(row, "ex")
     if ex is None:
         return True
-    return int(ex) == 0
+    return int(ex) <= 1
+
+
+# ── Far-IR (Jy) catalog quality ──────────────────────────────────
+
+def _akari_qual(qcol):
+    """AKARI IRC/FIS per-band flux quality: keep only q==3 (high quality,
+    confirmed, flux reliable). q<=2 is unconfirmed / unreliable."""
+    def _pred(row):
+        try:
+            return int(_col(row, qcol)) == 3
+        except (TypeError, ValueError):
+            return False
+    return _pred
+
+
+def _iras_qual(qcol):
+    """IRAS per-band flux quality: keep q>=2 (3=high, 2=moderate); reject q==1,
+    which flags an UPPER LIMIT, not a detection. The per-band ``q`` flag is the
+    catalogue's own quality call and is sufficient -- the separate ``Confuse``
+    flag is NOT a flux-reliability cut (beta Pic, the archetypal IRAS debris
+    disk, is q=3 yet Confuse=4), so cutting on it wrongly drops real sources."""
+    def _pred(row):
+        try:
+            return int(_col(row, qcol)) >= 2
+        except (TypeError, ValueError):
+            return False
+    return _pred
+
+
+def _qc_hppsc(row):
+    """Herschel/PACS point source: not at a map edge, not blended, SNR>=3."""
+    try:
+        snr_ok = float(_col(row, "snr")) >= 3.0
+    except (TypeError, ValueError):
+        snr_ok = False
+    edge = _col(row, "Edge")
+    blend = _col(row, "Blend")
+    blend_ok = blend is None or str(blend).strip() in ("0", "0.0", "")
+    return str(edge).strip().lower() in ("f", "false") and blend_ok and snr_ok
+
+
+def _qc_hspsc(row):
+    """Herschel/SPIRE point source: SNR>=3 only. Deliberately does NOT reject
+    fExt='T' -- debris disks are resolved/confused in the large SPIRE beam, so
+    the extended flag marks exactly the IR-excess sources we want."""
+    try:
+        return float(_col(row, "SNR")) >= 3.0
+    except (TypeError, ValueError):
+        return False
 
 
 def _qc_sdss(row):

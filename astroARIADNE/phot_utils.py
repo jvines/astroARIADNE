@@ -106,10 +106,14 @@ def mag_to_flux(mag, mag_err, band):
     The band parameter is a string representing the filter used and it must
     match exactly the name in pyphots filter database
 
-    If the filter is from PanSTARRS or SDSS, then the magnitude is in the AB
-    system. Else it's in the Vega system.
+    If the filter is from PanSTARRS, SDSS, GALEX or SkyMapper, the magnitude
+    is in the AB system. Else it's in the Vega system. (SkyMapper was wrongly
+    routed through the Vega branch until 2026-06: its AB-native mags came out
+    20-60% faint in flux -- the redder the band the worse -- which tilted
+    every fit that used them.)
     """
-    if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band:
+    if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band \
+            or 'SkyMapper_' in band:
         # Get flux from AB mag
         flux, flux_err = mag_to_flux_AB(mag, mag_err)
         # Get effective wavelength for bandpass
@@ -131,7 +135,8 @@ def flux_to_mag(flux, flux_err, band):
     The flux is expected to be in the units of erg s-1 cm-2 um-1
     """
     leff = get_effective_wavelength(band)
-    if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band:
+    if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band \
+            or 'SkyMapper_' in band:
         f0 = convert_f_nu_to_f_lambda(3.631e-20, leff)
     else:
         f0 = get_zero_flux(band)
