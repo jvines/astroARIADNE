@@ -21,7 +21,25 @@ GRID_BASENAMES = {
     'btcond': 'BTCond', 'ck04': 'CK04', 'kurucz': 'Kurucz', 'coelho': 'Coelho',
     'bosz': 'BOSZ', 'sphinx': 'SPHINX', 'tlusty': 'TLUSTY', 'koester': 'Koester',
     'newera': 'NewEra',
+    # Cool/brown-dwarf grids (L/T/Y regime) for the IR-excess companion BMA --
+    # not photosphere-fit grids; evaluated post-fit at the primary's [M/H].
+    'atmo': 'ATMO2020', 'sonora': 'Sonora',
+    # STAGGER 3D-RHD spectra (Chiavassa+2018 via POLLUX): FGK 4000-7000 K,
+    # logg 1.5-5.0, [Fe/H] -4..+0.5, 0.2-20 um. The only 3D grid in the
+    # ensemble; sparse (36% of the nominal lattice -- real simulation nodes).
+    'stagger': 'Stagger',
+    # BT-Dusty (Allard, via POLLUX): the max-dust limit of the BT family,
+    # 2000-6000 K, logg 0.5-5.5, 0.3-20 um. Solar-Z only, broadcast across the
+    # feh axis (like the cool BT-Settl extension).
+    'btdusty': 'BTDusty',
 }
+
+# Cool/BD grids used by the IR-excess companion characterization (BMA over the
+# cool ensemble). BT-Settl (cool-extended) participates via the fit grid.
+# BT-NextGen (gas-phase) and BT-Cond (full dust settling) joined 2026-06 with
+# the genuine SVO data: they reach 800 K and bracket the dust physics of the
+# L/T transition, exactly the regime that discriminates a BD companion.
+COOL_COMPANION_GRIDS = ('atmo', 'sonora', 'btnextgen', 'btcond')
 
 try:
     modelsdir = os.environ['ARIADNE_MODELS']
@@ -68,7 +86,31 @@ filter_names = np.array([
        'SPITZER_IRAC_58', 'SPITZER_IRAC_80', 'AKARI_IRC_S9W', 'IRAS_12',
        'AKARI_IRC_L18W', 'IRAS_25', 'SPITZER_MIPS_24', 'IRAS_60',
        'SPITZER_MIPS_70', 'IRAS_100', 'SPITZER_MIPS_160',
-       'HERSCHEL_SPIRE_PSW', 'HERSCHEL_SPIRE_PMW', 'HERSCHEL_SPIRE_PLW'
+       'HERSCHEL_SPIRE_PSW', 'HERSCHEL_SPIRE_PMW', 'HERSCHEL_SPIRE_PLW',
+       'AKARI_FIS_N60', 'AKARI_FIS_WIDE_S', 'AKARI_FIS_WIDE_L', 'AKARI_FIS_N160',
+       # SPHEREx super-bands (2-5 native channels each; see
+       # build_custom_filters.py SPHEREX_TOPHATS). All are FIT bands -- the
+       # five <= 2.4 um bridge the PS1_y-2MASS_J catalog void (1050) and
+       # thread the H2O troughs between J/H/Ks, the eight >= 2.75 um share
+       # the W1/W2/IRAC range and follow the same ~5 um fit/excess boundary
+       # (fit_irx always routes the >= 4.4 um W2 block to the excess set;
+       # route_mid_ir=True widens to the whole 2.75-5 um block). Grid columns
+       # are cache-derived (notebooks/augment_grids_spherex.py) pending the
+       # raw reconvolution; SPHEREX_4650/4900 are NaN in most grids until
+       # then.
+       'SPHEREX_1050',
+       'SPHEREX_1130', 'SPHEREX_1400', 'SPHEREX_1850', 'SPHEREX_2350',
+       'SPHEREX_2750', 'SPHEREX_3050', 'SPHEREX_3350', 'SPHEREX_3700',
+       'SPHEREX_4050', 'SPHEREX_4300', 'SPHEREX_4650', 'SPHEREX_4900',
+       # J-PLUS narrow diagnostics (Mg b / Halpha / Ca triplet), fed by Gaia
+       # XP synthetic photometry -- direct [Fe/H]/log g leverage.
+       'JPLUS_J0515', 'JPLUS_J0660', 'JPLUS_J0861',
+       # CASSIS / Spitzer-IRS low-res super-bands (>=5 um -> irx_bands, never
+       # fit). Energy top-hats, seam-avoiding; cache-derived grid columns from
+       # notebooks/augment_grids_irs.py pending the yuki raw reconvolution.
+       'IRS_5500', 'IRS_6500', 'IRS_8000', 'IRS_10000', 'IRS_12000',
+       'IRS_13000', 'IRS_15000', 'IRS_18000', 'IRS_23000', 'IRS_30000',
+       'IRS_35000'
 ])
 
 # IR-excess bands: redward of ~5 um, where warm-dust / debris-disk excess
@@ -85,6 +127,16 @@ irx_bands = frozenset([
     'SPITZER_MIPS_24', 'SPITZER_MIPS_70', 'SPITZER_MIPS_160',
     'HERSCHEL_PACS_BLUE', 'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED',
     'HERSCHEL_SPIRE_PSW', 'HERSCHEL_SPIRE_PMW', 'HERSCHEL_SPIRE_PLW',
+    'AKARI_FIS_N60', 'AKARI_FIS_WIDE_S', 'AKARI_FIS_WIDE_L', 'AKARI_FIS_N160',
+    # CASSIS/IRS low-res super-bands (all >= 5 um): excess, never fit.
+    'IRS_5500', 'IRS_6500', 'IRS_8000', 'IRS_10000', 'IRS_12000',
+    'IRS_13000', 'IRS_15000', 'IRS_18000', 'IRS_23000', 'IRS_30000',
+    'IRS_35000',
+    # The SPHEREx super-bands are NOT here: they share the 2.75-5 um range
+    # with the FIT bands W1/W2/IRAC, and the fit/excess boundary is a
+    # wavelength rule (~5 um), not an instrument rule. The opt-in
+    # fit_irx(route_mid_ir=True) moves the whole 2.75-5 um block (W1/W2,
+    # IRAC 3.6/4.5 and the red SPHEREx bands) to the excess set together.
 ])
 
 # Native wavelength coverage (upper limit, in micron) of model grids whose
@@ -92,8 +144,6 @@ irx_bands = frozenset([
 # limit is excluded from a standalone fit with that grid, because the grid's
 # flux there was extrapolated when the grid was built and is unreliable.
 # Grids absent from this dict are assumed to cover all filters.
-# Coelho 2014 spectra span ~0.25-0.9 um, so its IR photometry (2MASS, WISE,
-# Spitzer, Herschel) is not trustworthy.
 # Koester DA white-dwarf spectra span ~0.09-3.0 um; WISE W1/W2 and Spitzer IRAC
 # fall on the featureless Rayleigh-Jeans tail and are dropped (lossless).
 # Castelli-Kurucz / Kurucz (ATLAS9) extend to 160 um but are densely sampled
@@ -103,7 +153,10 @@ irx_bands = frozenset([
 # and a blackbody agree on. Capped at 8.5 um: IRAC 5.8/8.0 (which match BT-Settl
 # to 1%) survive; AKARI 9 (already 18% off) and the unreliable W3+ are dropped.
 grid_wave_coverage = {
-    'coelho': 0.9,
+    # NOTE (2026-06): the historical 0.9 um Coelho cap was lifted. The 2014
+    # low-res SED library is a purpose-built 0.13-10 um product and its
+    # NIR/IRAC photometry matches BT-Settl/PHOENIX to ~1-3% across FGK nodes
+    # (cross-grid audit); the NaN guard self-limits its reach at ~8 um.
     'koester': 3.0,
     'ck04': 8.5,
     'kurucz': 8.5,
@@ -131,6 +184,11 @@ iso_mask = np.array([
     0, 0,
     0, 0, 0, 0, 0, 0, 0,        # IR extension (IRAC 58/80, AKARI, IRAS, MIPS)
     0, 0, 0, 0, 0, 0, 0,        # ... and Herschel SPIRE
+    0, 0, 0, 0,                 # ... and AKARI FIS (65/90/140/160 um)
+    0, 0, 0, 0, 0, 0, 0,        # SPHEREx super-bands (not isochrone bands)
+    0, 0, 0, 0, 0, 0,
+    0, 0, 0,                    # J-PLUS narrow diagnostics
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   # CASSIS/IRS super-bands (not isochrone)
 ])
 
 # Filter bands for isochrones.
