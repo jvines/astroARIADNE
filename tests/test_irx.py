@@ -198,10 +198,12 @@ def test_reliability_gating_respects_coverage():
     from astroARIADNE.config import irx_bands
     reach = grid_irx_reach('coelho', coelho) & set(irx_bands)
     # Since the SPHEREx band extension (2026-06), coelho also reaches the
-    # SPHEREx red super-bands inside its 10 um coverage.
+    # SPHEREx red super-bands inside its 10 um coverage; the raw rebuild adds
+    # the IRS continuum bands below its ~8 um self-limit (IRS_5500/6500/8000).
     allowed = {'SPITZER_IRAC_58', 'SPITZER_IRAC_80',
                'SPHEREX_2750', 'SPHEREX_3050', 'SPHEREX_3350',
-               'SPHEREX_3700', 'SPHEREX_4050', 'SPHEREX_4300'}
+               'SPHEREX_3700', 'SPHEREX_4050', 'SPHEREX_4300',
+               'IRS_5500', 'IRS_6500', 'IRS_8000'}
     assert reach <= allowed and {'SPITZER_IRAC_58', 'SPITZER_IRAC_80'} <= reach
 
 
