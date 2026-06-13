@@ -404,6 +404,58 @@ And a new call to `s.print_mags()` would yield:
 A list of allowed filters can be found
 [here](https://github.com/jvines/astroARIADNE/blob/master/filters.md)
 
+<!-- DOC:DATASOURCES-START -->
+### Data sources & spectro-photometry
+
+When a `Star` is created, **ARIADNE**'s librarian assembles the broadband SED
+automatically. It pulls catalog photometry (Gaia, 2MASS, AllWISE, Pan-STARRS,
+SkyMapper, SDSS, APASS, Strömgren, Tycho, GALEX, and the far-IR catalogs) and
+then *gap-fills* with synthetic photometry derived from public spectroscopic
+and spectro-photometric surveys. Every magnitude is added **first-write-wins**:
+a real catalog measurement is never overwritten by a synthetic one, and the
+synthetic sources only ever fill wavelengths the catalogs leave uncovered.
+
+| Source | Range | Role | Opt out with |
+|--------|-------|------|--------------|
+| Catalog photometry | UV–far-IR | the SED backbone | per-catalog `ignore=[...]` |
+| **Gaia XP** synthetic | 0.4–1.05 µm | fills optical gaps (Strömgren / JKC / SDSS / PS1 standardized systems) for `G ≤ 16` | `ignore=['XP']` |
+| **DESI / BOSS** | 0.36–1.0 µm | the faint-end (`G > 16`) continuation of the optical fill | `ignore=['DESI']`, `ignore=['BOSS']` |
+| **SPHEREx** QR2 | 1.0–5.0 µm | super-band spectro-photometry bridging the J/H/Ks/W1/W2 gaps (incl. the 2MASS–WISE void) | `ignore=['SPHEREX']` |
+| **CASSIS / Spitzer-IRS** | 5–38 µm | IR-excess super-bands (10/18 µm silicate features) — never fit, only quantified as excess | `ignore=['CASSIS']` |
+| **IUE / INES** | 0.12–0.33 µm | GALEX FUV/NUV for bright stars where GALEX saturates (replaces the saturated catalog value) | `ignore=['IUE']` |
+
+Each synthetic band is convolved through the same filter curves the fit uses,
+carries a measured calibration floor on its uncertainty, and is announced in
+the log as it is added, e.g.
+
+```
+*** Gaia XP synthetic photometry filled 9 uncovered band(s): STROMGREN_v,
+    STROMGREN_b, GROUND_JOHNSON_B, GROUND_COUSINS_R, ... ***
+*** SPHEREx QR2 spectro-photometry added 10 super-band(s): SPHEREX_1130(3),
+    SPHEREX_1400(4), ... ***
+```
+
+The XP/SPHEREx fills also act as a **quality control** on the catalog: an
+observed magnitude that disagrees with its own synthetic counterpart by more
+than the tolerance (tightened for high-proper-motion stars, where multi-epoch
+surveys split the source) is flagged as a wrong/split crossmatch and dropped.
+
+**Turning the spectro-photometry off.** The whole synthetic layer is opt-out at
+the fit level — `Fitter.spectra = False` drops every XP/DESI/BOSS fill and the
+SPHEREx super-bands, leaving a catalog-only SED:
+
+```python
+f = Fitter()
+f.star = s
+f.spectra = False        # catalog photometry only (no XP / SPHEREx / spectra)
+```
+
+Why use the fills? On a sample of stars with directly-measured (interferometric)
+temperatures, the XP optical fills tighten the recovered `Teff` posterior by
+~35 % and can make otherwise unfittable, sparsely-observed stars fit at all —
+see [the validation below](#validating-the-fills).
+<!-- DOC:DATASOURCES-END -->
+
 ### Interstellar extinction
 
 **ARIADNE** has an incorporated prior for the interstellar extinction in the
