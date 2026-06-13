@@ -6,9 +6,9 @@ from multiprocessing import Pool
 
 import pandas as pd
 import numpy as np
-from isochrones import SingleStarModel, get_ichrone
-from isochrones.mist import MIST_Isochrone
-from isochrones.priors import FlatPrior, GaussianPrior
+# ``isochrones`` (+ the MIST grids) is a heavy, optional dependency. It is
+# imported lazily inside the functions that use it, so the rest of ARIADNE
+# (the photosphere and IR-excess fits) imports and runs without it installed.
 from numba.core.errors import (NumbaDeprecationWarning,
                                NumbaPendingDeprecationWarning)
 import dynesty
@@ -33,6 +33,7 @@ warnings.filterwarnings(
 
 def get_isochrone(logage, feh):
     """Retrieve isochrone for given age and feh."""
+    from isochrones.mist import MIST_Isochrone
     mist = MIST_Isochrone()
     iso = mist.isochrone(logage, feh)
     return iso
@@ -50,6 +51,8 @@ def estimate(bands, params, logg=True, out_folder='.', threads=1, dlogz=0.01):
         Evidence tolerance for the isochrone nested sampling. Lower is more
         precise but slower.
     """
+    from isochrones import SingleStarModel, get_ichrone
+    from isochrones.priors import FlatPrior, GaussianPrior
     global _ISO_MODEL, _ISO_PARAMS, _ISO_JITTER_VARS
     mist = get_ichrone('mist', bands=bands)
     model = SingleStarModel(mist, **params)

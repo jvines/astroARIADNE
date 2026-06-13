@@ -18,7 +18,11 @@ from scipy.constants import h as _h, c as _c, k as _k
 
 from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands,
                      irx_bands, GRID_BASENAMES)
-from .isochrone import estimate
+# Optional: only needed for the isochrone logg estimate (estimate_logg=True).
+try:
+    from .isochrone import estimate
+except Exception:
+    estimate = None
 from .librarian import Librarian
 from .librarian._adapter import adapt_librarian
 from .error import StarWarning, InputError
@@ -541,6 +545,10 @@ class Star:
                     '\t\t*** ESTIMATING LOGG USING MIST ISOCHRONES ***', c
                 )
             )
+        if estimate is None:
+            raise ImportError(
+                'estimate_logg=True needs the optional `isochrones` '
+                'dependency, which is not installed.')
         logg_est = estimate(used_bands, params, logg=True, out_folder=out)
         if logg_est is not None:
             self.logg = logg_est[0]
