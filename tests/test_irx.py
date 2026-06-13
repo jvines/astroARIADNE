@@ -294,6 +294,28 @@ def test_companion_radius_cap_degeneracy_floor():
         'R2 pegged at the primary radius: the degeneracy floor is not applied'
 
 
+def test_wd_host_detection():
+    """_is_wd_host fires on the Gaia white-dwarf cooling sequence (M_G > 10,
+    BP-RP < 1.5) and not on main-sequence FGK or red M dwarfs."""
+    import types
+    from astroARIADNE.fitter import Fitter
+
+    def star(bp, g, rp, dist):
+        return types.SimpleNamespace(
+            filter_names=np.array(['GaiaDR2v2_BP', 'GaiaDR2v2_G',
+                                   'GaiaDR2v2_RP']),
+            mags=np.array([bp, g, rp]), dist=dist)
+    # WD: M_G = 12 (>10), BP-RP = 0 (<1.5)
+    assert Fitter._is_wd_host(star(12.0, 12.0, 12.0, 10.0)) is True
+    # G dwarf: M_G ~ 5
+    assert Fitter._is_wd_host(star(5.5, 5.0, 4.5, 10.0)) is False
+    # M dwarf: faint (M_G ~ 11) but red (BP-RP = 4) -> not a WD
+    assert Fitter._is_wd_host(star(14.0, 11.0, 10.0, 10.0)) is False
+    # fit_wd exists and forces the WD path
+    f = Fitter()
+    assert hasattr(f, 'fit_wd') and f._force_wd is False
+
+
 def test_fit_irx_band_routing():
     """fit_irx routing: the W2 block (>= 4.4 um) moves to the excess set by
     default; route_mid_ir widens to the full 2.75-5 um block; regular SED

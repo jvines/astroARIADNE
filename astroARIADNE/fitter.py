@@ -25,7 +25,13 @@ from .config import (filesdir, gridsdir, priorsdir, filter_names, colors,
                      iso_mask, iso_bands, grid_wave_coverage,
                      COOL_COMPANION_GRIDS, irx_bands)
 from .error import *
-from .isochrone import estimate
+# ``isochrones`` (and the MIST grids) are a heavy, optional dependency used
+# only for the post-fit age/mass estimate (estimate_age=True). Import it
+# lazily so the photosphere/IR-excess fit runs without it.
+try:
+    from .isochrone import estimate
+except Exception:                       # isochrones not installed
+    estimate = None
 from .phot_utils import *
 from .sed_library import *
 from .utils import *
@@ -780,6 +786,7 @@ class Fitter:
         # The default fit endpoints never run it (the irx bands are still
         # routed out of the fit either way).
         self._do_irx = False
+        self._force_wd = False        # set by fit_wd(); forces the WD path
         self.contrast = None
         # Spectro-photometry switch: when False, bands derived from spectra
         # (Gaia XP synthetic fills, SPHEREx super-bands) are dropped from the
@@ -1506,6 +1513,22 @@ class Fitter:
         return bp_rp, abs_g
 
     @staticmethod
+    def _is_wd_host(star):
+        """True when the star sits on the Gaia white-dwarf cooling sequence
+        (faint absolute G, blue colour: M_G > 10 and BP-RP < 1.5).
+
+        A WD photosphere is Koester, whose spectra stop at ~3 um, so its
+        IR-excess bands are predicted by Rayleigh-Jeans extrapolation (the WD
+        continuum is pure RJ there). The main-sequence deep-IR ensemble would
+        mis-fit the WD and mischaracterize a cool-companion excess as warm
+        dust (WD 0137-349, GD 1400). The colour cut excludes the M-dwarf
+        sequence, which is comparably faint but much redder.
+        """
+        bp_rp, abs_g = Fitter._gaia_color_absmag(star)
+        return bool(abs_g is not None and abs_g > 10.0
+                    and bp_rp is not None and bp_rp < 1.5)
+
+    @staticmethod
     def _cool_dwarf_flags(temp, lum, bp_rp=None, abs_g=None):
         """Classify a star for regime-aware priors.
 
@@ -1570,6 +1593,11 @@ class Fitter:
             _bp_rp, _abs_g)
 
         _grid_l = (getattr(self, '_grid', '') or '').lower()
+        # A WD host in fit_irx is a koester-only BMA (self._grid is unset), so
+        # also honour the _wd_host flag -- otherwise the WD gets the FGK/MS
+        # Teff and logg priors and the fit rails off the koester grid edges.
+        if getattr(self, '_wd_host', False):
+            _grid_l = 'koester'
         # Teff: standalone grids that sit outside the FGK population prior need
         # their own wide uniform prior. Koester white dwarfs span 5000-80000 K;
         # TLUSTY hot stars 15-55 kK. The FGK population prior assigns ~zero
@@ -2008,8 +2036,25 @@ class Fitter:
         else:
             self.fit()
 
-    def fit_irx(self, models=None, route_mid_ir=False):
-        """BMA fit + IR-excess characterization -- the only endpoint that
+    def fit_wd(self, models=None, excess_from_um=1.0):
+        """White-dwarf SED fit + IR-excess characterization (the WD endpoint).
+
+        Fits the photosphere with the Koester DA grid under WD-appropriate
+        priors (Teff 5-80 kK, logg 6.5-9.5) and characterizes any IR excess --
+        an unresolved cool companion or a debris disk -- by Rayleigh-Jeans
+        extrapolation of the WD continuum past Koester's ~3 um reach. Every
+        band redward of ``excess_from_um`` (default 1.0 um, the WD/companion
+        crossover) joins the excess set; the WD is fit on its UV-optical
+        photometry, where Koester is excellent.
+
+        ``fit_irx`` also auto-detects a WD host from the Gaia HR position and
+        routes here; ``fit_wd`` is the deliberate, always-WD endpoint.
+        """
+        self._force_wd = True
+        return self.fit_irx(models=models, excess_from_um=excess_from_um)
+
+    def fit_irx(self, models=None, route_mid_ir=False, excess_from_um=None):
+        """BMA fit + IR-excess characterization -- the endpoint that
         quantifies and classifies IR excess.
 
         The ensemble is auto-selected for IR-excess work: among the candidate
@@ -2018,8 +2063,18 @@ class Fitter:
         maximized second, so the common (intersection) reach is clipped as
         little as possible. Passing ``models`` overrides the selection
         entirely and is respected to the full extent -- but grids with no
-        IR-excess capability at all (e.g. phoenix, coelho, koester) make the
-        run fail loudly rather than silently clip the reach to nothing.
+        IR-excess capability at all (e.g. phoenix, coelho) make the run fail
+        loudly rather than silently clip the reach to nothing.
+
+        ``excess_from_um`` sets the fit/excess wavelength boundary: every band
+        redward of it joins the quantified-excess set. Default 4.4 um (the W2
+        block); ``route_mid_ir=True`` is shorthand for 2.75 um; a WD host
+        (auto-detected, or via fit_wd) uses 1.0 um. Pass any value for full
+        control (e.g. 2.2 to route H/J/K to the excess for a veiled companion).
+
+        A WD host is detected from the Gaia HR position and dispatched to the
+        Koester photosphere + WD priors automatically; fit_wd() is the
+        explicit WD endpoint.
         """
         from .sed_library import grid_irx_reach, load_grid
         from .phot_utils import get_effective_wavelength
@@ -2037,7 +2092,25 @@ class Fitter:
             w = [x for x in w if np.isfinite(x)]
             return max(w) if w else 0.0
 
-        if models is not None:
+        # White-dwarf host: the photosphere is Koester (the only WD grid),
+        # whose spectra stop at ~3 um. Koester has zero physical IR-excess
+        # reach, but a WD's IR continuum is exactly Rayleigh-Jeans, so the
+        # excess bands beyond 3 um are predicted by RJ extrapolation in
+        # _compute_irx. Auto-detected from the Gaia HR position, or forced by
+        # the dedicated fit_wd() endpoint.
+        self._wd_host = (self._is_wd_host(self.star)
+                         or getattr(self, '_force_wd', False))
+        if self._wd_host:
+            self.models = list(models) if models is not None else ['koester']
+            _wd_reach = max((get_effective_wavelength(b) for b in irx_bands),
+                            default=0.0)
+            reaches = {g: (_wd_reach if g == 'koester' else _reach_um(g))
+                       for g in self.models}
+            print(colored(
+                '\t\t*** WD host (Gaia HR position): photosphere = Koester; '
+                'IR-excess bands predicted by Rayleigh-Jeans extrapolation '
+                '(the WD continuum is pure RJ beyond ~3 um). ***', 'cyan'))
+        elif models is not None:
             bad = [g for g in models if _reach_um(g) <= 0.0]
             if bad:
                 raise ValueError(
@@ -2084,9 +2157,26 @@ class Fitter:
         # pseudo-excess (SCR 1845 produced p=1.0 false companions this way
         # when the baseline carried bugs). Enable only when the <= 2.4 um
         # photosphere is demonstrably clean (XP + SPHEREx NIR anchored).
-        self._route_irx_extra(
-            self._IRX_EXTRA_BANDS if route_mid_ir else self._IRX_W2_BANDS,
-            anchor_um=2.4 if route_mid_ir else 4.4)
+        # Excess-set routing is a single wavelength rule: every band redward of
+        # `excess_from_um` joins the quantified-excess set (the photosphere is
+        # fit blueward of it). The three built-in modes are just defaults of
+        # this one knob, and the user can set any threshold (e.g. route H/J/K
+        # to the excess for a heavily veiled NIR companion):
+        #   - normal fit_irx : 4.4 um (the W2 block -- W2/IRAC 4.5/SPHEREx red)
+        #   - route_mid_ir   : 2.75 um (the full W1-W2 CH4-colour block)
+        #   - WD host        : 1.0 um (a hot WD + cool companion cross over at
+        #                      ~1 um; Koester owns UV-optical, the companion
+        #                      owns >= 1 um, RJ-extrapolated past Koester's
+        #                      ~3 um reach -- this also moves every SPHEREx
+        #                      band out of the fit so Koester is never
+        #                      band-guarded).
+        if excess_from_um is None:
+            excess_from_um = (1.0 if self._wd_host
+                              else 2.75 if route_mid_ir else 4.4)
+        ex_bands = [str(b) for b in self.star.filter_names
+                    if np.isfinite(get_effective_wavelength(str(b)))
+                    and get_effective_wavelength(str(b)) >= excess_from_um]
+        self._route_irx_extra(ex_bands, anchor_um=excess_from_um)
         self.initialize()
         # initialize() applies the Teff gate and the band-coverage guard, so
         # the surviving ensemble can be smaller than the roster announced
@@ -2587,8 +2677,29 @@ class Fitter:
         irx_obs_e = np.asarray(star.flux_er)[mask]
 
         interps = {g: load_grid(g) for g in grids}
-        common = set.intersection(*[grid_irx_reach(g, i)
-                                    for g, i in interps.items()])
+        wd = getattr(self, '_wd_host', False)
+        rj_ref_band, rj_ref_wl = None, None
+        if wd:
+            # WD photosphere: every excess band is quantifiable via RJ
+            # extrapolation. Anchor RJ on the reddest FIT band Koester reaches
+            # (<= its ~3 um coverage) -- the photosphere there is already deep
+            # in the Rayleigh-Jeans tail, so F_lambda ~ lambda^-4 is exact.
+            common = set(str(f) for f in irx_filt)
+            kg = next((i for g, i in interps.items() if g == 'koester'), None)
+            if kg is not None:
+                fm = np.asarray(star.filter_mask, int)
+                fb = np.asarray(star.filter_names)[fm]
+                fw = np.asarray(star.wave)[fm]
+                # anchor RJ on the reddest FIT band Koester reaches; for a hot
+                # WD even ~0.8 um is already in the RJ tail (peak << 0.3 um).
+                cand = [(float(w), str(b)) for b, w in zip(fb, fw)
+                        if str(b) in kg.finite_bands
+                        and np.isfinite(w) and 0.6 <= w <= 3.0]
+                if cand:
+                    rj_ref_wl, rj_ref_band = max(cand)
+        else:
+            common = set.intersection(*[grid_irx_reach(g, i)
+                                        for g, i in interps.items()])
 
         # Posterior mixture: (grid, weight, posterior_samples) per member.
         if out.get('weights') and out.get('originals'):
@@ -2626,9 +2737,25 @@ class Fitter:
                 theta = self._irx_theta(
                     {k: (ps[k][j] if hasattr(ps[k], '__len__') else ps[k])
                      for k in ps})
-                m = model_grid(theta, band, wl, interps[g], self._norm,
-                               av_law, binary=self.binary)
-                draws[d] = float(np.asarray(m).ravel()[0])
+                try:
+                    m = model_grid(theta, band, wl, interps[g], self._norm,
+                                   av_law, binary=self.binary)
+                    val = float(np.asarray(m).ravel()[0])
+                except (KeyError, ValueError, IndexError):
+                    # the grid carries no column for this band (e.g. Koester
+                    # has none of the >3 um IR-excess bands) -> RJ below.
+                    val = float('nan')
+                if not np.isfinite(val) and wd and rj_ref_band is not None:
+                    # band beyond Koester's ~3 um reach -> RJ-extrapolate the
+                    # WD photosphere from the reddest reached band (exact: the
+                    # WD continuum there is pure Rayleigh-Jeans, F_lam ~ lam^-4).
+                    mref = model_grid(theta, np.array([rj_ref_band]),
+                                      np.array([rj_ref_wl]), interps[g],
+                                      self._norm, av_law, binary=self.binary)
+                    vref = float(np.asarray(mref).ravel()[0])
+                    if np.isfinite(vref) and vref > 0:
+                        val = vref * (rj_ref_wl / float(wv)) ** 4
+                draws[d] = val
             model = float(np.nanmean(draws))
             model_err = float(np.nanstd(draws))
             excess = float(fo) - model
@@ -2926,7 +3053,11 @@ class Fitter:
         # Add estimated age to best fit dictionary. This is done with the wider
         # sampled distribution instead of the averaged one in order to save time
 
-        if self.estimate_age:
+        if self.estimate_age and estimate is None:
+            print(colored('\t\t*** estimate_age skipped: the optional '
+                          '`isochrones` dependency is not installed. ***',
+                          'yellow'))
+        if self.estimate_age and estimate is not None:
             age_samp, mass_samp, eep_samp = self._run_estimate_age(
                 out['best_fit_samples'],
                 out['uncertainties_samples'],
@@ -2988,9 +3119,16 @@ class Fitter:
         # Get synthetic mag and fluxes for highest probability model.
         synth_mod = 'btsettl'
         intp = self.load_interpolator(synth_mod)
-        ogteff = avgd['originals'][max_prob_mod]['teff']
-        oglogg = avgd['originals'][max_prob_mod]['logg']
-        ogfeh = avgd['originals'][max_prob_mod]['z']
+        # Broadcast to a common length: a pinned axis (e.g. Koester's single
+        # [Fe/H] node, or a fixed parameter) is stored as a scalar, which would
+        # otherwise break len()/zip over the posterior samples.
+        ogteff = np.atleast_1d(avgd['originals'][max_prob_mod]['teff'])
+        oglogg = np.atleast_1d(avgd['originals'][max_prob_mod]['logg'])
+        ogfeh = np.atleast_1d(avgd['originals'][max_prob_mod]['z'])
+        n = max(ogteff.size, oglogg.size, ogfeh.size)
+        ogteff = np.broadcast_to(ogteff, (n,))
+        oglogg = np.broadcast_to(oglogg, (n,))
+        ogfeh = np.broadcast_to(ogfeh, (n,))
         fluxes = np.zeros((len(oglogg), len(filter_names)))
         for i, t, g, z in zip(range(len(oglogg)), ogteff, oglogg, ogfeh):
             fluxes[i, :] = get_interpolated_flux(t, g, z, filter_names, intp)
