@@ -22,7 +22,8 @@ from astropy.constants import sigma_sb
 from termcolor import colored
 
 from .config import (filesdir, gridsdir, priorsdir, filter_names, colors,
-                     iso_mask, iso_bands, grid_wave_coverage)
+                     iso_mask, iso_bands, grid_wave_coverage,
+                     COOL_COMPANION_GRIDS, irx_bands)
 from .error import *
 from .isochrone import estimate
 from .phot_utils import *
@@ -64,14 +65,53 @@ def _fm07_rv(wave, a_v, r_v=3.1):
     return extinction.fm07(wave, a_v)
 
 
-def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
-    """Characterize an IR excess as a single-temperature (debris-disk) blackbody.
+# Modified-blackbody convention for the disk hypotheses (Wyatt 2008): pure
+# blackbody blueward of lambda0, B_lambda * (lambda0/lambda)^beta beyond it.
+# Small grains emit inefficiently at lambda >> grain size, so a pure BB
+# over-predicts the submm tail (PACS160/SPIRE/FIS bands).
+_MODBB_BETA = 1.0
+_MODBB_LAM0 = 210.0     # um
 
-    Fits ``F_exc(lambda) = Omega * B_lambda(T)`` to the positive excess fluxes
+
+def _modbb_factor(lam_um):
+    """Emission-efficiency factor of the modified blackbody at lam_um."""
+    lam = np.asarray(lam_um, float)
+    return np.where(lam > _MODBB_LAM0, (_MODBB_LAM0 / lam) ** _MODBB_BETA, 1.0)
+
+
+def _disk_lmax(T):
+    """Empirical ceiling on the disk fractional luminosity L_dust/L_* vs dust
+    temperature. Cold/warm debris disks reach ~1e-1 only in extreme
+    (giant-impact) systems; sustained HOT dust is observed only at hot-exozodi
+    levels (~1e-4, Kral+2017). Log-linear decline from 1e-1 at <=500 K to 1e-4
+    at 1500 K. Without this joint prior, a luminous companion photosphere can
+    masquerade as an astrophysically impossible hot, ultra-luminous 'disk'
+    (e.g. a T-dwarf secondary fit as a 1245 K, L/L*=0.16 blackbody)."""
+    T = np.asarray(T, float)
+    frac = ((np.log10(np.clip(T, 500.0, 1500.0)) - np.log10(500.0))
+            / (np.log10(1500.0) - np.log10(500.0)))
+    return 10.0 ** (-1.0 - 3.0 * frac)
+
+
+def _modbb_bolo_frac(T):
+    """Bolometric fraction int(B_mod)/int(B): corrects the Omega <-> L_dust
+    relation for the flux the modification removes from the submm tail."""
+    from scipy.constants import h, c, k as kB
+    lam = np.geomspace(1.0, 5000.0, 400) * 1e-6        # m
+    with np.errstate(over='ignore'):
+        B = (2 * h * c ** 2 / lam ** 5) / np.expm1(h * c / (lam * kB * T))
+    return float(np.trapz(B * _modbb_factor(lam * 1e6), lam)
+                 / np.trapz(B, lam))
+
+
+def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
+    """Characterize an IR excess as a single-temperature (debris-disk) modified
+    blackbody (beta=1 beyond 210 um, the field-standard convention).
+
+    Fits ``F_exc(lambda) = Omega * B_mod(T)`` to the positive excess fluxes
     (``F_obs - F_model`` in erg/s/cm^2/um at the band wavelengths), then derives
     the dust temperature ``T`` and the fractional excess luminosity
-    ``L_dust/L_*`` from ``F_dust = Omega * sigma T^4 / pi`` (the bolometric
-    Planck integral), ``L_dust = 4 pi d^2 F_dust``.
+    ``L_dust/L_*`` from the bolometric integral of the modified blackbody.
 
     Returns ``{t_dust, l_dust_over_lstar, n_bands, fit_chi2}`` or ``None`` when
     fewer than two positive bands are available (or distance/luminosity unknown)
@@ -87,11 +127,12 @@ def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
         return None
     lam = w[m] * 1e-6                                  # m
     F, E = F[m], E[m]
+    mod_fac = _modbb_factor(w[m])
 
     def _planck_per_um(T):
         # SI B_lambda [W/m^2/m/sr] -> erg/s/cm^2/um/sr (x1e7 x1e-4 x1e-6)
         B = (2 * h * c ** 2 / lam ** 5) / np.expm1(h * c / (lam * kB * T))
-        return B * 1e-3
+        return B * 1e-3 * mod_fac
 
     best = None                                        # (chi2, T, Omega)
     for T in np.geomspace(30.0, 1500.0, 400):
@@ -106,7 +147,7 @@ def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
     if best is None:
         return None
     chi2, T, Omega = best
-    f_dust = Omega * sigma_sb * T ** 4 / np.pi * 1e3   # W/m^2 -> erg/s/cm^2
+    f_dust = Omega * sigma_sb * T ** 4 / np.pi * 1e3 * _modbb_bolo_frac(T)
     d_cm = dist_pc * 3.0856775815e18
     l_dust = 4.0 * np.pi * d_cm ** 2 * f_dust          # erg/s
     l_star = lum_lsun * 3.828e33                        # erg/s
@@ -114,9 +155,166 @@ def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
                 omega_sr=Omega, n_bands=int(m.sum()), fit_chi2=chi2)
 
 
-def _excess_model_selection(names, waves_um, excess, excess_err, interp,
+def _bb_fit_teff(w_um, F, E):
+    """Raw blackbody Teff fit to band fluxes.
+
+    Fits ``F_lambda = A * B_lambda(T)`` with the scale ``A`` optimal
+    analytically at each ``T`` of a log-spaced scan, with one 4-sigma
+    clipping pass so chromospheric UV or a mid-IR excess cannot drag the
+    estimate. Returns ``(T, keep_mask)`` or ``None`` with fewer than 3
+    usable bands.
+    """
+    from scipy.constants import h, c, k as kB  # SI
+    w = np.asarray(w_um, float)
+    F = np.asarray(F, float)
+    E = np.asarray(E, float)
+    good = np.isfinite(F) & np.isfinite(E) & (F > 0) & (E > 0)
+    if good.sum() < 3:
+        return None
+    lam = w * 1e-6                             # m
+
+    def _best_T(msk):
+        # Fit in log-flux with RELATIVE-error weights. Linear-flux 1/sigma^2
+        # weighting hands control to the faintest points (their absolute
+        # errors are tiny), so five garbage catalog mags from a split
+        # high-PM crossmatch can out-vote 2MASS+WISE; relative weighting is
+        # scale-free. The calibration anchors are fit with flat 2% relative
+        # errors, so this also puts both sides of the calibration on the
+        # same convention.
+        lamv, lnF = lam[msk], np.log(F[msk])
+        wts = (F[msk] / E[msk]) ** 2           # 1/sigma_rel^2
+        B0 = 2 * h * c ** 2 / lamv ** 5
+        x0 = h * c / (lamv * kB)
+        wsum = np.sum(wts)
+        best = None                            # (chi2, T, A)
+        for T in np.geomspace(1000.0, 60000.0, 600):
+            B = B0 / np.expm1(x0 / T)
+            if not np.all(B > 0):              # Planck underflow at scan edge
+                continue
+            lnB = np.log(B)
+            lnA = float(np.sum(wts * (lnF - lnB)) / wsum)
+            chi2 = float(np.sum(wts * (lnF - lnA - lnB) ** 2))
+            if not np.isfinite(chi2):
+                continue
+            if best is None or chi2 < best[0]:
+                best = (chi2, float(T), np.exp(lnA))
+        return best
+
+    best = _best_T(good)
+    if best is None:
+        return None
+    # One clipping pass: drop bands deviating > 4 sigma from the first fit
+    # (chromospheric GALEX UV on G dwarfs, IR excesses, bad catalogue points).
+    _, T, A = best
+    B = (2 * h * c ** 2 / lam ** 5) / np.expm1(h * c / (lam * kB * T))
+    resid = np.where(good, np.abs(F - A * B) / np.where(E > 0, E, np.inf),
+                     np.inf)
+    keep = good & (resid < 4.0)
+    if 3 <= keep.sum() < good.sum():
+        refit = _best_T(keep)
+        if refit is not None:
+            return refit[1], keep
+    return T, good
+
+
+# Calibration anchors for the gate estimate. Blackbody fits to real stellar
+# SEDs are biased: cool (by up to ~600 K around 4000-5000 K, from
+# line/molecular blanketing) through the FGK range, and HOT (by ~+2000 K at
+# 15000 K, once the optical/NIR bands slide onto the Rayleigh-Jeans tail)
+# above ~8000 K -- both large enough to misgate at the 4000 and 16000 K
+# boundaries. The bias is removed by fitting the same blackbody to BT-Settl
+# synthetic photometry in the star's own band set at these anchor Teffs and
+# inverting the curve; the anchor range spans every gate boundary
+# (3000/4000/7000/15000/16000 K) with margin on both sides.
+_BB_GATE_ANCHORS = (1200., 1600., 2000., 2400., 2800., 3000., 3200., 3500.,
+                    4000., 4500., 5000., 5500., 6000., 6500., 7000., 8000.,
+                    10000., 12000., 14000., 16000., 20000.)
+
+# Bands blueward of this are excluded from the gate fit entirely: the Balmer
+# jump makes the BB-vs-star bias non-monotonic in u (verified: an SDSS_u
+# detection flips the 4000-4500 K calibration), and GALEX UV is chromospheric
+# on late-type stars anyway. 0.4 um keeps B and g, drops u and GALEX.
+_BB_GATE_MIN_UM = 0.4
+
+
+def _bb_gate_teff(star):
+    """Blackbody Teff estimate for grid gating, from the star's photometry.
+
+    The Teff gates need *some* estimate to work with: when the librarian
+    finds no catalogue Teff (``star.temp`` is 0/None), neither extreme is
+    acceptable -- 0 K reads as ultra-cool and drops every warm grid, while
+    skipping the gates multi-counts the BT family and admits
+    regime-inappropriate grids. This estimate is used **only** for gating,
+    never as a prior.
+
+    The raw blackbody fit is calibrated on the fly against BT-Settl
+    synthetic photometry generated for the very bands that survived the
+    fit's clipping pass (see ``_BB_GATE_ANCHORS``), making the estimate
+    accurate to ~100 K through the gate boundaries regardless of which
+    bands the star happens to have. Bands blueward of ``_BB_GATE_MIN_UM``
+    are excluded (Balmer jump / chromospheric UV). The calibrated value is
+    clamped into the anchor range, so a Rayleigh-Jeans-degenerate fit
+    railing the T scan cannot return an unphysical gate value. Returns
+    Teff in K, or ``None`` with fewer than 3 usable bands.
+    """
+    m = (star.used_filters == 1) & \
+        (np.asarray(star.wave, float) >= _BB_GATE_MIN_UM)
+    w = np.asarray(star.wave, float)[m]        # um
+    F = np.asarray(star.flux, float)[m]
+    E = np.asarray(star.flux_er, float)[m]
+    raw = _bb_fit_teff(w, F, E)
+    if raw is None:
+        return None
+    t_bb, keep = raw
+    # Calibration is best-effort: any failure falls back to the raw fit.
+    try:
+        from .sed_library import load_grid, get_interpolated_flux
+        bands = np.asarray(star.filter_names)[m][keep]
+        g = load_grid('btsettl')
+        anchors, t_anchor_bb = [], []
+        for t_true in _BB_GATE_ANCHORS:
+            fl = np.asarray(get_interpolated_flux(t_true, 4.5, 0.0, bands, g),
+                            dtype=float)
+            r = _bb_fit_teff(w[keep], fl, 0.02 * fl)
+            # Discard railed anchor fits (scan-edge temperatures): an anchor
+            # whose SED is hopeless in this band set (e.g. a 1200 K model
+            # observed only in the optical) produces garbage, not signal.
+            if r is not None and 1100.0 < r[0] < 55000.0:
+                anchors.append(t_true)
+                t_anchor_bb.append(r[0])
+        t_anchor_bb = np.asarray(t_anchor_bb)
+        anchors = np.asarray(anchors)
+        if len(anchors) >= 4:
+            # Only the bias curve AROUND t_bb has to be invertible -- distant
+            # anchors can be garbage (wrong-regime band sets) or carry kinks
+            # (Rayleigh-Jeans-degenerate hot fits) without affecting the
+            # local inversion. Start from the anchor whose blackbody
+            # temperature is closest to t_bb and expand while strictly
+            # increasing.
+            i0 = int(np.argmin(np.abs(t_anchor_bb - t_bb)))
+            lo = i0
+            while lo > 0 and t_anchor_bb[lo - 1] < t_anchor_bb[lo]:
+                lo -= 1
+            hi = i0
+            while hi + 1 < len(anchors) and \
+                    t_anchor_bb[hi + 1] > t_anchor_bb[hi]:
+                hi += 1
+            if hi - lo + 1 >= 3:
+                # np.interp clamps at both segment ends: a railed/degenerate
+                # raw fit gates as the segment's hottest (or coolest) anchor
+                # instead of a scan-edge temperature.
+                return float(np.interp(t_bb, t_anchor_bb[lo:hi + 1],
+                                       anchors[lo:hi + 1]))
+    except Exception:
+        logger.warning('blackbody gate calibration failed; using the raw '
+                       'blackbody Teff', exc_info=True)
+    return t_bb
+
+
+def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                             z, av, dist_pc, lum_lsun, use_norm, av_law,
-                            teff_primary, grid_teff_lo, grid_teff_hi):
+                            teff_primary, fit_names=None, fit_waves=None,
+                            fit_errs=None, rad_primary=None):
     """Bayesian model selection on the IR excess.
 
     Compares three hypotheses for the excess fluxes by their Bayesian evidence:
@@ -154,54 +352,212 @@ def _excess_model_selection(names, waves_um, excess, excess_err, interp,
 
     chi2_null = float(np.sum(F ** 2 * inv2))             # model = 0
 
-    # Disk grid: log-uniform (T, L_dust/L_*). Omega(T,L) inverts the validated
-    # L_dust = 4 d^2 Omega sigma T^4 * 1e3 chain.
+    # Fit-band consistency penalty. The photosphere fit converged on the fit
+    # bands, so any flux an excess component adds there would have appeared as
+    # a fit residual: each hypothesis pays sum((c_b/sigma_b)^2) over the fit
+    # bands for the flux c_b it predicts in them. Without this, a companion
+    # constrained only by W3/W4 can wander to (Teff2, R2) combinations that
+    # wildly over-predict J/H/K -- the bright-companion bias. (The rigorous
+    # treatment of a decisive companion remains the joint two-component fit.)
+    have_fit = (fit_names is not None and fit_waves is not None
+                and fit_errs is not None and len(np.atleast_1d(fit_names)) > 0)
+    if have_fit:
+        fn_b = np.asarray(fit_names)
+        fw = np.asarray(fit_waves, float)
+        fe_b = np.asarray(fit_errs, float)
+        okf = np.isfinite(fw) & np.isfinite(fe_b) & (fe_b > 0)
+        fn_b, fw, fe_b = fn_b[okf], fw[okf], fe_b[okf]
+        have_fit = fw.size > 0
+        flam_fit = fw * 1e-6
+        finv2 = 1.0 / fe_b ** 2
+
+    # Disk grid: log-uniform (T, L_dust/L_*), modified blackbody (beta=1 beyond
+    # 210 um). Omega(T,L) inverts L_dust = 4 d^2 Omega sigma T^4 * X(T) * 1e3,
+    # X(T) the modified bolometric fraction.
+    mod_irx = _modbb_factor(w)
+    mod_fit = _modbb_factor(fw) if have_fit else None
+
+    def _bmod(lam_m, T, fac):
+        with np.errstate(over='ignore'):
+            B = (2 * H * C ** 2 / lam_m ** 5) \
+                / np.expm1(H * C / (lam_m * KB * T)) * 1e-3
+        return B * fac                                     # erg/s/cm^2/um/sr
+
+    # L is sampled finely (0.006 dex): the likelihood is sharp in amplitude
+    # (flux ~ L), and a coarse L grid quantizes the evidence -- a nested
+    # two-component model would then win on interpolation alone.
     Tg = np.geomspace(30.0, 1500.0, 64)
-    Lg = np.geomspace(1e-7, 1e-1, 64)
+    Lg = np.geomspace(1e-7, 1e-1, 1024)
+    Xg = np.array([_modbb_bolo_frac(T) for T in Tg])
     chi2_disk = np.empty((Tg.size, Lg.size))
     omega_grid = np.empty((Tg.size, Lg.size))
     for i, T in enumerate(Tg):
-        B = (2 * H * C ** 2 / lam ** 5) \
-            / np.expm1(H * C / (lam * KB * T)) * 1e-3     # erg/s/cm^2/um/sr
-        Omega = Lg * l_star / (4 * d_cm ** 2 * SB * T ** 4 * 1e3)
+        B = _bmod(lam, T, mod_irx)
+        Omega = Lg * l_star / (4 * d_cm ** 2 * SB * T ** 4 * 1e3 * Xg[i])
         mod = Omega[:, None] * B[None, :]
         chi2_disk[i] = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
+        if have_fit:
+            Bf = _bmod(flam_fit, T, mod_fit)
+            chi2_disk[i] += Omega ** 2 * float(np.sum(Bf ** 2 * finv2))
+        # Joint (T, L) prior: fractional luminosities above the empirical
+        # ceiling are outside the disk hypothesis' support.
+        chi2_disk[i, Lg > _disk_lmax(T)] = np.inf
         omega_grid[i] = Omega
 
-    # Companion grid: uniform Teff2 (linear) x log-uniform R2 (log). Grid flux
-    # is computed once per Teff2 (rad=1) and scaled by R2^2.
-    t_hi = min(float(grid_teff_hi),
-               float(teff_primary) if teff_primary else 6000.0)
-    t_lo = max(float(grid_teff_lo), 2300.0)
-    comp_ok = t_hi > t_lo + 1.0
-    if comp_ok:
+    # Two-temperature disk (warm + cold modified blackbodies, the asteroid- +
+    # Kuiper-belt analogue pair): a 4-D quadrature on coarser axes, activated
+    # only when the band count can justify the two extra parameters (>=5
+    # quantified excess bands); the evidence comparison handles the Occam
+    # penalty. T_warm > T_cold breaks the labeling degeneracy.
+    chi2_disk2 = None
+    Tflat = Lflat = Oflat = None
+    if F.size >= 5:
+        Tg2 = np.geomspace(30.0, 1500.0, 24)
+        Lg2 = np.geomspace(1e-7, 1e-1, 36)
+        X2 = np.array([_modbb_bolo_frac(T) for T in Tg2])
+        ncomb = Tg2.size * Lg2.size
+        Mc = np.empty((ncomb, F.size))
+        Pf2 = np.empty((ncomb, fw.size)) if have_fit else None
+        Oflat = np.empty(ncomb)
+        Tflat = np.repeat(Tg2, Lg2.size)
+        Lflat = np.tile(Lg2, Tg2.size)
+        k = 0
+        for i, T in enumerate(Tg2):
+            B = _bmod(lam, T, mod_irx)
+            Bf = _bmod(flam_fit, T, mod_fit) if have_fit else None
+            Om = Lg2 * l_star / (4 * d_cm ** 2 * SB * T ** 4 * 1e3 * X2[i])
+            for j in range(Lg2.size):
+                Mc[k] = Om[j] * B
+                if have_fit:
+                    Pf2[k] = Om[j] * Bf
+                Oflat[k] = Om[j]
+                k += 1
+        chi2_disk2 = np.full((ncomb, ncomb), np.inf)
+        valid2 = Lflat <= _disk_lmax(Tflat)      # same joint (T, L) ceiling
+        for i in range(ncomb):
+            if not valid2[i]:
+                continue
+            ordered = (Tflat[i] > Tflat) & valid2            # warm i, cold j
+            if not ordered.any():
+                continue
+            mod2 = Mc[i][None, :] + Mc[ordered]
+            c2 = np.sum((F[None, :] - mod2) ** 2 * inv2[None, :], axis=1)
+            if have_fit:
+                c2 += np.sum((Pf2[i][None, :] + Pf2[ordered]) ** 2
+                             * finv2[None, :], axis=1)
+            chi2_disk2[i, ordered] = c2
+
+    # Companion BMA: each cool grid contributes a 2-D (Teff2 x R2) evidence at
+    # the primary's [M/H]; the companion-hypothesis evidence is the across-grid
+    # mean (equal grid priors) and the recovered Teff2/R2 are evidence-weighted
+    # -- the IR-excess analogue of ARIADNE's photosphere BMA. Per-grid flux is
+    # computed once per Teff2 (rad=1) and scaled by R2^2. A grid extended into
+    # the L/T regime (cool BT-Settl) plus the dedicated BD grids (ATMO, Sonora)
+    # lets a substellar companion outrun the free-blackbody disk, which would
+    # otherwise absorb a BD photosphere as a too-hot, unphysical "disk".
+    # Companion radius prior: an unresolved coeval companion to a
+    # MAIN-SEQUENCE primary cannot be larger than the primary (MS mass-radius
+    # is monotonic) -- without the cap, a tilted photosphere baseline lets
+    # the quadrature build a luminous pseudo-companion out of the deficit
+    # (SCR 1845 produced R2 = 0.114 against a 0.069 Rsun primary). The cap is
+    # floored at 0.12 Rsun (~1.2 R_Jup): substellar companions are
+    # degeneracy-supported, so a T dwarf at 0.09-0.10 Rsun is genuinely
+    # larger than a late-M primary -- a literal R2 <= R1 against SCR 1845's
+    # 0.07-0.10 Rsun primary excludes the true T6 solution and flips the
+    # verdict to "disk". Compact primaries are exempt: a BD companion to a
+    # WD (GD 1400, WD 0137-349) is genuinely LARGER than the primary, so for
+    # R1 <= 0.05 Rsun the full range stays open.
+    r2_hi = 1.0
+    if rad_primary is not None and np.isfinite(rad_primary) \
+            and rad_primary > 0.05:
+        r2_hi = max(float(rad_primary), 0.12)
+    R2g = np.geomspace(0.03, r2_hi, 64)
+    t_hi_max = float(teff_primary) if teff_primary else 6000.0
+    comp_per_grid = []   # (gname, T2g, chi2[64, 64])
+    for gname_g, ig in cool_interps:
+        la, ta, fa = ig.index_columns
+        t_lo = float(np.min(ta))
+        t_hi = min(float(np.max(ta)), t_hi_max)
+        if t_hi <= t_lo + 1.0:
+            continue
+        # Evaluate on exact grid nodes: z snapped to the nearest [M/H] node
+        # (the companion is coeval -- the primary's z -- and the BD grids'
+        # 0.5-dex feh resolution dwarfs the snap), logg at 5.0 (canonical field
+        # BD) snapped to a node. Off-node values would put nonzero interpolation
+        # weight on the sparse cubes' missing nodes (e.g. Sonora's non-solar
+        # quarter-step logg holes) and NaN the whole grid out of the BMA.
+        z_g = float(fa[int(np.argmin(np.abs(np.asarray(fa) - z)))])
+        lg_g = float(la[int(np.argmin(np.abs(np.asarray(la) - 5.0)))])
         T2g = np.linspace(t_lo, t_hi, 64)
-        R2g = np.geomspace(0.03, 1.0, 64)
-        chi2_comp = np.full((T2g.size, R2g.size), np.inf)
+        chi2 = np.full((T2g.size, R2g.size), np.inf)
+        names_all = np.concatenate([names, fn_b]) if have_fit else names
+        w_all = np.concatenate([w, fw]) if have_fit else w
+        # Bands the BD grids carry no column for (they stop at ~30 um; the
+        # far-IR set was added later) are modeled by their asymptotes, which
+        # are exact for a cool photosphere: pure Rayleigh-Jeans at
+        # lam >= 8 um (F_lambda ~ lam^-4, anchored on the reddest finite
+        # band) and Wien-dead (~0) at lam < 1 um. Without this, a SPIRE
+        # detection KeyErrors the whole quantification. Mid-range gaps stay
+        # NaN and skip the node (none exist in the shipped grids).
+        in_cols = np.array([b in ig.column_index for b in names_all])
+        names_in, w_in = names_all[in_cols], w_all[in_cols]
         for i, T2 in enumerate(T2g):
-            theta = (np.array([T2, 4.8, z, 1.0, av]) if use_norm
-                     else np.array([T2, 4.8, z, dist_pc, 1.0, av]))
-            funit = np.asarray(
-                model_grid(theta, names, w, interp, use_norm, av_law)).ravel()
+            theta = (np.array([T2, lg_g, z_g, 1.0, av]) if use_norm
+                     else np.array([T2, lg_g, z_g, dist_pc, 1.0, av]))
+            funit_all = np.full(len(names_all), np.nan)
+            funit_all[in_cols] = np.asarray(
+                model_grid(theta, names_in, w_in, ig, use_norm,
+                           av_law)).ravel()
+            bad = ~np.isfinite(funit_all)
+            if bad.any():
+                fin = np.isfinite(funit_all) & (funit_all > 0)
+                if fin.any():
+                    iref = int(np.argmax(np.where(fin, w_all, -np.inf)))
+                    rj = funit_all[iref] * (w_all[iref] / w_all) ** 4
+                    funit_all = np.where(bad & (w_all >= 8.0), rj, funit_all)
+                funit_all = np.where(
+                    ~np.isfinite(funit_all) & (w_all < 1.0), 0.0, funit_all)
+            funit = funit_all[:len(names)]
             if not np.all(np.isfinite(funit)) or np.all(funit <= 0):
                 continue
             mod = (R2g ** 2)[:, None] * funit[None, :]
-            chi2_comp[i] = np.sum((F[None, :] - mod) ** 2 * inv2[None, :],
-                                  axis=1)
-    else:
-        T2g = R2g = None
-        chi2_comp = np.array([[np.inf]])
+            chi2[i] = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
+            if have_fit:
+                cf = funit_all[len(names):]
+                okc = np.isfinite(cf) & (cf > 0)
+                if okc.any():
+                    chi2[i] += (R2g ** 4) * float(
+                        np.sum(cf[okc] ** 2 * finv2[okc]))
+        if np.isfinite(chi2).any():
+            comp_per_grid.append((gname_g, T2g, chi2))
+    comp_ok = len(comp_per_grid) > 0
 
-    # Evidence = mean likelihood over the (prior-uniform) grid; subtract the
+    # Evidence = mean likelihood over the (prior-uniform) grids; subtract the
     # global min chi^2 for numerical stability (cancels in the ratios).
-    m0 = min(chi2_null, float(np.min(chi2_disk)), float(np.min(chi2_comp)))
+    chi2_comp_min = min((float(np.min(c)) for _, _, c in comp_per_grid),
+                        default=np.inf)
+    chi2_d2_min = (float(np.min(chi2_disk2)) if chi2_disk2 is not None
+                   else np.inf)
+    m0 = min(chi2_null, float(np.min(chi2_disk)), chi2_comp_min, chi2_d2_min)
     z_null = float(np.exp(-(chi2_null - m0) / 2))
-    wd = np.exp(-(chi2_disk - m0) / 2)
-    wc = np.exp(-(chi2_comp - m0) / 2)
-    z_disk = float(np.mean(wd))
-    z_comp = float(np.mean(wc)) if comp_ok else 0.0
-    tot = z_null + z_disk + z_comp
+    with np.errstate(invalid='ignore'):
+        wd = np.where(np.isfinite(chi2_disk),
+                      np.exp(-(chi2_disk - m0) / 2), 0.0)
+    # Mean over the prior SUPPORT (the L<=L_max(T) region), not the full grid.
+    z_disk = float(wd.sum() / max(np.isfinite(chi2_disk).sum(), 1))
+    z_disk2 = 0.0
+    wd2 = None
+    if chi2_disk2 is not None and np.isfinite(chi2_disk2).any():
+        ordered = np.isfinite(chi2_disk2)
+        wd2 = np.where(ordered, np.exp(-(chi2_disk2 - m0) / 2), 0.0)
+        z_disk2 = float(wd2.sum() / ordered.sum())   # mean over the prior half
+    # Per-grid companion evidence; the hypothesis evidence is their mean.
+    z_comp_g = [float(np.mean(np.exp(-(c - m0) / 2)))
+                for _, _, c in comp_per_grid]
+    z_comp = float(np.mean(z_comp_g)) if comp_ok else 0.0
+    tot = z_null + z_disk + z_disk2 + z_comp
     p_none, p_disk, p_comp = z_null / tot, z_disk / tot, z_comp / tot
+    p_disk2 = z_disk2 / tot
 
     wdn = wd / wd.sum()
     TT, LL = np.meshgrid(Tg, Lg, indexing='ij')
@@ -212,32 +568,95 @@ def _excess_model_selection(names, waves_um, excess, excess_err, interp,
         l_dust_over_lstar=ld,
         l_dust_over_lstar_err=float(np.sqrt(np.sum(wdn * (LL - ld) ** 2))),
         omega_sr=float(np.sum(wdn * omega_grid)))
+    disk2 = None
+    if wd2 is not None and wd2.sum() > 0:
+        w2n = wd2 / wd2.sum()
+        wi = w2n.sum(axis=1)            # marginal over the warm component
+        wj = w2n.sum(axis=0)            # marginal over the cold component
+        # MAP pair alongside the marginal means: when a component is weakly
+        # constrained its marginal-mean (T, Omega) combination is NOT a real
+        # posterior solution (it can badly violate the data); anything that
+        # DISPLAYS the 2-T model must use the *_map values.
+        im = np.unravel_index(int(np.argmin(chi2_disk2)), chi2_disk2.shape)
+        disk2 = dict(
+            t_warm=float(np.sum(wi * Tflat)),
+            l_warm=float(np.sum(wi * Lflat)),
+            omega_warm=float(np.sum(wi * Oflat)),
+            t_cold=float(np.sum(wj * Tflat)),
+            l_cold=float(np.sum(wj * Lflat)),
+            omega_cold=float(np.sum(wj * Oflat)),
+            t_warm_map=float(Tflat[im[0]]),
+            l_warm_map=float(Lflat[im[0]]),
+            omega_warm_map=float(Oflat[im[0]]),
+            t_cold_map=float(Tflat[im[1]]),
+            l_cold_map=float(Lflat[im[1]]),
+            omega_cold_map=float(Oflat[im[1]]))
     companion = None
-    if comp_ok and np.isfinite(wc).any() and wc.sum() > 0:
-        wcn = wc / wc.sum()
-        T2M, R2M = np.meshgrid(T2g, R2g, indexing='ij')
-        teff2 = float(np.sum(wcn * T2M))
-        rad2 = float(np.sum(wcn * R2M))
-        companion = dict(
-            teff2=teff2,
-            teff2_err=float(np.sqrt(np.sum(wcn * (T2M - teff2) ** 2))),
-            rad2=rad2,
-            rad2_err=float(np.sqrt(np.sum(wcn * (R2M - rad2) ** 2))))
+    if comp_ok and z_comp > 0:
+        # Per-grid posterior (within-grid mean/var), then BMA across grids by
+        # evidence. The reported error folds the within-grid spread and the
+        # across-grid disagreement -- the model uncertainty the BMA exposes.
+        gp = []   # (gname, t2, t2var, r2, r2var, z_g, samples)
+        _rng = np.random.default_rng(0)
+        for (gname_g, T2g, c), zg in zip(comp_per_grid, z_comp_g):
+            wc = np.exp(-(c - m0) / 2)
+            s = float(wc.sum())
+            if not np.isfinite(s) or s <= 0:
+                continue
+            wcn = wc / s
+            T2M, R2M = np.meshgrid(T2g, R2g, indexing='ij')
+            t2 = float(np.sum(wcn * T2M))
+            r2 = float(np.sum(wcn * R2M))
+            # Correlated (Teff2, R2) posterior samples off the quadrature
+            # weights -- T2 and R2 are strongly anticorrelated along the
+            # constant-flux manifold, so independent marginal draws (mean +/-
+            # std) badly over-disperse anything visualizing the posterior.
+            idx = _rng.choice(wcn.size, size=40, p=wcn.ravel())
+            samples = [[float(T2M.ravel()[i]), float(R2M.ravel()[i])]
+                       for i in idx]
+            gp.append((gname_g, t2, float(np.sum(wcn * (T2M - t2) ** 2)),
+                       r2, float(np.sum(wcn * (R2M - r2) ** 2)), zg, samples))
+        if gp:
+            gw = np.array([g[5] for g in gp], float)
+            gw = gw / gw.sum()
+            t2a = np.array([g[1] for g in gp])
+            r2a = np.array([g[3] for g in gp])
+            t2v = np.array([g[2] for g in gp])
+            r2v = np.array([g[4] for g in gp])
+            teff2 = float(np.sum(gw * t2a))
+            rad2 = float(np.sum(gw * r2a))
+            companion = dict(
+                teff2=teff2,
+                teff2_err=float(np.sqrt(np.sum(gw * (t2v + (t2a - teff2) ** 2)))),
+                rad2=rad2,
+                rad2_err=float(np.sqrt(np.sum(gw * (r2v + (r2a - rad2) ** 2)))),
+                n_grids=len(gp),
+                per_grid={g[0]: dict(teff2=g[1],
+                                     teff2_err=float(np.sqrt(g[2])),
+                                     rad2=g[3],
+                                     rad2_err=float(np.sqrt(g[4])),
+                                     weight=float(wi),
+                                     samples=g[6])
+                          for g, wi in zip(gp, gw)})
 
-    pm = max(p_none, p_disk, p_comp)
+    # Classification: the two disk variants jointly oppose the companion.
+    p_dtot = p_disk + p_disk2
+    pm = max(p_none, p_dtot, p_comp)
     if p_none == pm:
         cls = 'none'
-    elif p_disk >= p_comp and p_disk / (p_disk + p_comp) > 0.75:
+    elif p_dtot >= p_comp and p_dtot / (p_dtot + p_comp) > 0.75:
         cls = 'disk'
-    elif p_comp > p_disk and p_comp / (p_disk + p_comp) > 0.75:
+    elif p_comp > p_dtot and p_comp / (p_dtot + p_comp) > 0.75:
         cls = 'companion'
     else:
         cls = 'ambiguous'
-    lnbf = (float(np.log(z_disk) - np.log(z_comp))
-            if (z_disk > 0 and z_comp > 0) else float('nan'))
-    return dict(p_none=p_none, p_disk=p_disk, p_companion=p_comp,
-                excess_class=cls, disk=disk, companion=companion,
-                lnbf_disk_companion=lnbf, n_bands=int(sel.sum()))
+    z_dtot = z_disk + z_disk2
+    lnbf = (float(np.log(z_dtot) - np.log(z_comp))
+            if (z_dtot > 0 and z_comp > 0) else float('nan'))
+    return dict(p_none=p_none, p_disk=p_disk, p_disk2=p_disk2,
+                p_companion=p_comp, excess_class=cls, disk=disk, disk2=disk2,
+                companion=companion, lnbf_disk_companion=lnbf,
+                n_bands=int(sel.sum()))
 
 
 class Fitter:
@@ -343,8 +762,9 @@ class Fitter:
         # BT-NextGen/BT-Cond only below 4000 K). Coelho (optical-only) and
         # TLUSTY (hot-star, needs its own uniform prior) are deliberately left
         # out — they are standalone-only and must be requested explicitly.
-        self.models = ['phoenix', 'btsettl', 'btnextgen', 'btcond',
-                       'kurucz', 'ck04', 'bosz', 'sphinx']
+        self.models = ['phoenix', 'btsettl', 'newera', 'btnextgen', 'btcond',
+                       'btdusty', 'kurucz', 'ck04', 'bosz', 'sphinx',
+                       'stagger', 'coelho']
         self.prior_setup = None
         self.sequential = True
         self.experimental = False
@@ -356,7 +776,15 @@ class Fitter:
         # degenerate. Use ``add_contrast`` or set ``contrast`` directly; the
         # binary gate in initialize enforces no-norm + a parallax + >=1 contrast.
         self.binary = False
+        # IR-excess characterization: computed only by the fit_irx() endpoint.
+        # The default fit endpoints never run it (the irx bands are still
+        # routed out of the fit either way).
+        self._do_irx = False
         self.contrast = None
+        # Spectro-photometry switch: when False, bands derived from spectra
+        # (Gaia XP synthetic fills, SPHEREx super-bands) are dropped from the
+        # fit at initialize() -- catalog photometry only.
+        self._spectra = True
         # Number of MCMC steps per proposal for dynesty's rwalk sampler.
         self.walks = 25
         # Number of BMA model grids to fit concurrently, each on a single
@@ -508,9 +936,13 @@ class Fitter:
         """Models to be used in BMA.
 
         Defaults to the full Teff-gated ensemble
-        ``['phoenix', 'btsettl', 'btnextgen', 'btcond', 'kurucz', 'ck04',
-        'bosz', 'sphinx']``; ``initialize`` skips any grid outside its valid
-        temperature range for the target. Assign a list to override.
+        ``['phoenix', 'btsettl', 'btnextgen', 'btcond', 'btdusty', 'kurucz',
+        'ck04', 'bosz', 'sphinx', 'stagger', 'coelho']``; ``initialize``
+        skips any grid outside its valid temperature range for the target
+        (gating on the catalogue Teff, or on a calibrated blackbody fit to
+        the photometry when none exists), plus any grid that cannot
+        synthesize one of the star's observed bands. Assign a list to
+        override which grids are candidates; the gates still apply.
         """
         return self._bma_models
 
@@ -594,6 +1026,41 @@ class Fitter:
         if law == laws[4]:
             law_f = _fm07_rv  # fixed Rv=3.1; see module-level wrapper
         self._av_law = law_f
+
+    @property
+    def spectra(self):
+        """Use spectro-photometry-derived bands (Gaia XP synthetic fills,
+        SPHEREx super-bands)? Default True; set False for catalog-only fits.
+        """
+        return self._spectra
+
+    @spectra.setter
+    def spectra(self, val):
+        self._spectra = bool(val)
+
+    def _drop_spectra_bands(self):
+        """Drop every spectro-photometry-derived band from the fit.
+
+        Covers the Gaia XP synthetic fills (tracked by Star.xp_filled
+        provenance) and any SPHEREX_* band. Same shallow-copy pattern as
+        ``_apply_grid_coverage``: the user's Star is left untouched.
+        """
+        xp = set(getattr(self.star, 'xp_filled', ()) or ())
+        names = self.star.filter_names
+        used = self.star.used_filters == 1
+        drop = used & np.array(
+            [(n in xp) or n.startswith('SPHEREX_') for n in names])
+        if not drop.any():
+            return
+        s = copy.copy(self.star)
+        s.used_filters = self.star.used_filters.copy()
+        s.used_filters[drop] = 0
+        s.filter_mask = np.where(s.used_filters == 1)[0]
+        self.star = s
+        print(colored(
+            '\t\t*** Fitter.spectra = False: dropped '
+            f'{int(drop.sum())} spectro-photometric band(s): '
+            f'{", ".join(names[drop])} ***', 'yellow'))
 
     def _apply_grid_coverage(self):
         """Drop bands outside the current grid's native wavelength coverage.
@@ -829,6 +1296,11 @@ class Fitter:
             # contrast is optional only for the internal SED-only comparison fit
             # (_skip_contrast_gate); a normal binary fit always has one.
             contrast = self._prep_contrast() if self.contrast else None
+        # Spectro-photometry opt-out: Fitter.spectra = False drops every band
+        # whose value came from a spectrum rather than a catalog measurement
+        # (Gaia XP synthetic fills; SPHEREx super-bands when they land).
+        if not self.spectra:
+            self._drop_spectra_bands()
         # For a standalone fit with a grid of limited wavelength coverage,
         # exclude out-of-coverage bands (e.g. Coelho's extrapolated IR). Not
         # applied in BMA, where every grid must share the same band set.
@@ -919,21 +1391,75 @@ class Fitter:
                 off_msg += f'The input temperature is {self.star.temp}'
                 print(colored(off_msg, 'yellow'))
 
+            # The Teff gates are not optional -- they exist so the ensemble
+            # cannot multi-count one model family (the BT triplet is
+            # identical above 2600 K by construction) or admit
+            # regime-inappropriate grids.
+            # When no catalogue Teff exists (no Gaia GSP-Phot ->
+            # star.temp is 0 or None), gate on a blackbody fit to the
+            # observed photometry instead: accurate to a few hundred K, far
+            # tighter than any gate boundary needs.
+            # 0, None and the offline -1 sentinel all mean "no estimate".
+            gate_temp = self.star.temp
+            if not gate_temp or gate_temp < 0:
+                gate_temp = _bb_gate_teff(self.star)
+                if gate_temp:
+                    msg = '\t\t*** No catalogue Teff available: grid gating '
+                    msg += 'uses a blackbody fit to the photometry, '
+                    msg += f'Teff ~ {gate_temp:.0f} K (override by passing '
+                    msg += 'temp to the Star constructor) ***'
+                    print(colored(msg, 'yellow'))
+                else:
+                    # No catalogue Teff and no photometry to estimate one
+                    # from; assume a warm star (the historical offline-mode
+                    # default).
+                    gate_temp = 4001.0
+                    msg = '\t\t*** No Teff estimate possible: grid gating '
+                    msg += 'assumes Teff > 4000 K (override by passing temp '
+                    msg += 'to the Star constructor) ***'
+                    print(colored(msg, 'yellow'))
             for mod in self._bma_models:
-                # We'll assume that if ARIADNE is running in offline mode
-                # Then the star will have > 4000 K
+                # BT-NextGen and BT-Cond are identical to BT-Settl (and each
+                # other) by construction above ~2600 K -- verified on the
+                # genuine SVO data (2026-06): 18-20% apart at 2000 K,
+                # converged at 2600 K. They participate only in the late-M/L
+                # regime where the dust treatments actually differ.
                 if (mod.lower() in ['btcond', 'btnextgen'] and
-                    self.star.temp > 4000) or \
+                    gate_temp > 2600) or \
                         (mod.lower() in ['ck04', 'kurucz'] and
-                         self.star.temp < 4000) or \
-                        (mod.lower() == 'coelho' and self.star.temp < 3500) or \
+                         gate_temp < 4000) or \
+                        (mod.lower() == 'coelho' and gate_temp < 3000) or \
+                        (mod.lower() == 'newera' and
+                         (gate_temp < 2300 or gate_temp > 12000)) or \
                         (mod.lower() == 'bosz' and
-                         (self.star.temp < 2800 or self.star.temp > 16000)) or \
-                        (mod.lower() == 'sphinx' and self.star.temp > 4000) or \
-                        (mod.lower() == 'tlusty' and self.star.temp < 15000):
+                         (gate_temp < 2800 or gate_temp > 16000)) or \
+                        (mod.lower() == 'sphinx' and gate_temp > 4000) or \
+                        (mod.lower() == 'btdusty' and gate_temp > 2600) or \
+                        (mod.lower() == 'stagger' and
+                         (gate_temp < 4000 or gate_temp > 7000)) or \
+                        (mod.lower() == 'tlusty' and gate_temp < 15000):
                     continue
 
                 df = self.load_interpolator(mod.lower())
+
+                # A grid that cannot synthesize one of the star's observed
+                # bands (NaN at every node -- e.g. STAGGER's POLLUX spectra
+                # lack GALEX UV and everything past ~13 um) returns -inf for
+                # every likelihood call: a full sampler run wasted on a
+                # structural zero weight. Skip it loudly instead. The band set
+                # cannot be reduced per-grid in BMA mode -- evidences are only
+                # comparable when every member fits the same bands.
+                fin = getattr(df, 'finite_bands', None)
+                if fin is not None:
+                    used = self.star.filter_names[self.star.used_filters == 1]
+                    miss = [b for b in used if b not in fin]
+                    if miss:
+                        print(colored(
+                            f'\t\t*** {mod} dropped from the BMA ensemble: '
+                            f'no grid coverage for fitted band(s) '
+                            f'{", ".join(miss)} -- its evidence would be '
+                            'zero. ***', 'yellow'))
+                        continue
 
                 self._interpolators.append(df)
                 self._grids.append(mod)
@@ -1149,13 +1675,28 @@ class Fitter:
             # defaults['norm'] = st.truncnorm(a=0, b=up, loc=1e-20, scale=1e-10)
             defaults['norm'] = st.uniform(loc=0, scale=1e-20)
             self.prior_sources['norm'] = 'uniform_default'
-        # Extinction prior setup.
-        if self.star.Av == 0.:
+        # Extinction prior setup. Within the Local Bubble (~70 pc) extinction
+        # is negligible and a free Av only absorbs blue model mismatch and
+        # biases Teff hot, so the DEFAULT prior auto-pins Av=0 for d < 70 pc.
+        # A user-supplied Av prior (via prior_setup) bypasses this entirely.
+        d_est = getattr(self.star, 'dist', None)
+        _av_is_default = (getattr(self, 'prior_setup', None) is None
+                          or (isinstance(self.prior_setup, dict)
+                              and self.prior_setup.get('Av', 'default')
+                              == 'default'))
+        auto_pin = bool(d_est and 0 < d_est < 70 and self.star.Av != 0.
+                        and _av_is_default)
+        if auto_pin:
+            print(colored(
+                '\t\t*** d = %.1f pc < 70 pc: Av auto-pinned to 0 (override '
+                'by setting an explicit Av prior) ***' % d_est, 'yellow'))
+        if self.star.Av == 0. or auto_pin:
             av_idx = 4 if self._norm else 5
             self.coordinator[av_idx] = 1
             self.fixed[av_idx] = 0
             defaults['Av'] = None
-            self.prior_sources['Av'] = 'fixed_zero'
+            self.prior_sources['Av'] = ('auto_pinned_d<70pc' if auto_pin
+                                        else 'fixed_zero')
         else:
             if self.star.Av_e is None:
                 defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
@@ -1175,16 +1716,24 @@ class Fitter:
         mask = self.star.filter_mask
         flxs = self.star.flux[mask]
         errs = self.star.flux_er[mask]
+        # Jitter prior scale: 10x the catalog error, floored at 5% of the
+        # band flux. The jitter absorbs MODEL inadequacy, whose size does not
+        # care how precise the catalog is -- scaling with sigma_cat alone
+        # prior-forbids millimag bands (Gaia G at 0.003 mag -> 3% ceiling)
+        # from absorbing the ~5-10% systematics every atmosphere grid carries
+        # for cool stars, and the likelihood then tilts the photosphere to
+        # nail the precise bands at the expense of the rest (SCR 1845).
         if getattr(self, 'jitter', True) == 'shared':
             mflx, merr = float(np.median(flxs)), float(np.median(errs))
+            sc = max(merr * 10, 0.05 * mflx)
             defaults['shared_noise'] = st.truncnorm(
-                loc=0, scale=merr * 10, a=0, b=(1 - mflx) / merr)
+                loc=0, scale=sc, a=0, b=(1 - mflx) / sc)
             order = np.append(order, 'shared_noise')
         else:
             for filt, flx, flx_e in zip(self.star.filter_names[mask], flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
-                sigma = flx_e * 10
-                b = (1 - flx) / flx_e
+                sigma = max(flx_e * 10, 0.05 * flx)
+                b = (1 - flx) / sigma
                 defaults[p_] = st.truncnorm(loc=0, scale=sigma, a=0, b=b)
                 order = np.append(order, p_)
         return defaults
@@ -1419,11 +1968,191 @@ class Fitter:
             self.out_folder, self._engine, self.norm, grid=self._grid)
         pass
 
+    # -- Operating-mode endpoints -------------------------------------------
+    # Four explicit, non-overlapping entry points:
+    #   fit_bma()    -- the default: BMA photosphere fit, NO IR-excess.
+    #   fit_single() -- one explicit grid (koester, tlusty, coelho, ...).
+    #   fit_binary() -- the SB2 two-component fit.
+    #   fit_irx()    -- BMA + IR-excess characterization, deep-IR ensemble
+    #                   auto-selected (user override respected, validated).
+    # The three new ones are one-call: they initialize() themselves.
+
+    def fit_single(self, grid=None):
+        """Fit one explicit model grid (no BMA, no IR-excess).
+
+        The endpoint for the standalone-only grids (koester, tlusty, coelho)
+        or any deliberate single-grid run. ``grid`` overrides ``self.grid``.
+        """
+        if grid is not None:
+            self.grid = grid
+        self.binary = False
+        self.bma = False
+        self._do_irx = False
+        self.initialize()
+        self.fit()
+
+    def fit_binary(self, bma=False):
+        """Fit the unresolved-binary (SB2) two-component model.
+
+        Requires the binary configuration (contrast constraints etc.) to be
+        set up beforehand; see the SB2 section of the README. With
+        ``bma=True`` the two-component fit is model-averaged over the
+        ensemble, else it runs on ``self.grid``.
+        """
+        self.binary = True
+        self.bma = bool(bma)
+        self._do_irx = False
+        self.initialize()
+        if bma:
+            self.fit_bma()
+        else:
+            self.fit()
+
+    def fit_irx(self, models=None, route_mid_ir=False):
+        """BMA fit + IR-excess characterization -- the only endpoint that
+        quantifies and classifies IR excess.
+
+        The ensemble is auto-selected for IR-excess work: among the candidate
+        fit grids, find the deepest IR reach any grid achieves and keep EVERY
+        grid that achieves it -- flux range is conserved first, member count
+        maximized second, so the common (intersection) reach is clipped as
+        little as possible. Passing ``models`` overrides the selection
+        entirely and is respected to the full extent -- but grids with no
+        IR-excess capability at all (e.g. phoenix, coelho, koester) make the
+        run fail loudly rather than silently clip the reach to nothing.
+        """
+        from .sed_library import grid_irx_reach, load_grid
+        from .phot_utils import get_effective_wavelength
+
+        def _reach_um(g):
+            # Reddest EXCESS band the grid can model (grid_irx_reach returns
+            # every in-coverage finite band, so intersect with irx_bands --
+            # otherwise an IRX-blind grid like phoenix scores its reddest FIT
+            # band and slips past validation).
+            try:
+                bands = grid_irx_reach(g, load_grid(g)) & set(irx_bands)
+            except Exception:
+                return 0.0
+            w = [get_effective_wavelength(b) for b in bands]
+            w = [x for x in w if np.isfinite(x)]
+            return max(w) if w else 0.0
+
+        if models is not None:
+            bad = [g for g in models if _reach_um(g) <= 0.0]
+            if bad:
+                raise ValueError(
+                    'fit_irx: the following grids have no IR-excess reach and '
+                    f'would clip the quantified band set to nothing: {bad}. '
+                    'Remove them from `models` (or use fit_bma() if you do '
+                    'not want IR-excess characterization).')
+            self.models = list(models)
+            reaches = {g: _reach_um(g) for g in self.models}
+        else:
+            candidates = ['btsettl', 'btnextgen', 'btcond', 'btdusty',
+                          'sphinx', 'newera', 'bosz', 'ck04', 'kurucz',
+                          'stagger', 'phoenix']
+            reaches = {g: _reach_um(g) for g in candidates}
+            deepest = max(reaches.values())
+            # keep every grid achieving the deepest reach (2% tolerance for
+            # near-identical band edges); Teff gating happens in initialize().
+            self.models = [g for g in candidates
+                           if reaches[g] >= 0.98 * deepest]
+        sel = ', '.join('%s(%.0fum)' % (g, reaches[g]) for g in self.models)
+        print(colored('\t\t*** IRX ensemble: %s ***' % sel, 'cyan'))
+        if self._norm:
+            # Explicit degradation notice: without a physical distance the
+            # excess can be detected but not characterized.
+            print(colored(
+                '\t\t*** fit_irx in norm mode: no physical distance, so the '
+                'disk L_dust/L_* and the companion (Teff2, R2) BMA are '
+                'UNAVAILABLE; per-band excess significances are still '
+                'computed. ***', 'yellow'))
+        self.binary = False
+        self.bma = True
+        self._do_irx = True
+        # Band routing. In an IRX fit the W2 block (>= 4.4 um: W2, IRAC 4.5,
+        # SPHEREx 4.65/4.90) ALWAYS joins the excess set: it is where a cool
+        # companion peaks, so leaving it in the fit lets the photosphere
+        # absorb exactly the signal fit_irx exists to quantify (SCR 1845's
+        # T6 verdict went ambiguous this way). The photosphere stays anchored
+        # through SPHEREX_4300 (4.4 um). Regular SED endpoints (fit_bma,
+        # fit_single, fit_binary) are untouched -- W2 is a fit band there.
+        # OPT-IN route_mid_ir=True widens routing to the full 2.75-5 um
+        # block: maximal companion-vs-disk shape leverage (the W1-W2 CH4
+        # color), at the cost of measuring everything beyond 2.4 um against
+        # an extrapolated baseline -- any tilt becomes high-significance
+        # pseudo-excess (SCR 1845 produced p=1.0 false companions this way
+        # when the baseline carried bugs). Enable only when the <= 2.4 um
+        # photosphere is demonstrably clean (XP + SPHEREx NIR anchored).
+        self._route_irx_extra(
+            self._IRX_EXTRA_BANDS if route_mid_ir else self._IRX_W2_BANDS,
+            anchor_um=2.4 if route_mid_ir else 4.4)
+        self.initialize()
+        # initialize() applies the Teff gate and the band-coverage guard, so
+        # the surviving ensemble can be smaller than the roster announced
+        # above (e.g. btnextgen/btcond drop out for any star above 4000 K).
+        if list(self._grids) != list(self.models):
+            print(colored('\t\t*** IRX ensemble after Teff gate / coverage '
+                          'guard: %s ***' % ', '.join(self._grids), 'cyan'))
+        self.fit_bma()
+
+    # Fit bands that fit_irx(route_mid_ir=True) re-routes to the excess set:
+    # the full 2.75-5 um block, moved together so the fit/excess boundary
+    # stays a wavelength rule rather than an instrument rule.
+    _IRX_EXTRA_BANDS = ('SPHEREX_2750', 'SPHEREX_3050', 'SPHEREX_3350',
+                        'WISE_RSR_W1', 'SPITZER_IRAC_36', 'SPHEREX_3700',
+                        'SPHEREX_4050', 'SPHEREX_4300', 'SPITZER_IRAC_45',
+                        'WISE_RSR_W2', 'SPHEREX_4650', 'SPHEREX_4900')
+
+    # The W2 block (>= 4.4 um), routed to the excess set on EVERY fit_irx
+    # call: the peak of a cool companion's SED. Regular SED endpoints keep
+    # these as fit bands.
+    _IRX_W2_BANDS = ('SPITZER_IRAC_45', 'WISE_RSR_W2',
+                     'SPHEREX_4650', 'SPHEREX_4900')
+
+    def _route_irx_extra(self, bands=None, anchor_um=2.4):
+        """Move the given fit bands to the quantified-excess set (fit_irx
+        endpoint only). Shallow-copy contract: the user's Star is untouched.
+        """
+        if bands is None:
+            bands = self._IRX_EXTRA_BANDS
+        star = self.star
+        names = star.filter_names
+        move = np.isin(names, np.asarray(bands)) & \
+            (star.used_filters == 1)
+        if not move.any():
+            return
+        s = copy.copy(star)
+        s.used_filters = star.used_filters.copy()
+        s.irx_used_filters = star.irx_used_filters.copy()
+        s.used_filters[move] = 0
+        s.irx_used_filters[move] = 1
+        s.filter_mask = np.where(s.used_filters == 1)[0]
+        s.irx_filter_mask = np.where(s.irx_used_filters == 1)[0]
+        self.star = s
+        print(colored(
+            '\t\t*** fit_irx: routed %d band(s) to the excess set '
+            '(the photosphere is fit from <= %.1f um): %s ***'
+            % (int(move.sum()), anchor_um, ', '.join(names[move])), 'cyan'))
+
     def fit_bma(self):
         """Perform the fit with different models and the average the output.
 
         Only works with dynesty.
         """
+        if not self._grids:
+            if self._bma and getattr(self, '_bma_models', None):
+                raise RuntimeError(
+                    'fit_bma: every requested grid was dropped by the Teff '
+                    'gate or the band-coverage guard for this star (see the '
+                    'notices above). Choose grids valid for this regime, or '
+                    'pass an explicit temp to the Star constructor if the '
+                    'gate estimate looks wrong.')
+            raise RuntimeError(
+                'fit_bma: no grids were loaded at initialize(). If you are '
+                'using the manual flow, set `f.bma = True` BEFORE calling '
+                'initialize() (the one-call endpoints fit_irx/fit_binary '
+                'handle this for you).')
         if len(self.star.filter_names[self.star.filter_mask]) <= 5:
             print(colored('\t\t\tNOT ENOUGH POINTS TO MAKE THE FIT! !', 'red'))
             return
@@ -1810,7 +2539,8 @@ class Fitter:
             with open(log_out, 'w') as logfile:
                 logfile.write(logdat)
         try:
-            out['irx'] = self._compute_irx(out, [self._grid], av_law)
+            out['irx'] = (self._compute_irx(out, [self._grid], av_law)
+                          if getattr(self, '_do_irx', False) else {})
         except Exception as e:                       # never break the save
             logger.warning('IR-excess quantification skipped: %s', e)
             out['irx'] = {}
@@ -1925,19 +2655,67 @@ class Fitter:
         ms = {}
         if members:
             gname = max(members, key=lambda mm: mm[1])[0]   # highest weight
-            taxis = interps[gname].index_columns[1]         # teff axis
+            # Cool-grid ensemble for the companion BMA: the dedicated BD grids
+            # (ATMO, Sonora) plus the fit grid when it reaches the cool regime
+            # (e.g. cool-extended BT-Settl). Each is evaluated at the primary's
+            # [M/H]; grids that fail to load are simply skipped.
+            cool = []
+            fitg = interps[gname]
+            if float(np.min(fitg.index_columns[1])) < 2300.0:
+                cool.append((gname, fitg))
+            for _bd in COOL_COMPANION_GRIDS:
+                try:
+                    cool.append((_bd, load_grid(_bd)))
+                except Exception as _e:
+                    logger.warning('cool companion grid %s unavailable: %s',
+                                   _bd, _e)
+            # Fit-band budget for the consistency penalty: photometric error
+            # inflated by the FITTED per-band noise terms (mag-space jitter ->
+            # flux via mag_to_flux, the likelihood's own convention). Raw
+            # photometric errors alone over-penalize -- M-dwarf fits carry
+            # several-sigma model systematics that the noise terms absorb.
+            fmask = getattr(star, 'filter_mask', None)
+            fkw = {}
+            if fmask is not None and len(fmask):
+                fn_fit = star.filter_names[fmask]
+                fe_fit = np.asarray(star.flux_er[fmask], float)
+                infl = np.zeros(len(fn_fit))
+                for _i, _b in enumerate(fn_fit):
+                    nz = bf.get(get_noise_name(_b) + '_noise',
+                                bf.get('shared_noise'))
+                    try:
+                        infl[_i] = float(mag_to_flux(
+                            float(star.mags[fmask][_i]), float(nz), _b)[1])
+                    except (TypeError, ValueError):
+                        infl[_i] = 0.0
+                fkw = dict(fit_names=fn_fit, fit_waves=star.wave[fmask],
+                           fit_errs=np.sqrt(fe_fit ** 2 + infl ** 2))
             ms = _excess_model_selection(
-                list(q), waves, exc, errs, interps[gname],
+                list(q), waves, exc, errs, cool,
                 float(bf.get('z', 0.0)), float(bf.get('Av', 0.0)),
                 getattr(star, 'dist', None), bf.get('lum'), self._norm, av_law,
-                bf.get('teff'), float(taxis.min()), float(taxis.max())) or {}
+                bf.get('teff'), rad_primary=bf.get('rad'), **fkw) or {}
+        # Least-squares single-temperature blackbody fit to the measured
+        # excess. This is the curve used by the SED+IRX model overlay: it
+        # threads the excess by construction, whereas the evidence-marginalized
+        # `disk` posterior-mean omega is skewed high by its log-uniform prior
+        # (the integrated L_dust/L_star is robust; the curve shape is not).
+        disk_bb = _fit_excess_blackbody(
+            waves, exc, errs, getattr(star, 'dist', None), bf.get('lum'))
         result['_summary'] = dict(
             quantified=sorted(q),
             plot_only=sorted(k for k, v in result.items()
                              if k != '_summary' and not v['quantified']),
             significant=sig,
             n_significant=len(sig),
-            has_excess=bool(len(sig) >= 1),
+            # Detection claim: >= 2 independent bands at >= 3 sigma. A single
+            # significant band is recorded as a caution, not a detection --
+            # one band is exactly what a wrong far-IR crossmatch or a noisy
+            # W4 produces (GJ 1214 showed a 48x PACS-100 "excess" this way).
+            # excess_class stays the evidence verdict over ALL quantified
+            # bands (characterization is reported separately from detection).
+            has_excess=bool(len(sig) >= 2),
+            single_band_caution=(sig[0] if len(sig) == 1 else None),
             excess_chi2=chi2,
             excess_class=ms.get('excess_class'),
             p_none=ms.get('p_none'),
@@ -1945,6 +2723,16 @@ class Fitter:
             p_companion=ms.get('p_companion'),
             lnbf_disk_companion=ms.get('lnbf_disk_companion'),
             disk=ms.get('disk'),
+            disk2=ms.get('disk2'),
+            p_disk2=ms.get('p_disk2'),
+            disk_bb=disk_bb,
+            # Explicit degradation marker: without a physical distance +
+            # luminosity (norm mode) the excess is detected per band but not
+            # characterizable -- say so instead of silently returning Nones.
+            degraded=(None if (getattr(star, 'dist', None) and bf.get('lum'))
+                      else 'no physical distance/luminosity (norm mode): '
+                           'per-band significances only; disk L_dust/L_* and '
+                           'companion BMA unavailable'),
             companion=ms.get('companion'),
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
                              if q else float('nan')))
@@ -2257,7 +3045,8 @@ class Fitter:
         with open(synth_out, 'w') as logfile:
             logfile.write(synthdat)
         try:
-            out['irx'] = self._compute_irx(out, list(self._grids), av_law)
+            out['irx'] = (self._compute_irx(out, list(self._grids), av_law)
+                          if getattr(self, '_do_irx', False) else {})
         except Exception as e:                       # never break the save
             logger.warning('IR-excess quantification skipped: %s', e)
             out['irx'] = {}

@@ -223,12 +223,16 @@ a single best-fitting atmosphere.
 BMA only makes sense when the grids being averaged share the same prior volume
 and observable set, so their evidences are comparable. ARIADNE enforces this by
 Teff-gating each grid to the regime where it is valid: the default ensemble
-(PHOENIX, BT-Settl/NextGen/Cond, Kurucz, Castelli-Kurucz, BOSZ and SPHINX) is
-filtered per target, so e.g. SPHINX contributes only below 4000 K and
-Kurucz/Castelli-Kurucz only above it. Grids that cannot satisfy the
-shared-observable-set requirement are kept out of the average and run on their
-own instead: Coelho (optical-only, so its red bands were extrapolated at build
-time) and TLUSTY (hot stars, which need their own uniform Teff prior).
+(PHOENIX, BT-Settl/NextGen/Cond/Dusty, Kurucz, Castelli-Kurucz, BOSZ, SPHINX,
+STAGGER and Coelho) is filtered per target, so e.g. SPHINX contributes
+only below 4000 K, the BT dust variants (BT-NextGen, BT-Cond, BT-Dusty) only
+below 2600 K -- above the dust-condensation regime they are identical to
+BT-Settl by construction (NextGen/Cond, verified on the source data) or
+differ only by opacity vintage (Dusty) -- Kurucz/Castelli-Kurucz only above
+4000 K, and STAGGER only between 4000 and 7000 K. Grids that cannot satisfy the
+shared-prior-volume requirement are kept out of the average and run on their
+own instead: TLUSTY (hot stars, which need their own uniform Teff prior) and
+Koester (white dwarfs, with WD-specific priors and no metallicity axis).
 ```
 
 ## Unresolved binaries (two-component SED)

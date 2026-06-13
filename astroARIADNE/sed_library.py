@@ -163,6 +163,13 @@ def _trilinear3d(x0, x1, x2, ii0, ii1, ii2, cube):
         w = (y0 if d0 else 1.0 - y0) \
             * (y1 if d1 else 1.0 - y1) \
             * (y2 if d2 else 1.0 - y2)
+        # A zero-weight corner contributes exactly zero -- skip it instead of
+        # accumulating 0*value, which poisons the sum with NaN when the unused
+        # corner is a missing grid node (sparse cubes: Sonora's non-solar logg
+        # holes, cool BT-Settl splices). Corners with nonzero weight still
+        # propagate their NaN, so missing data is never interpolated over.
+        if w == 0.0:
+            continue
         j0 = i0 + d0 if i0 + d0 < n0 else n0 - 1
         j1 = i1 + d1 if i1 + d1 < n1 else n1 - 1
         j2 = i2 + d2 if i2 + d2 < n2 else n2 - 1

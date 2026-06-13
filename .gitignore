@@ -114,3 +114,20 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# --- session 2026-06: keep generated/scratch out of the tree ---
+# In-place grid rebuild backups (versioned on disk, never committed)
+astroARIADNE/Datafiles/model_grids/*.h5.pre*
+astroARIADNE/Datafiles/model_grids/*.h5.bak
+astroARIADNE/Datafiles/model_grids/*.h5.cacheaug*
+astroARIADNE/Datafiles/spectra_cache.h5.pre*
+
+# One-shot module wiring notes (the wiring itself lives in the code)
+INTEGRATION_*.md
+
+# Local fit-output and profiling scratch
+test_star_*/
+profile_*.py
+bench_*.py
+verify_ad.py
+test_coverage.py

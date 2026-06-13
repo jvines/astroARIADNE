@@ -112,11 +112,14 @@ def test_quantified_excess_significance():
         assert r1['WISE_RSR_W3']['sigma'] > 5
         s1 = r1['_summary']
         assert s1['significant'] == ['WISE_RSR_W3']
-        # aggregate stats
-        assert s1['has_excess'] is True and s1['n_significant'] == 1
+        # aggregate stats: ONE significant band is a caution, not a detection
+        # (a wrong far-IR crossmatch produces exactly this signature)
+        assert s1['has_excess'] is False and s1['n_significant'] == 1
+        assert s1['single_band_caution'] == 'WISE_RSR_W3'
         assert s1['excess_chi2'] > 25                 # sigma>5 -> chi2>25
         assert s1['disk'] is None                     # 1 band -> no selection
         assert r0['_summary']['has_excess'] is False
+        assert r0['_summary']['single_band_caution'] is None
     finally:
         fmod.load_grid = orig
 
@@ -188,10 +191,18 @@ def test_reliability_gating_respects_coverage():
         cov = grid_wave_coverage.get(g)
         if cov is not None:
             assert all(get_effective_wavelength(b) <= cov for b in reach), g
-    # a capped optical grid contributes no IR-excess band at all
+    # coelho's reliability cap was lifted (its 0.13-10 um SED library matches
+    # the dense grids to ~1-3% in the NIR/IRAC); its IRX reach is now its
+    # finite IRAC bands, self-limited by the NaN guard at ~8 um.
     coelho = load_grid('coelho')
     from astroARIADNE.config import irx_bands
-    assert not (grid_irx_reach('coelho', coelho) & set(irx_bands))
+    reach = grid_irx_reach('coelho', coelho) & set(irx_bands)
+    # Since the SPHEREx band extension (2026-06), coelho also reaches the
+    # SPHEREx red super-bands inside its 10 um coverage.
+    allowed = {'SPITZER_IRAC_58', 'SPITZER_IRAC_80',
+               'SPHEREX_2750', 'SPHEREX_3050', 'SPHEREX_3350',
+               'SPHEREX_3700', 'SPHEREX_4050', 'SPHEREX_4300'}
+    assert reach <= allowed and {'SPITZER_IRAC_58', 'SPITZER_IRAC_80'} <= reach
 
 
 def test_excess_model_selection():
@@ -211,8 +222,8 @@ def test_excess_model_selection():
     dist = 30.0
 
     def sel(F, E):
-        return _excess_model_selection(names, waves, F, E, g, 0., 0., dist, 1.0,
-                                       False, _avlaw, 6000., ta.min(), ta.max())
+        return _excess_model_selection(names, waves, F, E, [('btsettl', g)],
+                                       0., 0., dist, 1.0, False, _avlaw, 6000.)
 
     # companion (Teff2 = 3000 K) -> P(companion) dominant, Teff2 recovered
     Fc = np.asarray(model_grid(np.array([3000., 4.8, 0., dist, 0.3, 0.]),
@@ -222,7 +233,8 @@ def test_excess_model_selection():
     assert r['p_companion'] > 0.9
     assert abs(r['companion']['teff2'] - 3000) < 300
 
-    # debris disk (150 K) -> P(disk) dominant, T_dust + L_dust/L* recovered
+    # debris disk (150 K) -> the SINGLE-T disk dominant (Occam suppresses the
+    # nested two-temperature variant), T_dust recovered
     def planck_um(lam, T):
         ll = lam * 1e-6
         return (2 * h * c ** 2 / ll ** 5) / np.expm1(h * c / (ll * kB * T)) \
@@ -230,8 +242,18 @@ def test_excess_model_selection():
     Fd = 2e-16 * planck_um(waves, 150.0)
     r = sel(Fd, 0.05 * Fd)
     assert r['excess_class'] == 'disk'
-    assert r['p_disk'] > 0.9
+    assert r['p_disk'] + r['p_disk2'] > 0.9
+    assert r['p_disk'] > r['p_disk2']
     assert abs(r['disk']['t_dust'] - 150) < 25
+
+    # two-temperature disk (300 K + 60 K belts) -> the 2-T variant wins and
+    # recovers both components
+    F2 = 1e-16 * planck_um(waves, 300.0) + 4e-15 * planck_um(waves, 60.0)
+    r = sel(F2, 0.05 * F2)
+    assert r['excess_class'] == 'disk'
+    assert r['p_disk2'] > 0.9
+    assert abs(r['disk2']['t_warm'] - 300) < 60
+    assert abs(r['disk2']['t_cold'] - 60) < 20
 
     # pure noise (no excess) -> the Occam-penalised null wins, not a spurious
     # disk/companion (the whole point of evidence over chi^2)
@@ -241,6 +263,75 @@ def test_excess_model_selection():
     r = sel(Fn, E)
     assert r['excess_class'] == 'none'
     assert r['p_none'] > 0.5
+
+
+def test_companion_radius_cap_degeneracy_floor():
+    """The R2 <= R1 prior is floored at 0.12 Rsun: substellar companions are
+    degeneracy-supported, so a T dwarf at ~0.10 Rsun is genuinely larger than
+    a late-M primary (SCR 1845: literal R2 <= R1 = 0.07 excluded the true T6
+    and flipped the verdict to 'disk')."""
+    from astroARIADNE.sed_library import load_grid, model_grid
+    from astroARIADNE.phot_utils import get_effective_wavelength
+    from astroARIADNE.fitter import _excess_model_selection
+    g = load_grid('btsettl')
+    names = np.array(['WISE_RSR_W3', 'AKARI_IRC_L18W', 'WISE_RSR_W4',
+                      'SPITZER_MIPS_24', 'IRAS_60', 'SPITZER_MIPS_70',
+                      'HERSCHEL_PACS_GREEN', 'SPITZER_MIPS_160'])
+    waves = np.array([get_effective_wavelength(b) for b in names])
+    dist = 4.0
+    # companion injected LARGER than the primary (0.10 vs 0.07 Rsun)
+    Fc = np.asarray(model_grid(np.array([1000., 5.0, 0., dist, 0.10, 0.]),
+                               names, waves, g, False, _avlaw)).ravel()
+    r = _excess_model_selection(names, waves, Fc, 0.05 * Fc, [('btsettl', g)],
+                                0., 0., dist, 2e-4, False, _avlaw, 2400.,
+                                rad_primary=0.07)
+    assert r['excess_class'] == 'companion'
+    assert r['p_companion'] > 0.9
+    assert abs(r['companion']['teff2'] - 1000) < 250
+    assert abs(r['companion']['rad2'] - 0.10) < 0.02, \
+        'R2 pegged at the primary radius: the degeneracy floor is not applied'
+
+
+def test_fit_irx_band_routing():
+    """fit_irx routing: the W2 block (>= 4.4 um) moves to the excess set by
+    default; route_mid_ir widens to the full 2.75-5 um block; regular SED
+    endpoints leave everything as fit bands. The user's Star object is
+    untouched (shallow-copy contract)."""
+    import types
+    from astroARIADNE.fitter import Fitter
+
+    def make_star():
+        return types.SimpleNamespace(
+            filter_names=np.array(['2MASS_Ks', 'WISE_RSR_W1',
+                                   'SPITZER_IRAC_45', 'WISE_RSR_W2',
+                                   'WISE_RSR_W3']),
+            used_filters=np.array([1., 1., 1., 1., 0.]),
+            irx_used_filters=np.array([0., 0., 0., 0., 1.]),
+            filter_mask=np.array([0, 1, 2, 3]),
+            irx_filter_mask=np.array([4]))
+
+    # default IRX routing: W2 block only, W1 stays a fit anchor
+    star = make_star()
+    f = Fitter()
+    f.star = star
+    f._route_irx_extra(f._IRX_W2_BANDS, anchor_um=4.4)
+    kept = f.star.filter_names[f.star.used_filters == 1]
+    excess = f.star.filter_names[f.star.irx_used_filters == 1]
+    assert list(kept) == ['2MASS_Ks', 'WISE_RSR_W1']
+    assert set(excess) == {'SPITZER_IRAC_45', 'WISE_RSR_W2', 'WISE_RSR_W3'}
+    assert star.used_filters.sum() == 4          # original untouched
+
+    # route_mid_ir: the whole 2.75-5 um block goes too
+    star = make_star()
+    f = Fitter()
+    f.star = star
+    f._route_irx_extra()                         # defaults to the full block
+    kept = f.star.filter_names[f.star.used_filters == 1]
+    excess = f.star.filter_names[f.star.irx_used_filters == 1]
+    assert list(kept) == ['2MASS_Ks']
+    assert set(excess) == {'WISE_RSR_W1', 'SPITZER_IRAC_45', 'WISE_RSR_W2',
+                           'WISE_RSR_W3'}
+    assert star.used_filters.sum() == 4          # original untouched
 
 
 if __name__ == '__main__':

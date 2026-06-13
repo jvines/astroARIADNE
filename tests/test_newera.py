@@ -16,20 +16,34 @@ from astroARIADNE.fitter import Fitter  # noqa: E402
 from astroARIADNE.sed_library import get_interpolated_flux, load_grid  # noqa: E402
 from astroARIADNE.config import filter_names, irx_bands  # noqa: E402
 
-# Base (non-IR-excess) photosphere band set every grid must carry.
-BASE_BANDS = set(filter_names) - set(irx_bands)
+# Base (non-IR-excess) photosphere band set every grid must carry. The
+# SPHEREx fit bands are excepted for NewEra: its cache-derived columns were
+# too sparse (466 nodes) to fit with, so they are blanked until the raw
+# reconvolution fills them -- the band-coverage guard then auto-drops newera
+# from SPHEREx-fed fits instead of letting NaN pockets poison them.
+BASE_BANDS = (set(filter_names) - set(irx_bands)
+              - {f for f in filter_names
+                 if f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_'))})
 
 
 def test_grid_schema():
     ne = load_grid('newera')
     lg, tf, fe = ne.index_columns
-    # NewEra's built grid is still base-only (its 0.09-930 um spectra reach the
-    # full IR, but adding those bands needs a re-stream; until then, base set).
-    assert set(ne.column_index) == BASE_BANDS
+    # NewEra was re-streamed at the full 66-band set (2026-06, on yuki): its
+    # 0.09-930 um spectra cover every band, IR-excess set included, making it
+    # the deepest-IR modern grid in the ensemble.
+    assert set(ne.column_index) == set(filter_names)
+    assert BASE_BANDS <= set(ne.finite_bands)
+    assert {'HERSCHEL_SPIRE_PLW', 'AKARI_FIS_N160'} <= set(ne.finite_bands)
     assert tf.min() == 2300.0 and tf.max() == 12000.0
     assert fe.min() == -4.0                             # metal-poor reach
     # NewEra's cube is NaN-padded at missing corners; count the filled nodes
-    assert np.isfinite(ne.grid).all(axis=-1).sum() > 5000
+    # over the 66 raw-convolved bands. The 12 SPHEREx columns are
+    # cache-derived and exist only at the 466 plotting-cache nodes until the
+    # raw reconvolution fills them (notebooks/augment_grids_spherex.py).
+    non_spherex = [i for f, i in ne.column_index.items()
+                   if not f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_'))]
+    assert np.isfinite(ne.grid[..., non_spherex]).all(axis=-1).sum() > 5000
 
 
 def test_interpolation_finite():

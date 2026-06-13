@@ -196,6 +196,9 @@ class Star:
                 # Store spectroscopic parameters for use in priors
                 self.rave_params = adapted.rave_params
                 self.spectroscopic_params = adapted.spectroscopic_params
+                # Spectro-photometric provenance (XP fills; later SPHEREx) --
+                # consumed by Fitter.spectra = False to drop these bands.
+                self.xp_filled = list(adapted.xp_filled)
             else:
                 print(
                     colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)
@@ -207,6 +210,7 @@ class Star:
                 self.kic = False
                 self.rave_params = None
                 self.spectroscopic_params = None
+                self.xp_filled = []
 
             # [plx, plx_e, dist, dist_e, rad, rad_e, temp, temp_e, lum, lum_e]
             libouts = extract_from_lib(adapted)

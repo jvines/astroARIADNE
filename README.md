@@ -481,12 +481,17 @@ setup = [engine, nlive, dlogz, bound, sample, threads, dynamic]
 models = [
 	'phoenix',
 	'btsettl',
-	'btnextgen',
-	'btcond',
+	'newera',    # PHOENIX-NewEra modern opacities, 2300-12000 K
+	'btnextgen', # gas-phase BT; only below 2600 K (identical to BT-Settl above)
+	'btcond',    # full-settling BT; only below 2600 K (same reason)
+	'btdusty',   # max-dust BT limit; only below 2600 K (above it, no dust
+	             # condenses and it is just an older BT opacity vintage)
 	'kurucz',
 	'ck04',
-	'bosz',     # MARCS+ATLAS9/Synspec, 2800-16000 K (BMA-capable)
-	'sphinx'    # M dwarfs; only contributes at Teff < 4000 K
+	'bosz',      # MARCS+ATLAS9/Synspec, 2800-16000 K
+	'sphinx',    # M dwarfs; only contributes at Teff < 4000 K
+	'stagger',   # 3D RHD; only contributes at 4000-7000 K
+	'coelho'     # independent 1D LTE physics (Coelho 2014)
 ]
 
 f = Fitter()
@@ -499,36 +504,54 @@ f.models = models
 f.n_samples = 100000
 ```
 
-**Note:** While you can always select all 8 models, **ARIADNE** has an internal
-filter put in place in order to avoid having the user unintentionally bias the
-results. For stars with Teff > 4000 K BT-Settl, BT-NextGen and BT-Cond are
-identical and thus only BT-Settl is used, even if the three are selected. On the
-other hand, Kurucz and Castelli & Kurucz are known to work poorly on stars with
-Teff < 4000 K, thus they aren't used in that regime. Likewise SPHINX only covers
-M dwarfs, so it is used only below 4000 K and silently dropped above it. This is
-why listing every grid is safe — each one contributes only where it is valid.
+**Note:** While you can always select all 11 models, **ARIADNE** has an
+internal filter put in place in order to avoid having the user unintentionally
+bias the results. BT-NextGen and BT-Cond are identical to BT-Settl (and to
+each other) **by construction above ~2600 K** — verified on the source data:
+18–20% apart at 2000 K, exactly converged at 2600 K — so both are used only
+at/below 2600 K, the late-M/L regime where their dust treatments genuinely
+diverge (they also serve the IR-excess **companion** hypothesis, where their
+800 K reach brackets the L/T-transition physics). Kurucz and Castelli &
+Kurucz are known to work poorly on stars with Teff < 4000 K, thus they
+aren't used in that regime. BT-Dusty is likewise gated to <= 2600 K: above
+the dust-condensation regime its differences from BT-Settl are an older
+opacity vintage, not dust physics. SPHINX only matters for M dwarfs, so it
+is used only at/below 4000 K and silently dropped above it;
+STAGGER's 3D models cover FGK stars, so it contributes only between 4000 and
+7000 K; Coelho is dropped below 3000 K. This is why listing every grid is
+safe — each one contributes only where it is valid. The filter is **not**
+user-overridable — it is what keeps one model
+family from being counted several times in the average. If the star has no
+catalogue Teff at all (e.g. no Gaia GSP-Phot entry), **ARIADNE** estimates one
+by fitting a blackbody to the observed photometry — calibrated on the fly
+against BT-Settl synthetic photometry in the star's own bands, since raw
+blackbody fits run several hundred K cool on real SEDs — and gates on that
+(a notice tells you the value; pass `temp` to the `Star` constructor to
+override it).
 
-**Additional grids.** Beyond the default ensemble, **ARIADNE** ships or supports
-these grids:
+**The full grid roster.** Everything **ARIADNE** ships or supports beyond the
+classic PHOENIX/BT/Kurucz families — some are default-ensemble members,
+some standalone:
 
 | grid | regime | Teff (K) | use |
 | --- | --- | --- | --- |
 | `bosz` | FGK + warm | 2800–16000 | BMA member (independent MARCS+ATLAS9/Synspec physics) |
 | `sphinx` | M dwarfs | 2000–4000 | BMA member (Teff-gated < 4000 K) — in the default ensemble |
 | `tlusty` | hot O/B (NLTE) | 15000–55000 | standalone |
-| `coelho` | FGK (optical-only) | ≥ 3500 | standalone |
+| `coelho` | FGK + warm | 3000–26000 | BMA member (independent 1D LTE physics) — in the default ensemble |
 | `koester` | DA white dwarfs | 5000–80000 | standalone (no [Fe/H] axis; WD priors) |
-| `newera` | FGKM (modern opacities) | 2300–12000 | BMA member — **must be built first** (see below) |
+| `newera` | FGKM (modern opacities) | 2300–12000 | **default BMA member** |
 
-`bosz` and `sphinx` are part of the default BMA ensemble and are
+`bosz`, `sphinx` and `coelho` are part of the default BMA ensemble and are
 temperature-gated to their validity ranges (SPHINX contributes only below
-4000 K), so you can leave them in the `models` list for any target. `tlusty`
-and `coelho` are meant to be run **standalone** (see below): `tlusty` uses a
-wide uniform Teff prior because the FGK population prior cannot reach the
-hot-star regime, and `coelho` only covers the optical, so its redder
-photometry was extrapolated when the grid was built (ARIADNE drops those bands
-in a standalone fit, but BMA requires a shared band set, which is why it is not
-a BMA member).
+4000 K, Coelho is dropped below 3000 K), so you can leave them in the `models`
+list for any target. Coelho's library spans 0.13–10 µm, which covers every
+band the photosphere fit uses (the reddest fit bands are WISE W2 and IRAC
+4.5 µm; everything redder belongs to the IR-excess set), and a cross-grid
+audit shows its synthetic photometry agrees with BT-Settl/PHOENIX at the
+1–3% level across the shared bands. `tlusty` is meant to be run **standalone**
+(see below): it uses a wide uniform Teff prior because the FGK population
+prior cannot reach the hot-star regime.
 
 `koester` is a **DA white-dwarf** grid (Koester 2010): a perfectly rectilinear
 82 × 13 (Teff, log g) cube with **no metallicity axis** (a single pinned
@@ -548,8 +571,9 @@ automatically.
 
 ### Running a single model (standalone)
 
-To fit a single grid instead of doing BMA, set `f.bma = False` and pick the
-grid with `f.grid`, then call `f.fit()`:
+To fit a single grid instead of doing BMA, use the dedicated `fit_single`
+endpoint — it's one call, no flags to juggle, and there's no ambiguity about
+what's running:
 
 ```python
 f = Fitter()
@@ -557,26 +581,67 @@ f.star = s
 f.setup = ['dynesty', 500, 0.1, 'multi', 'rwalk', 4, False]
 f.av_law = 'fitzpatrick'
 f.out_folder = out_folder
-f.bma = False
-f.grid = 'phoenix'      # or 'bosz', 'sphinx', 'tlusty', 'coelho', ...
 f.prior_setup = {
 	'teff': ('default'), 'logg': ('default'), 'z': ('default'),
 	'dist': ('default'), 'rad': ('default'), 'Av': ('default'),
 }
-f.initialize()
-f.fit()                 # single-grid fit (not fit_bma)
+f.fit_single('phoenix')   # or 'bosz', 'sphinx', 'tlusty', 'coelho', ...
 ```
 
-This is the right mode for the standalone-only grids `tlusty` (hot stars),
-`coelho` (optical-only) and `koester` (white dwarfs); `sphinx` can also be run
-this way for a pure M-dwarf fit, though it now participates in cool-star BMA by
-default. The output goes to the same files as a BMA run minus the
-model-averaging products. For `koester`, ARIADNE automatically switches to
-white-dwarf priors (uniform Teff 5000–80000 K, uniform log g 6.5–9.5, a
-WD-appropriate radius range) and pins `[Fe/H]=0` (the grid has no metallicity
-axis), so a WD fit needs nothing beyond `f.grid = 'koester'`. Validated on the
-DA standard GD 71 (recovered Teff/log g/radius/distance all consistent with the
-literature).
+This is the right mode for the standalone-only grids `tlusty` (hot stars) and
+`koester` (white dwarfs); `sphinx` and `coelho` can also be run this way for a
+single-physics fit, though both now participate in the default BMA ensemble.
+The output goes to the same files as a BMA run minus the model-averaging
+products.
+
+Every case below ships as a ready-to-run script in
+[`examples/`](https://github.com/jvines/astroARIADNE/tree/master/examples) —
+run it and you should reproduce the figure shown!
+
+#### Coelho (single grid): HD 209458
+
+Coelho 2014 spans 0.13–10 µm, so a standalone Coelho fit uses everything
+from the blue through 2MASS/WISE/IRAC (its historical ~0.9 µm reliability
+cap was lifted after a cross-grid audit showed 1–3% agreement with
+BT-Settl/PHOENIX in the NIR). Two more things this example shows: we skip
+GALEX (a G dwarf's UV is chromospheric, not photospheric — and Coelho's
+grid starts at 0.13 µm besides); and at 48 pc the `Av` prior auto-pins
+to 0. The fit recovers Teff = 5989 K and R = 1.19 R☉ against the literature
+6065 K / 1.16 R☉ — within 2%! Reproduce with
+[`examples/single_coelho.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_coelho.py):
+
+![HD 209458 Coelho fit](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/HD209458_coelho_SED.png)
+
+#### TLUSTY (hot stars): HD 65041
+
+For OB stars the LTE grids are out of their depth — `tlusty` is the NLTE
+grid for the job. HD 65041 is a B dwarf with a spectroscopic benchmark
+(Teff = 17605 ± 200 K; Huang, Gies & McSwain 2010) at galactic latitude
++30°, and the broadband fit recovers ~16900 K — within 4% from photometry
+alone, because at this temperature the Balmer jump still lives in the
+optical. For hotter stars the optical turns pure Rayleigh–Jeans and you
+*need* UV photometry (most bright OB stars saturate GALEX — add UV with
+`Star.add_mag` when you have it). Reproduce with
+[`examples/single_tlusty.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_tlusty.py):
+
+![HD 65041 TLUSTY fit](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/HD65041_tlusty_SED.png)
+
+#### Koester (white dwarfs): WDJ031149.21+190055.62
+
+For `koester` **ARIADNE** switches to white-dwarf priors automatically, so
+the fit needs nothing beyond picking the grid. This DA comes out at a
+SED-consistent ~15900 K with every band from GALEX FUV to 2MASS Ks agreeing
+within 10%. One honest warning: the Gaia-photometry catalogue (Gentile
+Fusillo et al. 2021) quotes 18185 K for this star from three optical bands —
+broadband WD temperatures carry ~10% systematics between methods, and they
+lean heavily on the UV (mind the caveats below). Reproduce with
+[`examples/single_koester.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_koester.py):
+
+![WDJ0311+1900 Koester fit](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/WD0311_koester_SED.png)
+
+Under the hood, `koester` mode means uniform Teff over 5000–80000 K, uniform
+log g over 6.5–9.5, a WD-appropriate radius range, and `[Fe/H]` pinned to 0
+(the grid has no metallicity axis).
 
 Two caveats specific to white dwarfs, both inherent to broadband SED fitting
 rather than to the grid:
@@ -592,16 +657,18 @@ rather than to the grid:
   it (bright standards are often GALEX-saturated).
 
 **Grid wavelength coverage.** Some grids do not span the full set of filters
-**ARIADNE** supports. The Coelho 2014 grid, in particular, only covers the
-optical (≲ 0.9 µm); its infrared photometry (2MASS, WISE, Spitzer, Herschel)
-was extrapolated when the grid was built and is unreliable, especially for
-cool stars. For this reason Coelho is **not** part of the default BMA set. If
-you use it as a **standalone** grid (`f.bma = False; f.grid = 'coelho'`),
-**ARIADNE** automatically excludes any photometry redder than the grid's
-coverage from the fit (a warning lists the dropped bands). Coverage limits are
-declared in `grid_wave_coverage` in `config.py`. The exclusion is **not**
-applied in BMA mode, where every grid must be fit to the same bands for the
-evidences to be comparable — so Coelho should only be used standalone.
+**ARIADNE** supports. The Coelho 2014 low-resolution SED library spans
+0.13–10 µm, and a cross-grid audit shows its NIR/IRAC photometry matches
+BT-Settl/PHOENIX to ~1–3% — so its historical 0.9 µm reliability cap was
+lifted, Coelho fits use 2MASS/WISE/IRAC, and the grid now sits in the
+**default BMA ensemble** (10 µm comfortably covers every photosphere fit
+band). For grids that genuinely stop short — Koester's ~3 µm red cutoff,
+the ATLAS9-based `ck04`/`kurucz` whose sparse IR sampling caps them at
+8.5 µm — **ARIADNE** automatically excludes any photometry redder than the
+grid's coverage from a **standalone** fit (a warning lists the dropped
+bands). Coverage limits are declared in `grid_wave_coverage` in `config.py`.
+The exclusion is **not** applied in BMA mode, where every grid must be fit to
+the same bands for the evidences to be comparable.
 
 **Performance & tuning knobs.** A few optional attributes control runtime:
 
@@ -1044,24 +1111,45 @@ all models, including MIST isochrone-derived parameters (age, mass, EEP) when
 available.
 
 
-## Infrared Excess
+## Infrared Excess (IRX)
 
-As of version 1.0, **ARIADNE** now allows for Infrared Excess visualization!
+**ARIADNE** quantifies and characterizes infrared excess — debris disks and
+unresolved cool companions — as a fully Bayesian *post-fit* analysis: bands
+redward of ~5 µm never bias the photosphere fit; they are compared against
+the posterior-predictive photosphere afterwards and classified by Bayesian
+evidence among four hypotheses (no excess, single- and two-temperature
+modified-blackbody disks, and an unresolved cool companion evaluated as a
+BMA over brown-dwarf-capable model grids). The librarian fetches the
+mid/far-IR photometry automatically (WISE, AKARI, IRAS, Spitzer, Herschel),
+proper-motion-propagated to each catalog's epoch, and a dedicated figure
+renders the SED together with the winning excess model — the classic
+`plot_SED()` figure is unchanged.
 
-To visualize infrared excess you just need to add the relevant photometric
-observations to the `Star` object with the `add_mag()` method. After the fitting
-is done, you then need to initiate the `Plotter` object with the `ir_excess`
-parameter set to `True`:
+IR excess is characterized only by the dedicated endpoint — the default
+`fit_bma()` never runs it. ARIADNE's four explicit fitting endpoints:
 
 ```Python
-artist = SEDPlotter(in_file, plots_out_folder, pdf=True, ir_excess=True)
-```
-Finally after plotting, you should get an SED figure with your manually added
-photometry!
+f.fit_bma()      # default: BMA photosphere fit, no IR-excess
+f.fit_single()   # one explicit grid (koester, tlusty, coelho, ...)
+f.fit_binary()   # the SB2 two-component fit
+f.fit_irx()      # BMA + IR-excess; deep-IR ensemble auto-selected
 
-Allowed filters for infrared excess plots are **WISE W3, WISE W4, HERSCHEL PACS
-BLUE, GREEN and RED**, names for these filters can be found in the
-[filters page.](https://github.com/jvines/astroARIADNE/blob/master/filters.md)
+artist = SEDPlotter(in_file, plots_out_folder, ir_excess=True)
+artist.plot_SED()   # the classic SED figure (unchanged)
+artist.IRX_SED()    # SED + IR-excess characterization
+```
+
+As a taste of what it does: `examples/irx_disk.py` runs eps Eridani through
+`fit_irx()`, quantifies twelve excess bands out to SPIRE 350 µm, and
+classifies it as a **disk** at T_dust = 62 ± 3 K (literature: 60–65 K), with
+the companion hypothesis rejected at lnBF ≈ 430:
+
+![eps Eri IRX](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/epsEri_IRX_SED.png)
+
+The full documentation — band routing, ingested catalogs, the evidence
+framework, output keys, validation set and caveats — lives in the
+[IRX documentation page](https://github.com/jvines/astroARIADNE/blob/master/docs/irx.md)
+(also on Read the Docs).
 
 <!-- DOC:OUTPUT-END -->
 

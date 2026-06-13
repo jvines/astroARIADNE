@@ -4,10 +4,38 @@ __all__ = ['SEDPlotter']
 
 import glob
 import logging
+import os
 import pickle
 from random import choice
 
 logger = logging.getLogger(__name__)
+
+# Cool/BD plotting spectra, shipped inside the standard spectra cache as the
+# groups btsettl_cool / atmo / sonora (added by
+# notebooks/build_cool_spectra_cache.py, distributed with the cache via
+# Zenodo). Loaded lazily per grid; None marks a grid (or the cache) as
+# unavailable so the companion overlay falls back to band-resolution curves.
+_COOL_SPEC_CACHE: dict = {}
+_COOL_GROUPS = {'btsettl': 'btsettl_cool', 'atmo': 'atmo', 'sonora': 'sonora'}
+
+
+def _load_cool_cache(gname):
+    if gname in _COOL_SPEC_CACHE:
+        return _COOL_SPEC_CACHE[gname]
+    out = None
+    group = _COOL_GROUPS.get(gname)
+    try:
+        import h5py
+        if group and spectra_cache and os.path.isfile(spectra_cache):
+            with h5py.File(spectra_cache, 'r') as h:
+                if group in h:
+                    g = h[group]
+                    out = (g['wavelength'][:].astype(float), g['teff'][:],
+                           g['logg'][:], g['z'][:], g['flux'][:])
+    except Exception:
+        out = None
+    _COOL_SPEC_CACHE[gname] = out
+    return out
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -177,9 +205,18 @@ class SEDPlotter:
                 irx_mask = self.star.irx_filter_mask
                 irx_filt = self.star.filter_names[irx_mask]
                 irx_wave = self.star.wave[irx_mask]
-                # the IR-excess characterization (disk/companion fit) from the
-                # fit output, for the SED overlay; may be absent on old pickles.
-                self.irx_fit = (out.get('irx') or {}).get('_summary')
+                # The IR-excess characterization (disk/companion fit) from the
+                # fit output, drawn as an overlay by IRX_SED (never plot_SED).
+                _irx = out.get('irx') or {}
+                self.irx_fit = _irx.get('_summary')
+                # Per-band excess significance as reported by _compute_irx --
+                # (obs-model)/hypot(obs_err, model_err), i.e. including the
+                # photosphere model uncertainty. Used for the residual panel so
+                # it matches the reported detection significance (the bare
+                # (obs-model)/obs_err overstates deviations for the IR bands).
+                self.irx_sigma = np.array([
+                    float((_irx.get(f, {}) or {}).get('sigma', np.nan))
+                    for f in irx_filt])
             for filt, flx, flx_e in zip(filters, flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = np.append(self.order, p_)
@@ -195,6 +232,19 @@ class SEDPlotter:
                 if param != 'inflation':
                     theta_samples[i] = bf_samples[param]
                     theta_average[i] = out['best_fit_averaged'][param]
+
+            # The plot theta (posterior medians) can land in a NaN pocket of
+            # the grid even though the fit was fine: the cool-splice nodes
+            # (Teff <= 2500 K) exist only at [Fe/H]=0, so a median like
+            # z=-0.02 NaNs every synthetic flux -- no model diamonds, no
+            # residuals (-inf samples were simply rejected during the fit).
+            # Snap the grid axes to the nearest finite node when that
+            # happens; the cache-backed spectrum curve already snaps the
+            # same way.
+            theta_samples = self._snap_theta_finite(theta_samples, filters,
+                                                    wave)
+            theta_average = self._snap_theta_finite(theta_average, filters,
+                                                    wave)
 
             # Calculate best fit model.
             model_samples = model_grid(theta_samples, filters, wave,
@@ -288,6 +338,35 @@ class SEDPlotter:
         self.irx_flux_er = np.array(self.irx_flux_er)
         self.irx_wave = np.array(self.irx_wave)
         self.irx_bandpass = np.array(self.irx_bandpass).T
+
+    def _snap_theta_finite(self, theta, filters, wave):
+        """Return ``theta`` with (z, teff, logg) snapped to the nearest grid
+        node, axis by axis, until the synthetic photometry is finite in every
+        fitted band. Returns the original theta untouched when it is already
+        fine (the normal case) or when no snap helps."""
+        def _all_finite(th):
+            m = model_grid(th, filters, wave, self.interpolator, self.norm,
+                           self.av_law, binary=self.binary)
+            return bool(np.isfinite(np.asarray(m, dtype=float)).all())
+        try:
+            if _all_finite(theta):
+                return theta
+            lg, tf, fe = self.interpolator.index_columns
+            th = np.array(theta, dtype=float)
+            # z first (the splice's restricted axis), then teff, then logg.
+            for idx, nodes in ((2, np.unique(fe)), (0, np.unique(tf)),
+                               (1, np.unique(lg))):
+                th[idx] = float(nodes[np.argmin(np.abs(nodes - th[idx]))])
+                if _all_finite(th):
+                    logger.warning(
+                        'plot theta sat on a NaN grid pocket; snapped '
+                        '(teff, logg, z) to (%.1f, %.2f, %.2f) for the '
+                        'synthetic photometry.', th[0], th[1], th[2])
+                    return th
+        except Exception as e:
+            logger.warning('theta finite-snap failed (%s); plotting with the '
+                           'raw theta.', e)
+        return theta
 
     def _load_from_cache(self, model_key):
         """Return (wavelength, flux) from pre-computed HDF5 cache, or None."""
@@ -568,17 +647,46 @@ class SEDPlotter:
         pass
 
     def plot_SED(self):
-        """Create the plot of the SED."""
+        """Create the plot of the SED.
+
+        This is the original SED figure: the fit photometry and the model,
+        covering the fitted bands only. IR-excess (irx) data are NOT shown
+        here -- use ``IRX_SED`` for the SED + IR-excess view.
+        """
+        self._render_sed(irx=False, basename='SED')
+
+    def IRX_SED(self):
+        """Create the SED plot including the IR-excess (irx) photometry.
+
+        Identical to ``plot_SED`` but additionally overlays the irx bands
+        (and their residuals) and extends the wavelength range into the IR.
+        """
+        self._render_sed(irx=True, basename='IRX_SED')
+
+    def _render_sed(self, irx=False, basename='SED'):
+        """Render the SED figure to ``<out_folder>/<basename>.{png,pdf}``.
+
+        With ``irx=False`` this reproduces the original fit-only SED; with
+        ``irx=True`` the IR-excess photometry/residuals are added and the
+        x-range is extended. Driven by :meth:`plot_SED` and :meth:`IRX_SED`.
+        """
         if self.moddir is None and not spectra_cache:
             logger.warning('Models directory not provided and no spectra cache set, skipping SED plot')
             return
         print('Plotting SED')
+        # Only show the irx bands when explicitly requested AND present.
+        show_irx = bool(irx and getattr(self, 'irx', False))
         # Get plot ylims.
         ymin = (self.flux * self.wave).min()
         ymax = (self.flux * self.wave).max()
 
-        if self.irx:
-            ymin = (self.irx_model * self.irx_wave).min()
+        if show_irx:
+            # The photosphere at the irx bands sets the floor. Bands beyond the
+            # grid's reach (plot-only, e.g. AKARI FIS) have a NaN model, so use
+            # nanmin and fall back to the fit-data floor if all are NaN.
+            _im = self.irx_model * self.irx_wave
+            if np.isfinite(_im).any():
+                ymin = float(np.nanmin(_im))
 
         n_filt = self.star.used_filters.sum()
         n_pars = int(len(self.theta) - n_filt)
@@ -611,63 +719,344 @@ class SEDPlotter:
         ax = f.add_subplot(gs[0])
         ax_r = f.add_subplot(gs[1])
 
-        if self.bma or self.binary:
+        # Gray posterior-draw spectra: BMA draws across grids by weight, binary
+        # draws the summed two-component model, single-grid draws straight from
+        # the posterior (the method handles all three; gating on bma/binary
+        # silently dropped the single-grid draws).
+        try:
             self._plot_bma_gray_spectra(ax)
+        except Exception as e:
+            logger.warning('gray posterior spectra skipped: %s', e)
         self.SED(ax)
 
+        # Keep the whole model curve in frame. The y-range is scaled to the
+        # data, but if the continuous model peaks above the data (e.g. the SED
+        # peak falls between photometric bands) extend the upper limit to the
+        # model so it isn't clipped. Also capture the photosphere spectrum (the
+        # model line) for the SED+IRX total overlay. ax.get_lines() here is just
+        # the model curve(s) from SED()/the gray spectra -- photometry follows.
+        ph_w = ph_f = None
+        for _ln in ax.get_lines():
+            _yd = np.asarray(_ln.get_ydata())
+            if len(_yd):
+                ymax = max(ymax, float(np.nanmax(_yd)))
+                if (_ln.get_color() == self.model_color
+                        and (ph_f is None or len(_yd) > len(ph_f))):
+                    ph_w, ph_f = np.asarray(_ln.get_xdata()), _yd
+
         # Model plot
+        # Observed photometry (and its error bars) renders ABOVE every model
+        # curve/draw (curves z=2, posterior draws z=1, synthetic-model markers
+        # z=3): data on top.
         ax.errorbar(self.wave, self.flux * self.wave,
                     xerr=self.bandpass, yerr=errors,
-                    fmt=',', ecolor=self.error_color, zorder=0,
+                    fmt=',', ecolor=self.error_color, zorder=4,
                     marker=None)
         ax.scatter(self.wave, self.flux * self.wave,
                    edgecolors='black', marker=self.marker, c=self.marker_colors,
-                   s=self.scatter_size, zorder=1, alpha=self.scatter_alpha)
+                   s=self.scatter_size, zorder=5, alpha=self.scatter_alpha)
         ax.scatter(self.wave, self.model * self.wave,
                    marker=self.marker_model,
                    edgecolors=self.marker_colors_model, s=self.scatter_size,
                    facecolor='none', zorder=3, lw=3)
 
-        if self.irx:
+        if show_irx:
             ax.errorbar(self.irx_wave, self.irx_flux * self.irx_wave,
                         xerr=self.irx_bandpass, yerr=self.irx_flux_er,
-                        fmt=',', ecolor=self.irx_error_color, zorder=0,
+                        fmt=',', ecolor=self.irx_error_color, zorder=4,
                         marker=None)
             ax.scatter(self.irx_wave, self.irx_flux * self.irx_wave,
                        edgecolors='black', marker=self.marker,
-                       c=self.marker_colors_irx, s=self.scatter_size, zorder=1,
+                       c=self.marker_colors_irx, s=self.scatter_size, zorder=5,
                        alpha=self.scatter_alpha)
-            ax.scatter(self.irx_wave, self.irx_model * self.irx_wave,
+            # Model diamonds at the irx bands are DEFERRED until the winning
+            # excess model is known below: they must show photosphere + the
+            # winning model -- a bare-photosphere diamond sitting under an
+            # excess point reads as a bad fit when the total is exactly what
+            # the model predicts. (Scatter happens after the overlay block.)
+            irx_model_display = np.asarray(self.irx_model, float).copy()
+
+            # Overlay the fitted IR-excess model(s) (IRX view only). The DISK
+            # component is the LS single-T blackbody (dust really is one); the
+            # COMPANION component is the actual grid photosphere at the BMA
+            # (Teff2, R2) -- a blackbody badly over-predicts 5-10 um where L/T
+            # photospheres are carved by CH4/H2O. Totals (photosphere + excess)
+            # are drawn over the photosphere's full range so they ride the black
+            # line where the excess is negligible and peel off where it is not.
+            # A clean classification shows one model; an ambiguous one shows
+            # BOTH, in different colors/styles, each labeled with its posterior
+            # probability. The companion carries light-red posterior draws
+            # (per-grid BMA samples), mirroring the gray photosphere draws.
+            fit = getattr(self, 'irx_fit', None)
+            bb = (fit or {}).get('disk_bb') if fit else None
+            _cls = (fit or {}).get('excess_class') if fit else None
+            _comp = (fit or {}).get('companion') if fit else None
+            p_d = float((fit or {}).get('p_disk') or 0.0)
+            p_c = float((fit or {}).get('p_companion') or 0.0)
+            have_bb = bool(bb) and np.isfinite(bb.get('t_dust', np.nan))
+            show_comp = bool(_cls in ('companion', 'ambiguous') and _comp
+                             and np.isfinite(_comp.get('teff2', np.nan))
+                             and not self.norm)
+            show_disk = have_bb and (not show_comp or _cls == 'ambiguous')
+            both = show_comp and show_disk
+            if (show_disk or show_comp) and ph_w is not None \
+                    and ph_f is not None:
+                from scipy.constants import h as _h, c as _c, k as _kB
+
+                def _dustbb(lam_um, T, omega):
+                    # Modified blackbody (beta=1 beyond 210 um), matching the
+                    # fitter's disk convention.
+                    lam_um = np.asarray(lam_um, float)
+                    lam = lam_um * 1e-6
+                    with np.errstate(over='ignore'):
+                        planck = (2 * _h * _c ** 2 / lam ** 5) \
+                            / np.expm1(_h * _c / (lam * _kB * T)) * 1e-3
+                    fac = np.where(lam_um > 210.0, 210.0 / lam_um, 1.0)
+                    return omega * planck * fac * lam_um
+
+                # Draw the 2-T disk only when it DECISIVELY beats single-T
+                # (same 0.75 convention as the classification): at even odds
+                # the second component is prior-volume wash, not a detection.
+                # Display uses the MAP pair -- marginal means of a weakly
+                # constrained component are not a real solution.
+                _d2 = (fit or {}).get('disk2')
+                p_d2 = float((fit or {}).get('p_disk2') or 0.0)
+                _use2 = (bool(_d2) and 't_warm_map' in (_d2 or {})
+                         and (p_d + p_d2) > 0
+                         and p_d2 / (p_d + p_d2) > 0.75)
+
+                def _diskbb(lam_um):
+                    if _use2:
+                        return (_dustbb(lam_um, _d2['t_warm_map'],
+                                        _d2['omega_warm_map'])
+                                + _dustbb(lam_um, _d2['t_cold_map'],
+                                          _d2['omega_cold_map']))
+                    return _dustbb(lam_um, bb['t_dust'], bb['omega_sr'])
+
+                def _comp_spectrum(gname, t2):
+                    # Full-resolution companion spectrum from the cool-spectra
+                    # cache (Datafiles/cool_spectra.h5, R~300 plotting cache):
+                    # nearest feh node to the primary's z, logg node nearest
+                    # 5.0, log-flux interpolated between the bracketing teff
+                    # nodes. Returns (wave_um, surface F_lambda) or None.
+                    cc = _load_cool_cache(gname)
+                    if cc is None:
+                        return None
+                    wave, te, lo, fe, fl = cc
+                    zsel = fe[int(np.argmin(np.abs(fe - self.theta[2])))]
+                    m1 = fe == zsel
+                    lsel = lo[m1][int(np.argmin(np.abs(lo[m1] - 5.0)))]
+                    m2 = m1 & (lo == lsel)
+                    ts = np.unique(te[m2])
+                    if not len(ts):
+                        return None
+                    t2c = float(np.clip(t2, ts[0], ts[-1]))
+                    i = int(np.searchsorted(ts, t2c))
+                    tlo = ts[max(i - 1, 0)]
+                    thi = ts[min(i, len(ts) - 1)] if t2c > ts[0] else ts[0]
+                    slo = fl[np.where(m2 & (te == tlo))[0][0]]
+                    if thi == tlo:
+                        s = slo
+                    else:
+                        shi = fl[np.where(m2 & (te == thi))[0][0]]
+                        u_ = (t2c - tlo) / (thi - tlo)
+                        with np.errstate(invalid='ignore', divide='ignore'):
+                            s = 10 ** ((1 - u_) * np.log10(slo)
+                                       + u_ * np.log10(shi))
+                    return wave, s
+
+                def _comp_curve(t2, r2, gname, ig=None):
+                    # Companion lambda*F_lambda curve at (t2, r2): the cached
+                    # spectrum when available (smooth), else band fluxes through
+                    # the interpolation grid. Redward of ~1 um only -- the cool
+                    # body is negligible in the optical and the structure there
+                    # just clutters the plot.
+                    try:
+                        sp = _comp_spectrum(gname, t2)
+                        if sp is not None:
+                            wave, s = sp
+                            dist_sr = self.theta[3] * u.pc.to(u.solRad)
+                            flx = apply(self.av_law(wave * 1e4, self.theta[5],
+                                                    3.1),
+                                        s * (r2 / dist_sr) ** 2)
+                            good = (np.isfinite(flx) & (flx > 0)
+                                    & (wave >= 0.95))
+                            if good.sum() > 10:
+                                return wave[good], (flx * wave)[good]
+                        if ig is None:
+                            return None
+                        la, _ta, fa = ig.index_columns
+                        zq = float(np.asarray(fa)[int(np.argmin(np.abs(
+                            np.asarray(fa) - self.theta[2])))])
+                        lq = float(np.asarray(la)[int(np.argmin(np.abs(
+                            np.asarray(la) - 5.0)))])
+                        bands = np.asarray(
+                            [b for b in self.star.filter_names
+                             if b in ig.column_index])
+                        wv = np.array([get_effective_wavelength(b)
+                                       for b in bands])
+                        ok = np.isfinite(wv)
+                        bands, wv = bands[ok], wv[ok]
+                        th2 = np.array([t2, lq, zq, self.theta[3], r2,
+                                        self.theta[5]])
+                        cf = np.asarray(model_grid(
+                            th2, bands, wv, ig, self.norm,
+                            self.av_law)).ravel()
+                        good = np.isfinite(cf) & (cf > 0) & (wv >= 0.95)
+                        if good.sum() < 4:
+                            return None
+                        order = np.argsort(wv[good])
+                        return wv[good][order], (cf[good] * wv[good])[order]
+                    except Exception:
+                        return None
+
+                def _comp_band_flux(t2, r2):
+                    """Companion band fluxes (F_lambda) at the irx bands via
+                    proper grid convolution -- same source as the mean curve.
+                    NaN where the grid lacks the band (the companion is
+                    negligible there anyway, e.g. SPIRE)."""
+                    out = np.full(len(self.irx_wave), np.nan)
+                    try:
+                        ig = self.interpolator
+                        la, _ta, fa = ig.index_columns
+                        zq = float(np.asarray(fa)[int(np.argmin(np.abs(
+                            np.asarray(fa) - self.theta[2])))])
+                        lq = float(np.asarray(la)[int(np.argmin(np.abs(
+                            np.asarray(la) - 5.0)))])
+                        bands = self.star.filter_names[
+                            self.star.irx_filter_mask]
+                        keep = np.array([b in ig.column_index for b in bands])
+                        if not keep.any():
+                            return out
+                        th2 = np.array([t2, lq, zq, self.theta[3], r2,
+                                        self.theta[5]])
+                        out[keep] = np.asarray(model_grid(
+                            th2, bands[keep], self.irx_wave[keep], ig,
+                            self.norm, self.av_law)).ravel()
+                    except Exception:
+                        pass
+                    return out
+
+                def _total(wb, cb):
+                    # From ~1 um on: the total is indistinguishable from the
+                    # photosphere there, so it emerges smoothly from the black
+                    # line (no orphaned segment) without painting over the
+                    # jagged optical spectrum.
+                    m = (ph_w >= max(wb[0], 0.95)) & (ph_w <= wb[-1])
+                    if not m.any():
+                        return None
+                    ci = 10 ** np.interp(np.log10(ph_w[m]),
+                                         np.log10(wb), np.log10(cb))
+                    return ph_w[m], ph_f[m] + ci
+
+                if show_comp:
+                    comp_color = 'tab:red'
+                    # Light-red posterior draws of the cool body: sample
+                    # (Teff2, R2) per grid from the companion BMA and draw the
+                    # grid curve, mirroring the gray photosphere draws.
+                    pg = _comp.get('per_grid') or {}
+                    if pg:
+                        rng = np.random.default_rng()
+                        gnames = list(pg)
+                        gw = np.array([pg[g]['weight'] for g in gnames], float)
+                        gw = gw / gw.sum() if gw.sum() > 0 else None
+                        gcache = {}
+
+                        def _gi(name):
+                            if name == self.grid:
+                                return self.interpolator
+                            if name not in gcache:
+                                try:
+                                    gcache[name] = load_grid(name)
+                                except Exception:
+                                    gcache[name] = None
+                            return gcache[name]
+
+                        for _ in range(25):
+                            gn = rng.choice(gnames, p=gw)
+                            e = pg[gn]
+                            # Correlated (T2, R2) posterior samples from the
+                            # quadrature (T2-R2 are strongly anticorrelated;
+                            # independent marginal draws over-disperse).
+                            smp = e.get('samples')
+                            if smp:
+                                t2, r2 = smp[int(rng.integers(len(smp)))]
+                            else:
+                                t2 = rng.normal(e['teff2'],
+                                                e.get('teff2_err', 0.0) or 0.0)
+                                r2 = rng.normal(e['rad2'],
+                                                e.get('rad2_err', 0.0) or 0.0)
+                            if r2 <= 0:
+                                continue
+                            cur = _comp_curve(t2, r2, gn, _gi(gn))
+                            if cur is not None:
+                                ax.plot(cur[0], cur[1], color='lightcoral',
+                                        lw=0.8, alpha=0.12, zorder=1)
+                    cur = _comp_curve(_comp['teff2'], _comp['rad2'],
+                                      self.grid, self.interpolator)
+                    if cur is not None:
+                        wb, cb = cur
+                        ax.plot(wb, cb, ls='--', lw=1.3, color=comp_color,
+                                alpha=0.85, zorder=2,
+                                label=(r'companion (P=%.2f): T$_2$=%.0f K, '
+                                       r'R$_2$=%.2f R$_\odot$'
+                                       % (p_c, _comp['teff2'],
+                                          _comp.get('rad2', np.nan))))
+                        tot = _total(wb, cb)
+                        if tot is not None:
+                            ax.plot(tot[0], tot[1], lw=1.75, color=comp_color,
+                                    ls='-.', zorder=2,
+                                    label='star + companion model')
+                    # The winner contributes to the model diamonds.
+                    if not show_disk or p_c >= p_d:
+                        cf = _comp_band_flux(_comp['teff2'], _comp['rad2'])
+                        ok = np.isfinite(cf)
+                        irx_model_display[ok] += cf[ok]
+                if show_disk:
+                    # The winner contributes to the model diamonds.
+                    if not show_comp or p_d > p_c:
+                        with np.errstate(invalid='ignore'):
+                            irx_model_display += (_diskbb(self.irx_wave)
+                                                  / self.irx_wave)
+                    # When both hypotheses are shown the disk switches to green
+                    # with its own line styles so the two are unmistakable; a
+                    # clean disk keeps the established red styling.
+                    disk_color = 'seagreen' if both else 'tab:red'
+                    d_ls, t_ls = (':', '--') if both else ('--', '-.')
+                    md = ph_w >= 0.95
+                    ax.plot(ph_w[md], ph_f[md] + _diskbb(ph_w[md]), lw=1.75,
+                            color=disk_color, ls=t_ls, zorder=2,
+                            label='star + disk model')
+                    lam_um = np.geomspace(0.95, 300.0, 400)
+                    if _use2:
+                        # Two-temperature disk: warm + cold components shown
+                        # individually, the summed curve labeled with both.
+                        for _tk, _ok in (('t_warm_map', 'omega_warm_map'),
+                                         ('t_cold_map', 'omega_cold_map')):
+                            ax.plot(lam_um,
+                                    _dustbb(lam_um, _d2[_tk], _d2[_ok]),
+                                    ls=':', lw=1.0, color=disk_color,
+                                    alpha=0.6, zorder=2)
+                        ax.plot(lam_um, _diskbb(lam_um), ls=d_ls, lw=1.3,
+                                color=disk_color, alpha=0.85, zorder=2,
+                                label=(r'2-T disk (P=%.2f): T$_w$=%.0f K, '
+                                       r'T$_c$=%.0f K'
+                                       % (p_d + p_d2, _d2['t_warm_map'],
+                                          _d2['t_cold_map'])))
+                    else:
+                        ax.plot(lam_um, _diskbb(lam_um), ls=d_ls, lw=1.3,
+                                color=disk_color, alpha=0.85, zorder=2,
+                                label=(r'disk BB (P=%.2f): T$_d$=%.0f K, '
+                                       r'L$_d$/L$_*$=%.1g'
+                                       % (p_d + p_d2, bb['t_dust'],
+                                          bb['l_dust_over_lstar'])))
+                ax.legend(loc='upper right', fontsize=9, frameon=False)
+
+            # Deferred model diamonds: photosphere + winning excess model.
+            ax.scatter(self.irx_wave, irx_model_display * self.irx_wave,
                        marker=self.marker_model,
                        edgecolors=self.marker_colors_model_irx,
                        s=self.scatter_size, facecolor='none', zorder=3, lw=3)
-            # Overlay the fitted excess characterization + classification.
-            fit = getattr(self, 'irx_fit', None)
-            bb = (fit or {}).get('disk')
-            if bb and fit.get('excess_class') in ('disk', 'ambiguous'):
-                from scipy.constants import h as _h, c as _c, k as _kB
-                lam_um = np.geomspace(5.0, max(self.irx_wave.max() * 1.5, 50.0),
-                                      200)
-                lam = lam_um * 1e-6
-                bp = (2 * _h * _c ** 2 / lam ** 5) \
-                    / np.expm1(_h * _c / (lam * _kB * bb['t_dust'])) * 1e-3
-                ax.plot(lam_um, bb['omega_sr'] * bp * lam_um, ls='--', lw=2,
-                        color=self.irx_error_color, zorder=2,
-                        label=f"disk BB {bb['t_dust']:.0f} K")
-            if fit and fit.get('excess_class'):
-                cls = fit['excess_class']
-                comp = fit.get('companion') or {}
-                if cls == 'disk' and bb:
-                    note = (f"IR excess: disk  T$_d$={bb['t_dust']:.0f} K  "
-                            f"L$_d$/L$_*$={bb['l_dust_over_lstar']:.1e}")
-                elif cls == 'companion' and comp:
-                    note = (f"IR excess: companion  "
-                            f"T$_{{eff,2}}$={comp['teff2']:.0f} K")
-                else:
-                    note = f"IR excess: {cls}"
-                ax.annotate(note, xy=(0.97, 0.05), xycoords='axes fraction',
-                            ha='right', va='bottom', fontsize=11,
-                            color=self.irx_error_color)
 
         # Residual plot
         ax_r.axhline(y=0, lw=2, ls='--', c='k', alpha=.7)
@@ -684,25 +1073,56 @@ class SEDPlotter:
         #              edgecolors=self.marker_colors_model, s=self.scatter_size,
         #              facecolor='none', lw=3, zorder=10)
 
-        if self.irx:
-            irx_res = (self.irx_flux - self.irx_model) / self.irx_flux_er
-            ax_r.errorbar(self.irx_wave, np.zeros(self.irx_wave.shape[0]),
-                          xerr=self.irx_bandpass, yerr=self.irx_flux_er,
+        if show_irx:
+            irx_res = getattr(self, 'irx_sigma', None)
+            if irx_res is None:
+                irx_res = (self.irx_flux - self.irx_model) / self.irx_flux_er
+            # Plot-only bands (outside the ensemble's common quantification
+            # reach, e.g. while a grid's new columns await reconvolution)
+            # carry no reported sigma -- but the PLOT grid does predict them
+            # (the diamonds above), so show their residuals as open markers:
+            # visibly provisional, never confused with quantified evidence.
+            irx_res = np.asarray(irx_res, float)
+            _po = ~np.isfinite(irx_res) & np.isfinite(self.irx_model) \
+                & np.isfinite(self.irx_flux) & (self.irx_flux_er > 0)
+            if _po.any():
+                _po_res = ((self.irx_flux[_po] - self.irx_model[_po])
+                           / self.irx_flux_er[_po])
+                ax_r.scatter(self.irx_wave[_po], _po_res, zorder=3,
+                             marker=self.marker, facecolor='none',
+                             edgecolors='darkorange', s=self.scatter_size,
+                             lw=1.5)
+            ax_r.errorbar(self.irx_wave, irx_res, zorder=3,
+                          xerr=self.irx_bandpass, yerr=np.ones_like(irx_res),
                           fmt=',', ecolor=self.irx_error_color, marker=None)
-            ax_r.scatter(self.irx_wave, np.zeros(self.irx_wave.shape[0]),
+            ax_r.scatter(self.irx_wave, irx_res, zorder=3,
                          edgecolors='black', marker=self.marker,
                          c=self.marker_colors_irx, s=self.scatter_size,
                          alpha=self.scatter_alpha)
-            ax_r.scatter(self.irx_wave, irx_res,
-                         marker=self.marker_model,
-                         edgecolors=self.marker_colors_model_irx,
-                         s=self.scatter_size, facecolor='none', lw=3, zorder=10)
 
         # Formatting
-        res_std = norm_res.std()
-        ax.set_ylim([ymin * 0.6, ymax * 1.5])
+        # A NaN residual (e.g. a plot-only band whose model flux is NaN at a
+        # sparse cool-splice node) must not poison the residual-panel scale.
+        _nr = np.asarray(norm_res, float)
+        _nr = _nr[np.isfinite(_nr)]
+        res_std = float(_nr.std()) if _nr.size else 1.0
+        # The IRX view gets extra headroom so the upper-right legend sits in
+        # clean space above the SED peak.
+        # IRX view: enough headroom for the upper-right legend without the
+        # top third of the panel going empty (x3.0 left the SED floating in
+        # blank space for warm-excess stars whose curves end early).
+        ax.set_ylim([ymin * 0.6, ymax * (2.0 if show_irx else 1.5)])
         # ax_r.set_ylim([-5, 5])
-        ax_r.set_ylim([-5 * res_std, 5 * res_std])
+        if show_irx:
+            # Symmetric scale that snugly fits every residual (fit + irx). Using
+            # 5*std instead lets one outlier band inflate the range and leave the
+            # panel mostly empty; this keeps all points visible without that.
+            _r = np.concatenate([norm_res, np.asarray(irx_res, dtype=float)])
+            _r = _r[np.isfinite(_r)]
+            _m = max(5.0, float(np.nanmax(np.abs(_r)))) * 1.1
+            ax_r.set_ylim([-_m, _m])
+        else:
+            ax_r.set_ylim([-5 * res_std, 5 * res_std])
         ax.set_xscale('log', nonpositive='clip')
         ax.set_yscale('log', nonpositive='clip')
         ax_r.set_xscale('log', nonpositive='clip')
@@ -732,8 +1152,13 @@ class SEDPlotter:
             labelsize=self.tick_labelsize
         )
         xticks = np.linspace(1, 10, 10)
-        if self.irx:
-            xticks = [1, 3, 5, 10, 20, 50, 100, 250]
+        if show_irx:
+            # Red edge follows the data: reddest irx band plus margin, instead
+            # of a fixed 250 um that leaves a long empty tail for stars whose
+            # coverage stops at W4.
+            _xmax = float(np.nanmax(self.irx_wave)) * 1.5
+            xticks = [t for t in (1, 3, 5, 10, 20, 50, 100, 250)
+                      if t <= _xmax]
         ax_r.set_xticks(xticks)
         ax_r.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
         ax.set_xticks(xticks)
@@ -745,9 +1170,9 @@ class SEDPlotter:
 
         xlims1 = [0.125, 6]
         xlims2 = [0.25, 6]
-        if self.irx:
-            xlims1 = [0.125, 250]
-            xlims2 = [0.25, 250]
+        if show_irx:
+            xlims1 = [0.125, _xmax]
+            xlims2 = [0.25, _xmax]
 
         if 'GALEX_FUV' in self.star.filter_names[self.star.filter_mask] or \
                 'GALEX_NUV' in self.star.filter_names[self.star.filter_mask]:
@@ -770,9 +1195,11 @@ class SEDPlotter:
             tick.set_fontname(self.fontname)
 
         if self.pdf:
-            plt.savefig(f'{self.out_folder}/SED.pdf', bbox_inches='tight')
+            plt.savefig(f'{self.out_folder}/{basename}.pdf',
+                        bbox_inches='tight')
         if self.png:
-            plt.savefig(f'{self.out_folder}/SED.png', bbox_inches='tight')
+            plt.savefig(f'{self.out_folder}/{basename}.png',
+                        bbox_inches='tight')
         if self.save:
             data = np.vstack((self.wave, self.model * self.wave)).T
             np.savetxt(f'{self.out_folder}/synthetic.dat', data, fmt='%s',
@@ -781,21 +1208,23 @@ class SEDPlotter:
 
     def SED(self, ax):
         """Plot the SED model."""
-        # Only these grids ship full spectra (cache / models dir). The newer
-        # grids (bosz, sphinx, tlusty) provide a band-flux interpolator for
-        # fitting but no spectra, so the continuous model line can't be drawn.
-        # Degrade gracefully: plot_SED still shows the photometry and the
-        # synthetic-flux markers; we just skip (and explain) the model curve.
-        # (Also guards the if/elif chain below, which has no else and would
-        # otherwise hit undefined wave/flux in the save branch.)
+        # Grids with a dedicated branch below draw from the cache or the raw
+        # model files. Anything else (sphinx, tlusty, bosz, stagger, btdusty,
+        # the rebuilt newera, ...) is drawn straight from its spectra_cache
+        # group when one exists -- nearest-node spectrum, extincted and scaled
+        # like every other curve. Only a grid with NO cache group degrades to
+        # photometry + synthetic-flux markers.
         _spectra_grids = ('phoenix', 'btsettl', 'btnextgen', 'btcond',
                           'ck04', 'kurucz', 'coelho')
+        _generic = None
         if self.grid.lower() not in _spectra_grids:
-            logger.warning(
-                f"Grid '{self.grid}' has no spectra in the cache; plotting the "
-                f"SED without the continuous model spectrum (photometry and "
-                f"synthetic model fluxes are still shown).")
-            return
+            _generic = self._load_from_cache(self.grid.lower())
+            if _generic is None:
+                logger.warning(
+                    f"Grid '{self.grid}' has no spectra in the cache; plotting "
+                    f"the SED without the continuous model spectrum "
+                    f"(photometry and synthetic model fluxes are still shown).")
+                return
         Rv = 3.1  # For extinction.
         if not self.norm:
             rad = self.theta[4]
@@ -805,6 +1234,15 @@ class SEDPlotter:
         else:
             norm = self.theta[3]
             Av = self.theta[4]
+
+        if _generic is not None and not self.binary:
+            wave, flux = _generic
+            good = np.isfinite(flux) & (flux > 0)
+            wave, flux = wave[good], flux[good]
+            ext = self.av_law(wave * 1e4, Av, Rv)
+            flx = apply(ext, flux) * norm * wave
+            ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
+            return
 
         # SED plot.
         if self.binary:
@@ -1075,11 +1513,15 @@ class SEDPlotter:
     def plot_bma_hist(self):
         """Plot histograms."""
         print('Plotting BMA histograms.')
-        colors = [
-            'tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
-            'tab:brown'
-        ]
         models = [key for key in self.out['originals'].keys()]
+        # One color per ensemble member; tab:cyan and tab:pink are reserved
+        # for the weighted-sampling / weighted-average curves below.
+        palette = [
+            'tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+            'tab:brown', 'tab:gray', 'tab:olive', 'gold', 'teal',
+            'limegreen', 'crimson', 'navy', 'darkviolet', 'magenta'
+        ]
+        colors = [palette[j % len(palette)] for j in range(len(models))]
         for i, param in enumerate(self.order):
             if 'noise' in param:
                 continue
@@ -1164,6 +1606,24 @@ class SEDPlotter:
                                fontname=self.fontname
                                )
                 axes = [ax1, ax2]
+                # Zero-weight grids pegged at a grid edge run away to absurd
+                # parameter values and stretch the axes; frame the plot on the
+                # members that actually carry weight (plus the weighted
+                # posteriors).
+                wmodels = [m for m in models
+                           if self.out['weights'][m] > 1e-3]
+                if wmodels:
+                    lo = min(np.percentile(self.out['originals'][m][param],
+                                           0.1) for m in wmodels)
+                    hi = max(np.percentile(self.out['originals'][m][param],
+                                           99.9) for m in wmodels)
+                    for ws in ('weighted_samples', 'weighted_average'):
+                        lo = min(lo, np.percentile(self.out[ws][param], 0.1))
+                        hi = max(hi, np.percentile(self.out[ws][param], 99.9))
+                    if hi > lo:
+                        pad = 0.05 * (hi - lo)
+                        for ax in axes:
+                            ax.set_xlim(lo - pad, hi + pad)
                 for ax in axes:
                     ax.set_xlabel(lab,
                                   fontsize=self.fontsize,
@@ -1841,6 +2301,11 @@ class SEDPlotter:
 
     def __read_config(self):
         """Read plotter configuration file."""
+        # ARIADNE renders math with mathtext, never LaTeX. Some third-party
+        # imports flip text.usetex globally mid-process, which crashes every
+        # savefig on machines without a TeX install -- pin it off.
+        import matplotlib
+        matplotlib.rcParams['text.usetex'] = False
         if self.settings_dir is None:
             settings = open(filesdir + '/plot_settings.dat', 'r')
         else:

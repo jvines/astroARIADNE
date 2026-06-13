@@ -13,6 +13,8 @@ installation
 theory
 usage
 output
+irx
+examples
 customization
 filters
 api
