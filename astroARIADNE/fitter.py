@@ -1502,6 +1502,31 @@ class Fitter:
 
         self.star.save_mags(self.out_folder + '/')
 
+        # Single-grid coverage pre-pass. A single-grid ensemble (e.g. a WD fit
+        # via fit_wd, which forces koester) has no cross-grid evidence
+        # comparison, so a fit band the grid cannot synthesize must be
+        # DESELECTED -- dropped from the fit -- rather than dropping the only
+        # grid, which would leave the band-coverage guard below with an empty
+        # ensemble and abort the fit (a WD carrying a J-PLUS narrow band that
+        # koester has no column for, JPLUS_J0515, did exactly this). Done before
+        # the noise-term count so ndim stays consistent. (Multi-grid BMA keeps
+        # the strict guard: evidences are only comparable when every member fits
+        # the same band set.)
+        if self._bma and len(self._bma_models) == 1:
+            _fin = getattr(self.load_interpolator(self._bma_models[0].lower()),
+                           'finite_bands', None)
+            if _fin is not None:
+                _fn = self.star.filter_names
+                _miss = [str(b) for b, u in zip(_fn, self.star.used_filters)
+                         if u == 1 and str(b) not in _fin]
+                if _miss:
+                    for _b in _miss:
+                        self.star.used_filters[_fn == _b] = 0
+                    print(colored(
+                        f'\t\t*** single-grid fit ({self._bma_models[0]}): '
+                        f'deselected {len(_miss)} uncovered fit band(s) '
+                        f'{", ".join(_miss)} (no grid column). ***', 'yellow'))
+
         # Parameter coordination.
         # Order for the parameters are:
         # teff, logg, z, dist, rad, Av, noise
