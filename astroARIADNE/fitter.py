@@ -784,6 +784,20 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             gp.append((gname_g, t2, float(np.sum(wcn * (T2M - t2) ** 2)),
                        r2, float(np.sum(wcn * (R2M - r2) ** 2)), zg, samples))
         if gp:
+            # MAP pair (global chi^2 minimum across grids / teff1 / Teff2 / R2):
+            # the actual best-fit (Teff2, R2). The marginal MEAN below drifts
+            # toward the grid centre (~1700 K) for a weakly-detected companion
+            # -- a prior artefact, not a solution -- so quote teff2_map (like the
+            # 2-T disk *_map values) when sigma/Teff is large.
+            t2_map = r2_map = float('nan')
+            _bestc = np.inf
+            for (gname_g, T2g, _Tg1, c) in comp_per_grid:
+                mi = int(np.argmin(c))
+                cv = float(c.ravel()[mi])
+                if cv < _bestc:
+                    _bestc = cv
+                    _, _i, _j = np.unravel_index(mi, c.shape)
+                    t2_map, r2_map = float(T2g[_i]), float(R2g[_j])
             gw = np.array([g[5] for g in gp], float)
             gw = gw / gw.sum()
             t2a = np.array([g[1] for g in gp])
@@ -794,8 +808,10 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             rad2 = float(np.sum(gw * r2a))
             companion = dict(
                 teff2=teff2,
+                teff2_map=t2_map,
                 teff2_err=float(np.sqrt(np.sum(gw * (t2v + (t2a - teff2) ** 2)))),
                 rad2=rad2,
+                rad2_map=r2_map,
                 rad2_err=float(np.sqrt(np.sum(gw * (r2v + (r2a - rad2) ** 2)))),
                 n_grids=len(gp),
                 per_grid={g[0]: dict(teff2=g[1],
