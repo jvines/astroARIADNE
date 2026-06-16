@@ -3,6 +3,7 @@
 __all__ = ['Fitter', 'dynesty_log_like', 'dynesty_loglike_bma', 'pt_dynesty']
 
 import copy
+import json
 import logging
 import os
 import pickle
@@ -49,6 +50,88 @@ except ModuleNotFoundError:
 
 set_start_method('fork', force=True)
 
+
+# ---------------------------------------------------------------------------
+# Portable NetCDF (de)serialization of the BMA result dict (scipy only, no
+# arviz/xarray/netCDF4). Numeric arrays -> NetCDF variables; the nested result
+# structure, scalars and strings -> a single JSON `ariadne_result` attribute.
+# Round-trips losslessly; a version-independent replacement for BMA.pkl.
+# ---------------------------------------------------------------------------
+def _nc_dtype(arr):
+    """numpy dtype -> NetCDF3 type code, or None if not a numeric array."""
+    k = arr.dtype.kind
+    if k == 'f':
+        return 'f8' if arr.dtype.itemsize >= 8 else 'f4'
+    if k in 'iub':            # ints/uints/bools -> int32 (NetCDF3 has no int64)
+        return 'i4'
+    return None               # strings/objects -> kept inline in the JSON
+
+
+def _result_dict_to_nc(d, path):
+    """Serialize a (possibly nested) result dict to NetCDF via scipy.io."""
+    from scipy.io import netcdf_file
+    arrays = {}                                   # var name -> ndarray
+
+    def enc(o):
+        if isinstance(o, dict):
+            return {'__d__': {str(k): enc(v) for k, v in o.items()}}
+        if isinstance(o, (np.floating, np.integer, np.bool_)):
+            return o.item()
+        if isinstance(o, (str, bool, int, float)) or o is None:
+            return o
+        arr = o if isinstance(o, np.ndarray) else (
+            np.asarray(o) if isinstance(o, (list, tuple)) else None)
+        if arr is not None and _nc_dtype(arr) is not None and arr.ndim >= 1 \
+                and arr.size > 0:
+            name = f'v{len(arrays)}'
+            arrays[name] = arr
+            return {'__a__': name, 'shape': list(arr.shape),
+                    'dtype': str(arr.dtype)}
+        if isinstance(o, (list, tuple)):          # non-numeric / ragged / empty
+            return [enc(x) for x in o]
+        if isinstance(o, np.ndarray):             # string/object array -> list
+            return enc(o.tolist())
+        return str(o)                             # last-resort fallback
+
+    meta = enc(d)
+    f = netcdf_file(path, 'w')
+    f.format = 'ariadne-bma-1'
+    f.ariadne_result = json.dumps(meta)
+    for name, arr in arrays.items():
+        nct = _nc_dtype(arr)
+        dims = []
+        for j, s in enumerate(arr.shape):
+            dn = f'{name}_{j}'
+            f.createDimension(dn, int(s))
+            dims.append(dn)
+        f.createVariable(name, nct, tuple(dims))[:] = arr.astype(nct)
+    f.close()
+
+
+def _result_nc_to_dict(path):
+    """Inverse of :func:`_result_dict_to_nc`."""
+    from scipy.io import netcdf_file
+    f = netcdf_file(path, 'r', mmap=False)
+    meta_raw = f.ariadne_result
+    meta = json.loads(meta_raw.decode() if isinstance(meta_raw, bytes)
+                      else meta_raw)
+    arrays = {name: np.array(var[:]) for name, var in f.variables.items()}
+    f.close()
+
+    def dec(o):
+        if isinstance(o, dict):
+            if '__a__' in o:
+                return arrays[o['__a__']].astype(o['dtype']).reshape(o['shape'])
+            if '__d__' in o:
+                return {k: dec(v) for k, v in o['__d__'].items()}
+            return {k: dec(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [dec(x) for x in o]
+        return o
+
+    return dec(meta)
+
+
 # Module-level globals consumed by the dynesty wrappers; set per fit in
 # Fitter.initialize. Defaults keep single-star fits free of binary state.
 binary = False
@@ -77,6 +160,18 @@ def _fm07_rv(wave, a_v, r_v=3.1):
 # over-predicts the submm tail (PACS160/SPIRE/FIS bands).
 _MODBB_BETA = 1.0
 _MODBB_LAM0 = 210.0     # um
+
+# Absolute flux-calibration floor for the IR-excess bands. Unlike the
+# photosphere-fit bands (which receive a fitted jitter noise term, scale
+# >= 0.05*flux, see create_priors) the IR-excess bands are routed OUT of the
+# fit by Star and compared to the model raw. Catalogue statistical errors omit
+# the instrument's absolute calibration uncertainty, which for the mid/far-IR
+# photometers used here is at least a few percent (Spitzer MIPS-24 ~2-4%, WISE
+# W1-W4 2.4-5.7%, AKARI ~3-7%). Without a floor a band that reports an
+# unphysically tiny error (a MIPS-24 point at 0.06% blew up to ~1350 sigma)
+# produces a spurious huge excess that dominates the model-selection chi^2.
+# Floor the *observed* error at this fraction of the observed flux.
+_IRX_ABS_CAL_FLOOR = 0.02
 
 
 def _modbb_factor(lam_um):
@@ -2676,13 +2771,17 @@ class Fitter:
             posterior_samples.shape[0]
         )
 
-        # If normalization constant was fitted, create a distribution of radii
-        # only if there's a distance available.
-
-        if use_norm and star.dist != -1:
-            rad = self._get_rad(
-                out['posterior_samples']['norm'], star.dist, star.dist_e
-            )
+        # If normalization constant was fitted, derive the radius from the
+        # distance. With no distance (2-parameter source) there is no radius:
+        # set it NaN so mass and luminosity follow as NaN (unmeasurable) instead
+        # of crashing the code that expects a 'rad' sample.
+        if use_norm:
+            if star.dist != -1:
+                rad = self._get_rad(
+                    out['posterior_samples']['norm'], star.dist, star.dist_e
+                )
+            else:
+                rad = np.full_like(out['posterior_samples']['norm'], np.nan)
             out['posterior_samples']['rad'] = rad
 
         # Create a distribution of masses.
@@ -2892,11 +2991,14 @@ class Fitter:
                 fm = np.asarray(star.filter_mask, int)
                 fb = np.asarray(star.filter_names)[fm]
                 fw = np.asarray(star.wave)[fm]
-                # anchor RJ on the reddest FIT band Koester reaches; for a hot
-                # WD even ~0.8 um is already in the RJ tail (peak << 0.3 um).
+                # anchor RJ on the reddest FIT band Koester models RELIABLY;
+                # for a hot WD even ~0.8 um is already in the RJ tail (peak <<
+                # 0.3 um). Cap at 2.5 um: the Koester model spectra stop at
+                # ~3 um, so band fluxes redward of that are unreliable (W2 comes
+                # out ~10x high, IRAC-4.5 = 0) and must not anchor the tail.
                 cand = [(float(w), str(b)) for b, w in zip(fb, fw)
                         if str(b) in kg.finite_bands
-                        and np.isfinite(w) and 0.6 <= w <= 3.0]
+                        and np.isfinite(w) and 0.6 <= w <= 2.5]
                 if cand:
                     rj_ref_wl, rj_ref_band = max(cand)
         else:
@@ -2947,10 +3049,14 @@ class Fitter:
                     # the grid carries no column for this band (e.g. Koester
                     # has none of the >3 um IR-excess bands) -> RJ below.
                     val = float('nan')
-                if not np.isfinite(val) and wd and rj_ref_band is not None:
-                    # band beyond Koester's ~3 um reach -> RJ-extrapolate the
-                    # WD photosphere from the reddest reached band (exact: the
-                    # WD continuum there is pure Rayleigh-Jeans, F_lam ~ lam^-4).
+                if (wd and rj_ref_band is not None
+                        and (not np.isfinite(val) or float(wv) > 2.9)):
+                    # Band beyond Koester's ~3 um spectral reach -> RJ-extrapolate
+                    # the WD photosphere from the reddest reliably-modeled band.
+                    # Force this for ALL bands > 2.9 um even when the grid returns
+                    # a (finite) value: the Koester band fluxes are unreliable
+                    # there (W2 ~10x high, IRAC-4.5 = 0). The WD continuum is pure
+                    # Rayleigh-Jeans there (F_lam ~ lam^-4), so this is exact.
                     mref = model_grid(theta, np.array([rj_ref_band]),
                                       np.array([rj_ref_wl]), interps[g],
                                       self._norm, av_law, binary=self.binary)
@@ -2961,10 +3067,15 @@ class Fitter:
             model = float(np.nanmean(draws))
             model_err = float(np.nanstd(draws))
             excess = float(fo) - model
-            denom = float(np.hypot(float(fe), model_err))
+            # Floor the observed error at the absolute-calibration level before
+            # forming the significance (see _IRX_ABS_CAL_FLOOR): the raw
+            # catalogue error can be unphysically small for bright IR points.
+            obs_e_eff = max(float(fe), _IRX_ABS_CAL_FLOOR * float(fo))
+            denom = float(np.hypot(obs_e_eff, model_err))
             sigma = excess / denom if denom > 0 else float('nan')
             result[f] = dict(wave=float(wv), obs=float(fo), obs_err=float(fe),
-                             model=model, model_err=model_err, excess=excess,
+                             obs_err_eff=obs_e_eff, model=model,
+                             model_err=model_err, excess=excess,
                              sigma=sigma, quantified=True)
         q = {k: v for k, v in result.items() if v['quantified']}
         sig = sorted(k for k, v in q.items()
@@ -2979,7 +3090,8 @@ class Fitter:
         bf = out.get('best_fit_averaged', {})
         waves = [v['wave'] for v in q.values()]
         exc = [v['excess'] for v in q.values()]
-        errs = [float(np.hypot(v['obs_err'], v['model_err']))
+        errs = [float(np.hypot(v.get('obs_err_eff', v['obs_err']),
+                               v['model_err']))
                 for v in q.values()]
         ms = {}
         if members:
@@ -3134,15 +3246,20 @@ class Fitter:
                 out['weighted_samples'][par] = avgd['weighted_samples'][par]
                 out['weighted_average'][par] = avgd['weighted_average'][par]
 
-        # If normalization constant was fitted, create a distribution of radii.
-
-        if use_norm and star.dist != -1:
-            rad_sampled = self._get_rad(
-                out['weighted_samples']['norm'], star.dist, star.dist_e
-            )
-            rad_averageed = self._get_rad(
-                out['weighted_average']['norm'], star.dist, star.dist_e
-            )
+        # If normalization constant was fitted, derive the radius from the
+        # distance; with no distance there is no radius (NaN -> mass/lum NaN).
+        if use_norm:
+            if star.dist != -1:
+                rad_sampled = self._get_rad(
+                    out['weighted_samples']['norm'], star.dist, star.dist_e
+                )
+                rad_averageed = self._get_rad(
+                    out['weighted_average']['norm'], star.dist, star.dist_e
+                )
+            else:
+                rad_sampled = np.full_like(
+                    out['weighted_samples']['norm'], np.nan)
+                rad_averageed = np.nan
             out['weighted_samples']['rad'] = rad_sampled
             out['weighted_average']['rad'] = rad_averageed
 
@@ -3489,6 +3606,13 @@ class Fitter:
             try:  # Skip fixed params.
                 len(post_samples[0][k])
             except TypeError:
+                continue
+            # A normalization fit with no distance has no radius/mass/luminosity
+            # (all-NaN samples); a KDE can't be built on them, so carry the NaN
+            # through rather than crash.
+            if np.all(np.isnan(np.asarray(post_samples[0][k], dtype=float))):
+                out['weighted_samples'][k] = np.full(nsamples, np.nan)
+                out['weighted_average'][k] = np.full(nsamples, np.nan)
                 continue
             traces = []
             extended_weights = []
@@ -3870,54 +3994,36 @@ class Fitter:
         }
 
     def to_netcdf(self, path):
-        """Export BMA results as arviz DataTree in netCDF4 format.
+        """Export the full BMA result to a portable NetCDF (``.nc``) file.
 
-        Produces an ``arviz.InferenceData``-compatible ``.nc`` file
-        following the ecosystem output spec.
+        Written with ``scipy.io`` only -- no arviz/xarray/netCDF4 dependency.
+        Numeric arrays (posteriors, weighted samples, SED fluxes, evidences)
+        become NetCDF variables; the nested result structure, scalars, strings
+        and the IR-excess classification ride in a single JSON ``ariadne_result``
+        attribute. The file round-trips losslessly through
+        :meth:`Fitter.read_netcdf` and is a drop-in, version-independent
+        replacement for ``BMA.pkl``.
 
         Parameters
         ----------
         path : str
             Output file path (e.g. ``'ariadne_result.nc'``).
         """
-        import arviz as az
+        out = getattr(self, 'out', None)
+        if out is None:
+            raise RuntimeError('No result to export; run the fit first.')
+        _result_dict_to_nc(out, path)
+        logger.info(f'Wrote BMA result to {path}')
 
-        d = self.to_dict()
+    @staticmethod
+    def read_netcdf(path):
+        """Read a result written by :meth:`to_netcdf` back into a dict.
 
-        ss = d['sample_stats']
-        data = {
-            'posterior': d['posterior'],
-            'observed_data': d['observed_data'],
-            'constant_data': {
-                'log_evidence': np.array(ss['log_evidence']),
-                'model_weights': ss['model_weights'],
-                'model_names': np.array(ss['model_names']),
-            },
-        }
-
-        # Add per-model posteriors as separate groups
-        for model_name, mp in d.get('model_posteriors', {}).items():
-            data[f'posterior_{model_name}'] = mp
-
-        # Add MIST isochrone posteriors
-        if d.get('mist_posterior'):
-            data['posterior'].update(d['mist_posterior'])
-
-        # Add model SED fluxes to observed_data
-        if d.get('model_sed') and 'model_flux' in d['model_sed']:
-            data['observed_data']['model_flux'] = d['model_sed']['model_flux']
-
-        # Add summary stats to constant_data
-        for stat_key in ('best_fit_averaged', 'uncertainties_averaged',
-                         'confidence_interval_averaged'):
-            if stat_key in d.get('summary', {}):
-                for param, val in d['summary'][stat_key].items():
-                    key = f'{stat_key}__{param}'
-                    data['constant_data'][key] = np.array(val)
-
-        dt = az.from_dict(data)
-        dt.to_netcdf(path)
-        logger.info(f'Wrote InferenceData to {path}')
+        Inverse of :meth:`to_netcdf`; returns the same structure that was
+        pickled to ``BMA.pkl``, with the numeric arrays restored from the
+        NetCDF variables.
+        """
+        return _result_nc_to_dict(path)
 
 
 #####################

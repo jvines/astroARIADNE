@@ -6,6 +6,8 @@ likelihood, artefact masks). Pulled out of the original monolithic
 librarian.py so the QC logic is editable and testable in isolation.
 """
 
+import os
+
 import numpy as np
 import numpy.ma as ma
 
@@ -51,12 +53,59 @@ def _qc_2mass_band(row, band_idx):
     return qflg[band_idx] in "ABCD" and cflg[band_idx] == "0"
 
 
+# AllWISE cc_flags (contamination & confusion), per band: '0' is clean; an
+# UPPERCASE D/P/H/O marks the detection itself as a likely artefact of a nearby
+# bright source (Diffraction spike / Persistence / scattered-light Halo / Optical
+# ghost) -- spurious, always rejected. lowercase d/p/h/o marks a *real* detection
+# in an artefact-prone region whose profile-fit photometry is usually fine.
+# lowercase is KEPT by default: bright debris-disk hosts self-trigger lowercase
+# h/d on their OWN W3/W4 (their PSF halo/spikes), so cutting it strips real disk
+# bands (HR 4796A, lambda Boo, HD 15115...) -- while the contamination that
+# actually matters (a faint background galaxy blended in the beam) carries
+# ccf='0' and is invisible here anyway. Opt into strict lowercase cutting via
+# ARIADNE_WISE_CCF_STRICT=1.
+_WISE_CCF_STRICT = (os.environ.get("ARIADNE_WISE_CCF_STRICT", "0")
+                    not in ("0", "false", "False"))
+# AllWISE profile-fit photometry stays reliable while the saturated-pixel
+# fraction is small; reject a band only when heavily saturated.
+_WISE_SAT_MAX = float(os.environ.get("ARIADNE_WISE_SAT_MAX", 0.3))
+
+
 def _qc_wise_band(row, band_idx):
-    """QC for a single WISE band (W1=0, W2=1)."""
-    qph = str(_col(row, "qph") or "UU")
-    if band_idx >= len(qph):
+    """QC for a single AllWISE band (W1=0, W2=1, W3=2, W4=3).
+
+    Three per-band gates:
+      * ph_qual (``qph``): photometric quality must be A/B/C, not U/X/Z.
+      * cc_flags (``ccf``): contamination & confusion. '0' passes; an uppercase
+        D/P/H/O (a spurious detection of a nearby bright source's diffraction
+        spike / persistence / halo / optical ghost) is always rejected; lowercase
+        d/p/h/o is KEPT by default (bright disk hosts self-flag their own W3/W4),
+        rejected only under ``_WISE_CCF_STRICT``.
+      * saturation (``sat1``..``sat4``): reject when the saturated-pixel fraction
+        exceeds ``_WISE_SAT_MAX``.
+
+    These catch contamination AllWISE itself flags. They do NOT catch an
+    unresolved background source blended within the beam (cc_flags stays '0', the
+    blend is a real point source positionally coincident with the star) -- that
+    needs colour / cross-resolution vetting handled downstream, not a catalog
+    flag.
+    """
+    qph = str(_col(row, "qph") or "UUUU")
+    if band_idx >= len(qph) or qph[band_idx] not in "ABC":
         return False
-    return qph[band_idx] in "ABC"
+    ccf = str(_col(row, "ccf") or "0000")
+    if band_idx < len(ccf):
+        c = ccf[band_idx]
+        if c != "0" and (c.isupper() or _WISE_CCF_STRICT):
+            return False
+    sat = _col(row, "sat%d" % (band_idx + 1))
+    if sat is not None:
+        try:
+            if float(sat) > _WISE_SAT_MAX:
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
 
 
 def _qc_wise_extended(row):
@@ -69,6 +118,21 @@ def _qc_wise_extended(row):
     if ex is None:
         return True
     return int(ex) <= 1
+
+
+def _qc_wise_blend(row):
+    """AllWISE blend reliability (``nb`` = number of PSF components fit
+    simultaneously at this position). Reject only genuinely crowded extractions
+    (nb >= 3): nb == 2 is a single close neighbour that profile-fitting handles
+    routinely -- common for real disks in moderately crowded fields (Sco-Cen,
+    Taurus) -- so it is kept to avoid stripping their photometry. Missing =
+    keep."""
+    nb = _col(row, "nb")
+    try:
+        nb = int(nb) if nb is not None else 1
+    except (TypeError, ValueError):
+        return True
+    return nb < 3
 
 
 # ── Far-IR (Jy) catalog quality ──────────────────────────────────

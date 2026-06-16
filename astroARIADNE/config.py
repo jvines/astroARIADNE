@@ -36,10 +36,13 @@ GRID_BASENAMES = {
 
 # Cool/BD grids used by the IR-excess companion characterization (BMA over the
 # cool ensemble). BT-Settl (cool-extended) participates via the fit grid.
-# BT-NextGen (gas-phase) and BT-Cond (full dust settling) joined 2026-06 with
-# the genuine SVO data: they reach 800 K and bracket the dust physics of the
-# L/T transition, exactly the regime that discriminates a BD companion.
-COOL_COMPANION_GRIDS = ('atmo', 'sonora', 'btnextgen', 'btcond')
+# The three BT cloud limits now bracket the dust physics of the L/T transition
+# symmetrically: BT-NextGen (gas-phase, no condensates), BT-Cond (dust fully
+# settled/rained out -- the T-dwarf cleared limit), and BT-Dusty (dust
+# suspended -- the L-dwarf cloudy limit). Without BT-Dusty the ensemble was
+# lopsided toward cleared atmospheres, under-serving exactly the dusty L-dwarf
+# regime where the SED shape carries the most disk-vs-companion leverage.
+COOL_COMPANION_GRIDS = ('atmo', 'sonora', 'btnextgen', 'btcond', 'btdusty')
 
 try:
     modelsdir = os.environ['ARIADNE_MODELS']

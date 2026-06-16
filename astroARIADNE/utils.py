@@ -224,7 +224,11 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm, grid=None):
     _T = '\t\t\t'
 
     if use_norm:
-        order = np.array(['teff', 'logg', 'z', 'norm', 'rad', 'Av'])
+        # 'rad' is DERIVED in normalization mode (radius from norm + distance),
+        # not a fitted parameter -- it is shown among the derived params below.
+        # Keeping it out of `order` aligns `order` with the fit's coordinator
+        # (the old 6-element order was off-by-one against the 5-parameter fit).
+        order = np.array(['teff', 'logg', 'z', 'norm', 'Av'])
     else:
         order = np.array(['teff', 'logg', 'z', 'dist', 'rad', 'Av'])
 
@@ -297,7 +301,9 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm, grid=None):
 
     # Derived parameters
     derived = []
-    if not use_norm:
+    if use_norm:
+        derived.append('rad')   # radius from norm + distance (NaN if no distance)
+    else:
         derived.append('AD')
     derived.extend(['grav_mass', 'lum'])
     if engine == 'Bayesian Model Averaging':

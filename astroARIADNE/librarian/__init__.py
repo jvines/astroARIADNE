@@ -40,5 +40,6 @@ from ._qc import (
     _qc_sdss,
     _qc_skymapper,
     _qc_wise_band,
+    _qc_wise_blend,
     _qc_wise_extended,
 )

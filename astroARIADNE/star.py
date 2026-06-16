@@ -2,6 +2,7 @@
 
 __all__ = ['Star']
 
+import json
 import random
 import warnings
 
@@ -15,6 +16,7 @@ from dustmaps.bayestar import BayestarQuery
 from termcolor import colored
 
 from scipy.constants import h as _h, c as _c, k as _k
+from scipy.io import netcdf_file
 
 from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands,
                      irx_bands, GRID_BASENAMES)
@@ -298,25 +300,34 @@ class Star:
         # Get max Av
         if Av is None:
             self.Av_e = None
-            dmap = self.dustmaps[dustmap]()
-            coords = SkyCoord(self.ra, self.dec, distance=self.dist,
-                              unit=(u.deg, u.deg, u.pc), frame='icrs')
-            if dustmap in ['SFD', 'Lenz']:
-                ebv = dmap(coords)
-                self.Av = ebv * 2.742
-            elif dustmap == 'Bayestar':
-                ebvs = dmap(coords, mode='percentile', pct=[15, 50, 84])
-                if np.any(np.isnan(ebvs)):
-                    StarWarning(None, 2).warn()
-                    ebv = self.dustmaps['SFD']()(coords)
+            # A 2-parameter Gaia source has no distance (self.dist == -1). A
+            # negative distance breaks the SkyCoord, and a 3D map (Bayestar)
+            # cannot be sampled without one, so fall back to the 2D SFD map --
+            # the full line-of-sight E(B-V), which is distance-independent.
+            if self.dist is None or self.dist <= 0:
+                coords = SkyCoord(self.ra, self.dec, unit=(u.deg, u.deg),
+                                  frame='icrs')
+                self.Av = self.dustmaps['SFD']()(coords) * 2.742
+            else:
+                dmap = self.dustmaps[dustmap]()
+                coords = SkyCoord(self.ra, self.dec, distance=self.dist,
+                                  unit=(u.deg, u.deg, u.pc), frame='icrs')
+                if dustmap in ['SFD', 'Lenz']:
+                    ebv = dmap(coords)
                     self.Av = ebv * 2.742
-                else:
-                    mags = ebvs * 2.742 * 0.884
-                    self.Av = mags[1]
-                    self.Av_e = max([mags[1] - mags[0], mags[2] - mags[1]])
-            elif dustmap in ['Planck13', 'Planck16']:
-                ebv = dmap(coords)
-                self.Av = ebv * 3.1
+                elif dustmap == 'Bayestar':
+                    ebvs = dmap(coords, mode='percentile', pct=[15, 50, 84])
+                    if np.any(np.isnan(ebvs)):
+                        StarWarning(None, 2).warn()
+                        ebv = self.dustmaps['SFD']()(coords)
+                        self.Av = ebv * 2.742
+                    else:
+                        mags = ebvs * 2.742 * 0.884
+                        self.Av = mags[1]
+                        self.Av_e = max([mags[1] - mags[0], mags[2] - mags[1]])
+                elif dustmap in ['Planck13', 'Planck16']:
+                    ebv = dmap(coords)
+                    self.Av = ebv * 3.1
         else:
             self.Av = Av
         # Get the wavelength and fluxes of the retrieved magnitudes.
@@ -491,11 +502,147 @@ class Star:
         print('')
 
     def save_mags(self, out):
-        """Save the used magnitudes in a file."""
+        """Save the photometry.
+
+        Writes the legacy ``<out>mags.dat`` table AND a complete, portable
+        ``<out>photometry.nc`` NetCDF that freezes EVERYTHING needed to refit
+        the star offline: every used band (photosphere-fit and IR-excess,
+        including the XP-synthetic gap-fills and SPHEREx bands), the band
+        routing, distance/parallax/Av, radius/Teff/luminosity, and the
+        spectroscopic priors. Reload it with ``Star.from_nc(<out>photometry.nc)``
+        to refit with no archival lookup -- reproducible and librarian-free.
+        """
         master, headers = self.__prepare_mags()
         fmt = '%s %2.4f %2.4f'
         np.savetxt(out + 'mags.dat', master, header=' '.join(headers),
                    delimiter=' ', fmt=fmt)
+        self.to_nc(out + 'photometry.nc')
+
+    def to_nc(self, path):
+        """Freeze the full photometric state to a NetCDF (``.nc``) file.
+
+        Self-describing and dependency-light (written via ``scipy.io`` -- no
+        xarray/netCDF4 needed). Stores the used + IR-excess bands as proper
+        NetCDF variables (``filter_name``, ``mag``, ``mag_err``, ``used``,
+        ``irx_used``) plus the XP-filled band list, with scalar metadata
+        (distance, parallax, Av, radius/Teff/lum) as typed attributes and the
+        spectroscopic/RAVE provenance as JSON attributes. Round-trips through
+        ``Star.from_nc``.
+        """
+        idx = np.append(self.filter_mask, self.irx_filter_mask).astype(int)
+        names = np.asarray(self.filter_names)[idx]
+        mags = np.asarray(self.mags, float)[idx]
+        errs = np.asarray(self.mag_errs, float)[idx]
+        used = np.asarray(self.used_filters)[idx].astype('i4')
+        irx = np.asarray(self.irx_used_filters)[idx].astype('i4')
+
+        def _charmat(strs):
+            strs = [str(s) for s in strs]
+            nrow = max(len(strs), 1)
+            ncol = max((len(s) for s in strs), default=1)
+            m = np.zeros((nrow, ncol), 'S1')
+            for i, s in enumerate(strs):
+                m[i, :len(s)] = [ch.encode() for ch in s]
+            return m
+
+        char = _charmat(names)
+        xp = [str(b) for b in (getattr(self, 'xp_filled', None) or [])]
+        xpchar = _charmat(xp)
+
+        def _f(x):
+            try:
+                return float(x) if x is not None else float('nan')
+            except (TypeError, ValueError):
+                return float('nan')
+
+        f = netcdf_file(path, 'w')
+        f.format_version = '1'
+        f.starname = str(self.starname)
+        for a in ('ra', 'dec', 'plx', 'plx_e', 'dist', 'dist_e', 'rad', 'rad_e',
+                  'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e'):
+            setattr(f, a, _f(getattr(self, a, None)))
+        f.ids = json.dumps({'g_id': self.g_id, 'tic': getattr(self, 'tic', None),
+                            'kic': getattr(self, 'kic', None)})
+        f.spectroscopic_params = json.dumps(
+            getattr(self, 'spectroscopic_params', None), default=str)
+        f.rave_params = json.dumps(getattr(self, 'rave_params', None),
+                                   default=str)
+        f.n_xp_filled = int(len(xp))
+        f.createDimension('filter', len(names))
+        f.createDimension('nchar', char.shape[1])
+        f.createDimension('n_xp', xpchar.shape[0])
+        f.createDimension('nchar_xp', xpchar.shape[1])
+        f.createVariable('filter_name', 'S1', ('filter', 'nchar'))[:] = char
+        for nm, arr, tp in (('mag', mags, 'f8'), ('mag_err', errs, 'f8'),
+                            ('used', used, 'i4'), ('irx_used', irx, 'i4')):
+            f.createVariable(nm, tp, ('filter',))[:] = arr
+        f.createVariable('xp_filled_name', 'S1', ('n_xp', 'nchar_xp'))[:] = xpchar
+        f.close()
+
+    @classmethod
+    def from_nc(cls, path, verbose=False):
+        """Reconstruct a fit-ready Star from a ``.nc`` saved by ``save_mags``/
+        ``to_nc`` -- NO archival lookup.
+
+        The frozen photometry, band routing (incl. XP + SPHEREx), distance,
+        Av and spectroscopic priors are restored exactly; the returned Star can
+        be handed straight to a :class:`~astroARIADNE.fitter.Fitter`.
+        """
+        g = netcdf_file(path, 'r', mmap=False)
+
+        def _rows(var, n=None):
+            data = g.variables[var][:].astype('S1')
+            if n is not None:
+                data = data[:n]
+            return [b''.join(r).decode().strip('\x00') for r in data]
+
+        def _attr(a, default=None):
+            v = getattr(g, a, default)
+            return v.decode() if isinstance(v, bytes) else v
+
+        def _fa(a):
+            try:
+                v = float(_attr(a))
+            except (TypeError, ValueError):
+                return None
+            return None if np.isnan(v) else v
+
+        names = _rows('filter_name')
+        mags = np.asarray(g.variables['mag'][:], float)
+        errs = np.asarray(g.variables['mag_err'][:], float)
+        meta = {a: _fa(a) for a in
+                ('ra', 'dec', 'plx', 'plx_e', 'dist', 'dist_e', 'rad', 'rad_e',
+                 'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e')}
+        starname = _attr('starname')
+        ids = json.loads(_attr('ids', '{}'))
+        spec = json.loads(_attr('spectroscopic_params', 'null'))
+        rave = json.loads(_attr('rave_params', 'null'))
+        nxp = int(getattr(g, 'n_xp_filled', 0))
+        xp = _rows('xp_filled_name', nxp) if nxp > 0 else []
+        g.close()
+
+        mag_dict = {n: [float(m), float(e)]
+                    for n, m, e in zip(names, mags, errs)}
+        # Offline construction: leave plx/dist None so the existing offline
+        # branch runs (placeholder scalars, None provenance); pass Av so the
+        # dustmap is never queried. The exact scalars + provenance are restored
+        # immediately below. The mag_dict reproduces the photosphere/IRX band
+        # split deterministically (config.irx_bands membership).
+        star = cls(starname, meta['ra'], meta['dec'], g_id=ids.get('g_id'),
+                   mag_dict=mag_dict, offline=True,
+                   rad=meta['rad'], rad_e=meta['rad_e'],
+                   temp=meta['temp'], temp_e=meta['temp_e'],
+                   lum=meta['lum'], lum_e=meta['lum_e'],
+                   Av=meta['Av'], Av_e=meta['Av_e'], verbose=verbose)
+        star.plx, star.plx_e = meta['plx'], meta['plx_e']
+        star.dist, star.dist_e = meta['dist'], meta['dist_e']
+        star.Av_e = meta['Av_e']
+        star.tic = ids.get('tic')
+        star.kic = ids.get('kic')
+        star.spectroscopic_params = spec
+        star.rave_params = rave
+        star.xp_filled = xp
+        return star
 
     def __prepare_mags(self):
         """Prepare mags for either printing or saving in a file."""

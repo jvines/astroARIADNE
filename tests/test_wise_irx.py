@@ -16,7 +16,8 @@ sys.path.insert(0, REPO)
 import astroARIADNE  # noqa: E402
 assert 'site-packages' not in astroARIADNE.__file__, astroARIADNE.__file__
 from astroARIADNE.librarian._api import _CATALOGS, _WISE_BAND_IDX  # noqa: E402
-from astroARIADNE.librarian._qc import _qc_wise_band  # noqa: E402
+from astroARIADNE.librarian import _qc  # noqa: E402
+from astroARIADNE.librarian._qc import _qc_wise_band, _qc_wise_blend  # noqa: E402
 from astroARIADNE.librarian._filtermap import to_ariadne_filters  # noqa: E402
 from astroARIADNE.config import irx_bands, filter_names  # noqa: E402
 from astroARIADNE.phot_utils import get_zero_flux  # noqa: E402
@@ -46,6 +47,30 @@ def test_qph_qc_passes_detections_rejects_upper_limits():
     assert _qc_wise_band(row, _WISE_BAND_IDX['WISE_RSR_W4']) is False  # U
     # missing/short qph -> reject
     assert _qc_wise_band({'qph': 'AB'}, 3) is False
+
+
+def test_ccf_contamination_and_saturation_rejected():
+    W3 = _WISE_BAND_IDX['WISE_RSR_W3']
+    # clean cc_flags passes
+    assert _qc_wise_band({'qph': 'AAAA', 'ccf': '0000'}, W3) is True
+    # UPPERCASE artefact (halo on W3) is always rejected
+    assert _qc_wise_band({'qph': 'AAAA', 'ccf': '00H0'}, W3) is False
+    # lowercase possible-contamination rejected iff strict (default on)
+    assert _qc_wise_band({'qph': 'AAAA', 'ccf': '00h0'}, W3) is (
+        not _qc._WISE_CCF_STRICT)
+    # heavy saturation on W3 rejected, none kept
+    assert _qc_wise_band({'qph': 'AAAA', 'ccf': '0000', 'sat3': 0.9}, W3) is False
+    assert _qc_wise_band({'qph': 'AAAA', 'ccf': '0000', 'sat3': 0.0}, W3) is True
+    # backward compatible: a row without ccf/sat is treated as clean
+    assert _qc_wise_band({'qph': 'AAAA'}, W3) is True
+
+
+def test_wise_blend_guard():
+    assert _qc_wise_blend({'nb': 1}) is True   # single component
+    assert _qc_wise_blend({'nb': 2}) is True   # one close neighbour -> kept
+    assert _qc_wise_blend({'nb': 3}) is False  # crowded extraction
+    assert _qc_wise_blend({'nb': 4}) is False
+    assert _qc_wise_blend({}) is True          # missing -> keep
 
 
 def test_w3_w4_pass_filter_bridge_and_route_to_irx():

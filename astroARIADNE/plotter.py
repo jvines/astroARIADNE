@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 # Zenodo). Loaded lazily per grid; None marks a grid (or the cache) as
 # unavailable so the companion overlay falls back to band-resolution curves.
 _COOL_SPEC_CACHE: dict = {}
-_COOL_GROUPS = {'btsettl': 'btsettl_cool', 'atmo': 'atmo', 'sonora': 'sonora'}
+_COOL_GROUPS = {'btsettl': 'btsettl_cool', 'atmo': 'atmo', 'sonora': 'sonora',
+                'btcond': 'btcond', 'btnextgen': 'btnextgen',
+                'btdusty': 'btdusty'}
 
 
 def _load_cool_cache(gname):
@@ -140,8 +142,6 @@ class SEDPlotter:
         self.method = method
         self.save = save_model
         self.irx = ir_excess
-        if self.irx:
-            model = 'btsettl'
 
         traces = f'{out_folder}/traces'
         histograms = f'{out_folder}/histograms'
@@ -217,6 +217,18 @@ class SEDPlotter:
                 self.irx_sigma = np.array([
                     float((_irx.get(f, {}) or {}).get('sigma', np.nan))
                     for f in irx_filt])
+                # Per-band error used for the residual panel: floored obs error
+                # in quadrature with the photosphere model uncertainty (the same
+                # denominator as the stored significance). The residual panel
+                # shows (obs - DISPLAYED total model)/err so it agrees with the
+                # top panel rather than the bare-photosphere excess sigma.
+                self.irx_band_err = np.array([
+                    float(np.hypot(
+                        (_irx.get(f, {}) or {}).get(
+                            'obs_err_eff',
+                            (_irx.get(f, {}) or {}).get('obs_err', np.nan)),
+                        (_irx.get(f, {}) or {}).get('model_err', 0.0)))
+                    for f in irx_filt])
             for filt, flx, flx_e in zip(filters, flxs, errs):
                 p_ = get_noise_name(filt) + '_noise'
                 self.order = np.append(self.order, p_)
@@ -254,24 +266,36 @@ class SEDPlotter:
                                        self.interpolator, self.norm,
                                        self.av_law, binary=self.binary)
             if self.irx:
-                # Reach-gate: only model the IR-excess bands this grid both
-                # reaches and reliably models (grid_irx_reach = finite columns
-                # within grid_wave_coverage). Bands beyond reach are plot-only --
-                # left NaN here so the SED still shows the observed point but no
-                # model line, and model_grid never KeyErrors on a missing band.
+                # Per-band photosphere model at the IR-excess bands. PREFER the
+                # fitter's stored posterior-predictive model (_compute_irx, in
+                # the pickle's irx dict): it is the evidence-weighted value over
+                # the FULL BMA ensemble and is finite for every quantified band.
+                # Recomputing from the single forced plotting grid (btsettl, set
+                # for every IRX plot) leaves NaN holes on bands that grid does
+                # not reach or has NaN nodes for -- which silently dropped the
+                # model diamond on those bands. Fall back to the recomputed grid
+                # model only where the fitter stored none (e.g. plot-only bands
+                # outside the ensemble's common reach), so model_grid never
+                # KeyErrors on a missing band and provisional bands still draw.
+                irx_stored = np.array([
+                    float((_irx.get(f, {}) or {}).get('model', np.nan))
+                    for f in irx_filt])
                 reach = grid_irx_reach(self.grid, self.interpolator)
                 keep = np.array([f in reach for f in irx_filt], dtype=bool)
-                irx_model_sam = np.full(len(irx_filt), np.nan)
-                irx_model_avg = np.full(len(irx_filt), np.nan)
+                irx_recomp_sam = np.full(len(irx_filt), np.nan)
+                irx_recomp_avg = np.full(len(irx_filt), np.nan)
                 if keep.any():
-                    irx_model_sam[keep] = model_grid(
+                    irx_recomp_sam[keep] = model_grid(
                         theta_samples, irx_filt[keep], irx_wave[keep],
                         self.interpolator, self.norm, self.av_law,
                         binary=self.binary)
-                    irx_model_avg[keep] = model_grid(
+                    irx_recomp_avg[keep] = model_grid(
                         theta_average, irx_filt[keep], irx_wave[keep],
                         self.interpolator, self.norm, self.av_law,
                         binary=self.binary)
+                _fin = np.isfinite(irx_stored)
+                irx_model_sam = np.where(_fin, irx_stored, irx_recomp_sam)
+                irx_model_avg = np.where(_fin, irx_stored, irx_recomp_avg)
             if method == 'averaged':
                 self.theta = theta_average
                 self.model = model_average
@@ -399,6 +423,99 @@ class SEDPlotter:
             logger.warning(f'Failed to load spectra cache for {model_key}: {e}')
             return None
 
+    @staticmethod
+    def _extend_rj(wave, flux, lam_max=30.0):
+        """Extend a photosphere spectrum to lam_max with a Rayleigh-Jeans tail
+        (F_lambda ~ lambda^-4). The plotting spectra cache stops at ~4.63 um, but
+        an IRX SED shows excess bands out to ~22 um (W4); a stellar photosphere
+        is firmly in the RJ regime there, so the tail is an excellent stand-in
+        for the unavailable full-range model spectrum. No-op if already long."""
+        wave = np.asarray(wave, float); flux = np.asarray(flux, float)
+        if wave[-1] >= lam_max:
+            return wave, flux
+        ext_w = np.geomspace(wave[-1] * 1.001, lam_max, 80)
+        ext_f = flux[-1] * (wave[-1] / ext_w) ** 4
+        return np.concatenate([wave, ext_w]), np.concatenate([flux, ext_f])
+
+    @staticmethod
+    def _convolve_to_R(wave, flux, R_hi=1500.0, R_lo=100.0,
+                       lam_split=5.0, width=0.45):
+        """Convolve a spectrum to a WAVELENGTH-DEPENDENT resolving power and
+        return it on a uniform log grid: R_hi in the optical/NIR (keep the real
+        molecular bands) tapering smoothly to R_lo across lam_split into the
+        mid-IR (where the NewEra extension is an unresolved mess). The smooth
+        taper means there is still no resolution seam at the cache/NewEra
+        splice. Constant-R Gaussian in log-wavelength."""
+        wave = np.asarray(wave, float); flux = np.asarray(flux, float)
+        g = np.isfinite(wave) & np.isfinite(flux) & (wave > 0) & (flux > 0)
+        if g.sum() < 10:
+            return wave, flux
+        w = wave[g]; f = flux[g]
+        o = np.argsort(w); w, f = w[o], f[o]
+        lo, hi = np.log(w[0]), np.log(w[-1])
+        npts = int(np.clip(8 * R_hi * (hi - lo), 64, 16000))  # oversample, cap
+        lg = np.linspace(lo, hi, npts)
+        fg = np.interp(lg, np.log(w), np.log10(np.maximum(f, 1e-300)))
+        try:
+            from scipy.ndimage import gaussian_filter1d
+            dln = (hi - lo) / (npts - 1)
+            f_hi = gaussian_filter1d(fg, (1.0 / R_hi) / 2.3548 / dln,
+                                     mode='nearest')
+            f_lo = gaussian_filter1d(fg, (1.0 / R_lo) / 2.3548 / dln,
+                                     mode='nearest')
+            wgt = 0.5 * (1.0 - np.tanh((lg - np.log(lam_split)) / width))
+            fg = f_hi * wgt + f_lo * (1.0 - wgt)
+        except Exception:
+            pass
+        return np.exp(lg), 10 ** fg
+
+    def _extend_photosphere(self, wave, flux, teff, logg, z, lam_max=30.0):
+        """Extend a photosphere spectrum past the cache's red end (~4.63 um)
+        using the NewEra grid, which reaches 700 um and covers 2300-11800 K and
+        therefore carries the real molecular mid-IR structure -- so the line
+        follows a model rather than a straight Rayleigh-Jeans extrapolation. The
+        NewEra tail is scaled to match the spectrum at the splice. Falls back to
+        the RJ tail when NewEra does not cover the star (e.g. a hot WD)."""
+        wave = np.asarray(wave, float); flux = np.asarray(flux, float)
+        if wave[-1] >= lam_max:
+            return self._convolve_to_R(wave, flux)
+        ne = None
+        try:
+            import h5py
+            import os as _os
+            if spectra_cache and _os.path.isfile(spectra_cache):
+                with h5py.File(spectra_cache, 'r') as f:
+                    if 'newera' in f:
+                        g = f['newera']
+                        tt = g['teff'][:]; ll = g['logg'][:]; zz = g['z'][:]
+                        if tt.min() <= teff <= tt.max():
+                            ut = np.unique(tt); ul = np.unique(ll); uz = np.unique(zz)
+                            tv = ut[np.argmin(np.abs(ut - teff))]
+                            lv = ul[np.argmin(np.abs(ul - logg))]
+                            zv = uz[np.argmin(np.abs(uz - z))]
+                            m = (tt == tv) & (ll == lv) & (zz == zv)
+                            ix = np.where(m)[0]
+                            if len(ix):
+                                ne = (g['wavelength'][:].astype(float),
+                                      g['flux'][ix[0]].astype(float))
+        except Exception:
+            ne = None
+        if ne is None:
+            return self._convolve_to_R(*self._extend_rj(wave, flux, lam_max))
+        nw, nf = ne
+        good = np.isfinite(nf) & (nf > 0)
+        ext = good & (nw > wave[-1]) & (nw <= lam_max)
+        if ext.sum() < 2 or good.sum() < 2:
+            return self._convolve_to_R(*self._extend_rj(wave, flux, lam_max))
+        # Splice the NewEra tail (scaled to match at the join), then convolve the
+        # WHOLE spectrum to a single resolving power so the optical/NIR cache and
+        # the mid-IR extension share the same smoothness -- no jarring break.
+        f_splice = np.interp(wave[-1], nw[good], nf[good])
+        scale = flux[-1] / f_splice if f_splice > 0 else 1.0
+        ew = np.concatenate([wave, nw[ext]])
+        ef = np.concatenate([flux, nf[ext] * scale])
+        return self._convolve_to_R(ew, ef)
+
     def _get_raw_spectrum(self, model_key, teff, logg, z):
         """Fetch broadened spectrum for given model and stellar params.
 
@@ -518,6 +635,10 @@ class SEDPlotter:
                     if s2 is not None:
                         norm2 = (_sv(samples['rad2'], idx) / dist) ** 2
                         flx = flx + apply(ext, s2[1].copy()) * norm2 * wave
+                # Convolve each draw to the same resolution as the best-fit line
+                # (IRX view) so the posterior cloud matches its smoothness.
+                if getattr(self, 'irx', False):
+                    wave, flx = self._convolve_to_R(wave, flx)
                 ax.plot(wave, flx, color='gray', alpha=0.15, lw=0.5, zorder=-1)
 
         # Restore winning model's grid
@@ -682,11 +803,14 @@ class SEDPlotter:
 
         if show_irx:
             # The photosphere at the irx bands sets the floor. Bands beyond the
-            # grid's reach (plot-only, e.g. AKARI FIS) have a NaN model, so use
-            # nanmin and fall back to the fit-data floor if all are NaN.
+            # grid's reach (plot-only, e.g. AKARI FIS) have a NaN model, and a
+            # band the grid returns exactly 0 for (e.g. a koester column with no
+            # IRAC-4.5 coverage) must NOT drag the floor to 0 -- that collapses
+            # the log axis. Use only finite, strictly positive model values.
             _im = self.irx_model * self.irx_wave
-            if np.isfinite(_im).any():
-                ymin = float(np.nanmin(_im))
+            _pos = _im[np.isfinite(_im) & (_im > 0)]
+            if _pos.size:
+                ymin = float(_pos.min())
 
         n_filt = self.star.used_filters.sum()
         n_pars = int(len(self.theta) - n_filt)
@@ -774,7 +898,28 @@ class SEDPlotter:
             # winning model -- a bare-photosphere diamond sitting under an
             # excess point reads as a bad fit when the total is exactly what
             # the model predicts. (Scatter happens after the overlay block.)
+            #
+            # Build the photosphere part from the DISPLAYED photosphere CURVE
+            # (ph_w, ph_f) sampled at the bands, not the stored per-band model:
+            # the diamonds must sit on the same model line the eye follows, and
+            # the band grid can carry artifacts the smooth spectrum does not
+            # (a koester WD's W2 column is ~4x high and its IRAC-4.5 column is
+            # 0). Fall back to the stored per-band model where the curve does
+            # not reach.
             irx_model_display = np.asarray(self.irx_model, float).copy()
+            if ph_w is not None and ph_f is not None \
+                    and len(np.atleast_1d(ph_w)) > 1:
+                _pw = np.asarray(ph_w, float)
+                _pf = np.asarray(ph_f, float)
+                _okp = np.isfinite(_pw) & np.isfinite(_pf) & (_pf > 0)
+                if _okp.sum() > 1:
+                    with np.errstate(invalid='ignore', divide='ignore'):
+                        _ph_lf = 10 ** np.interp(
+                            np.log10(self.irx_wave), np.log10(_pw[_okp]),
+                            np.log10(_pf[_okp]), left=np.nan, right=np.nan)
+                    _ph_fl = _ph_lf / self.irx_wave   # lam*F_lam -> F_lam
+                    _usep = np.isfinite(_ph_fl)
+                    irx_model_display[_usep] = _ph_fl[_usep]
 
             # Overlay the fitted IR-excess model(s) (IRX view only). The DISK
             # component is the LS single-T blackbody (dust really is one); the
@@ -910,14 +1055,16 @@ class SEDPlotter:
                     except Exception:
                         return None
 
-                def _comp_band_flux(t2, r2):
+                def _comp_band_flux(t2, r2, ig=None):
                     """Companion band fluxes (F_lambda) at the irx bands via
                     proper grid convolution -- same source as the mean curve.
-                    NaN where the grid lacks the band (the companion is
-                    negligible there anyway, e.g. SPIRE)."""
+                    ``ig`` is the companion's OWN (cool) grid; default to the
+                    primary interpolator only as a last resort. NaN where the
+                    grid lacks the band (the companion is negligible there
+                    anyway, e.g. SPIRE)."""
                     out = np.full(len(self.irx_wave), np.nan)
                     try:
-                        ig = self.interpolator
+                        ig = ig if ig is not None else self.interpolator
                         la, _ta, fa = ig.index_columns
                         zq = float(np.asarray(fa)[int(np.argmin(np.abs(
                             np.asarray(fa) - self.theta[2])))])
@@ -951,6 +1098,44 @@ class SEDPlotter:
 
                 if show_comp:
                     comp_color = 'tab:red'
+
+                    # Start the companion curve a short lead blueward of the
+                    # first IR-excess band, so it leads INTO the excess rather
+                    # than running deep into the photosphere. Falls back to the
+                    # cross-over fraction if the star has no IRX bands.
+                    def _trim_blue(wb, cb, lead=0.8):
+                        wb = np.asarray(wb, float)
+                        cb = np.asarray(cb, float)
+                        iw = np.asarray(self.irx_wave, float)
+                        iw = iw[np.isfinite(iw) & (iw > 0)]
+                        if len(iw):
+                            w0 = lead * float(iw.min())
+                        else:
+                            ph_at = 10 ** np.interp(
+                                np.log10(wb), np.log10(ph_w),
+                                np.log10(np.maximum(ph_f, 1e-300)))
+                            sig = np.where(cb >= 0.25 * ph_at)[0]
+                            w0 = wb[sig[0]] if len(sig) else wb[0]
+                        m = wb >= w0
+                        return wb[m], cb[m]
+
+                    # Smooth the companion spectrum down a notch: the R~300 cool
+                    # cache carries deep CH4/H2O molecular bands that read as
+                    # noisy/jagged at plot scale. A boxcar in log-flux keeps the
+                    # overall shape while calming the wiggles. (The model DIAMONDS
+                    # still use the proper band-convolved fluxes, untouched.)
+                    def _smooth(f, n=15):
+                        f = np.asarray(f, float)
+                        if len(f) < n:
+                            return f
+                        try:
+                            from scipy.ndimage import uniform_filter1d
+                            lf = np.log10(np.maximum(f, 1e-300))
+                            return 10 ** uniform_filter1d(lf, size=n,
+                                                          mode='nearest')
+                        except Exception:
+                            return f
+
                     # Light-red posterior draws of the cool body: sample
                     # (Teff2, R2) per grid from the companion BMA and draw the
                     # grid curve, mirroring the gray photosphere draws.
@@ -990,13 +1175,32 @@ class SEDPlotter:
                                 continue
                             cur = _comp_curve(t2, r2, gn, _gi(gn))
                             if cur is not None:
-                                ax.plot(cur[0], cur[1], color='lightcoral',
+                                _dw, _dc = _trim_blue(cur[0], _smooth(cur[1]))
+                                ax.plot(_dw, _dc, color='lightcoral',
                                         lw=0.8, alpha=0.12, zorder=1)
-                    cur = _comp_curve(_comp['teff2'], _comp['rad2'],
-                                      self.grid, self.interpolator)
+                    # Companion display grid: the highest-weight per-grid member
+                    # that has a cool spectra cache (_COOL_GROUPS), so the curve
+                    # is a smooth R~300 model spectrum reaching the mid-IR rather
+                    # than a jagged line through the ~40 band points (which is
+                    # what self.grid=btcond falls back to -- btcond has no cool
+                    # cache group). Same grid feeds the model diamonds below.
+                    _pg = _comp.get('per_grid') or {}
+                    _cgc = sorted([(_pg[g].get('weight', 0.0), g)
+                                   for g in _pg if g in _COOL_GROUPS
+                                   and _pg[g].get('weight', 0.0) > 0],
+                                  reverse=True)
+                    _cg = _cgc[0][1] if _cgc else self.grid
+                    try:
+                        _cig = (self.interpolator if _cg == self.grid
+                                else load_grid(_cg))
+                    except Exception:
+                        _cg, _cig = self.grid, self.interpolator
+                    cur = _comp_curve(_comp['teff2'], _comp['rad2'], _cg, _cig)
                     if cur is not None:
                         wb, cb = cur
-                        ax.plot(wb, cb, ls='--', lw=1.3, color=comp_color,
+                        cb = _smooth(cb)
+                        _cw, _cc = _trim_blue(wb, cb)
+                        ax.plot(_cw, _cc, ls='--', lw=1.3, color=comp_color,
                                 alpha=0.85, zorder=2,
                                 label=(r'companion (P=%.2f): T$_2$=%.0f K, '
                                        r'R$_2$=%.2f R$_\odot$'
@@ -1004,12 +1208,24 @@ class SEDPlotter:
                                           _comp.get('rad2', np.nan))))
                         tot = _total(wb, cb)
                         if tot is not None:
-                            ax.plot(tot[0], tot[1], lw=1.75, color=comp_color,
+                            # Trim the COMBINED (star+companion) curve to the
+                            # same cross-over: blueward of it the total is
+                            # indistinguishable from the photosphere (black
+                            # line), so drawing it there paints a thick red mass
+                            # over the photosphere. Show it only where the
+                            # companion lifts the total off the star.
+                            tw = np.asarray(tot[0], float)
+                            tf = np.asarray(tot[1], float)
+                            if len(_cw):
+                                _tm = tw >= _cw[0]
+                                tw, tf = tw[_tm], tf[_tm]
+                            ax.plot(tw, tf, lw=1.75, color=comp_color,
                                     ls='-.', zorder=2,
                                     label='star + companion model')
-                    # The winner contributes to the model diamonds.
+                    # The winner contributes to the model diamonds, via the same
+                    # cool grid as the displayed curve so they stay consistent.
                     if not show_disk or p_c >= p_d:
-                        cf = _comp_band_flux(_comp['teff2'], _comp['rad2'])
+                        cf = _comp_band_flux(_comp['teff2'], _comp['rad2'], _cig)
                         ok = np.isfinite(cf)
                         irx_model_display[ok] += cf[ok]
                 if show_disk:
@@ -1052,7 +1268,12 @@ class SEDPlotter:
                                           bb['l_dust_over_lstar'])))
                 ax.legend(loc='upper right', fontsize=9, frameon=False)
 
-            # Deferred model diamonds: photosphere + winning excess model.
+            # Deferred model diamonds: photosphere + winning excess model. Open,
+            # same size as the photosphere diamonds, drawn BEHIND the data so the
+            # diamond corners frame each observed point. Every band now carries a
+            # finite model (the per-band BMA models read at init), so a diamond
+            # is drawn for every band -- the earlier "missing" diamonds were NaN
+            # models from the forced btsettl grid, not occlusion.
             ax.scatter(self.irx_wave, irx_model_display * self.irx_wave,
                        marker=self.marker_model,
                        edgecolors=self.marker_colors_model_irx,
@@ -1074,9 +1295,17 @@ class SEDPlotter:
         #              facecolor='none', lw=3, zorder=10)
 
         if show_irx:
-            irx_res = getattr(self, 'irx_sigma', None)
-            if irx_res is None:
-                irx_res = (self.irx_flux - self.irx_model) / self.irx_flux_er
+            # Residuals of the DISPLAYED total model (photosphere + winning
+            # excess = the model diamonds above), so the panel AGREES with the
+            # top panel. Using the bare-photosphere excess significance
+            # (self.irx_sigma) made a band whose total model sits on the data
+            # read as a ~50 sigma "residual", contradicting the diamonds.
+            _err = getattr(self, 'irx_band_err', None)
+            if _err is None or not np.isfinite(np.asarray(_err, float)).any():
+                _err = self.irx_flux_er
+            with np.errstate(invalid='ignore', divide='ignore'):
+                irx_res = ((self.irx_flux - irx_model_display)
+                           / np.asarray(_err, float))
             # Plot-only bands (outside the ensemble's common quantification
             # reach, e.g. while a grid's new columns await reconvolution)
             # carry no reported sigma -- but the PLOT grid does predict them
@@ -1296,8 +1525,11 @@ class SEDPlotter:
 
         elif self.grid == 'btsettl':
             cached = self._load_from_cache('btsettl')
-            if cached is not None and not self.irx:
+            if cached is not None:
                 wave, brf = cached
+                if self.irx:
+                    wave, brf = self._extend_photosphere(
+                        wave, brf, self.theta[0], self.theta[1], self.theta[2])
             else:
                 wave, flux = self.fetch_btsettl()
                 lower_lim = 0.125 < wave
@@ -1319,8 +1551,11 @@ class SEDPlotter:
 
         elif self.grid == 'btnextgen':
             cached = self._load_from_cache('btnextgen')
-            if cached is not None and not self.irx:
+            if cached is not None:
                 wave, brf = cached
+                if self.irx:
+                    wave, brf = self._extend_photosphere(
+                        wave, brf, self.theta[0], self.theta[1], self.theta[2])
             else:
                 wave, flux = self.fetch_btnextgen()
                 lower_lim = 0.125 < wave
@@ -1342,8 +1577,11 @@ class SEDPlotter:
 
         elif self.grid == 'btcond':
             cached = self._load_from_cache('btcond')
-            if cached is not None and not self.irx:
+            if cached is not None:
                 wave, brf = cached
+                if self.irx:
+                    wave, brf = self._extend_photosphere(
+                        wave, brf, self.theta[0], self.theta[1], self.theta[2])
             else:
                 wave, flux = self.fetch_btcond()
                 lower_lim = 0.125 < wave
@@ -1362,6 +1600,24 @@ class SEDPlotter:
             flx = apply(ext, brf)
             flx *= wave * norm
             ax.plot(wave, flx, lw=1.25, color=self.model_color, zorder=0)
+
+        elif self.grid == 'newera':
+            # NewEra has no external-drive fetch path; its plotting spectra live
+            # only in the cache. Drawn whenever the BMA gives the star to NewEra
+            # so the black best-fit line matches the (NewEra-weighted) gray draws.
+            cached = self._load_from_cache('newera')
+            if cached is not None:
+                wave, flux = cached
+                if self.irx:
+                    wave, flux = self._extend_photosphere(
+                        wave, flux, self.theta[0], self.theta[1], self.theta[2])
+                ext = self.av_law(wave * 1e4, Av, Rv)
+                flux = apply(ext, flux) * wave * norm
+                ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
+            else:
+                logger.warning('newera spectra not in cache; photosphere '
+                               'curve skipped')
+                wave, flux = np.array([]), np.array([])
 
         elif self.grid == 'ck04':
             cached = self._load_from_cache('ck04')
@@ -1411,6 +1667,23 @@ class SEDPlotter:
             flux = apply(ext, flux)
             flux *= wave * norm
             ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
+        elif self.grid == 'koester':
+            # WD photosphere from the koester spectra cache. Koester DA models
+            # span 0.09-3 um; redward (the IRX bands) the WD continuum is pure
+            # Rayleigh-Jeans, so _extend_rj is exact. No external models needed.
+            cached = self._load_from_cache('koester')
+            if cached is not None:
+                wave, flux = cached
+                if self.irx:
+                    wave, flux = self._extend_photosphere(
+                        wave, flux, self.theta[0], self.theta[1], self.theta[2])
+                ext = self.av_law(wave * 1e4, Av, Rv)
+                flux = apply(ext, flux) * wave * norm
+                ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
+            else:
+                logger.warning('koester spectra not in cache; WD photosphere '
+                               'curve skipped')
+                wave, flux = np.array([]), np.array([])
         if self.save:
             data = np.vstack((wave, flux)).T
             np.savetxt(f'{self.out_folder}/SED.dat', data, fmt='%s',

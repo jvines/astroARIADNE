@@ -39,6 +39,41 @@ Gaia.TIMEOUT = 60
 XMatch.TIMEOUT = 60
 Catalogs.TIMEOUT = 60
 
+
+class GaiaQueryError(RuntimeError):
+    """The core Gaia DR3 astrometry query failed (timeout/throttle), as distinct
+    from a genuinely missing source. The librarian raises this instead of
+    silently returning a distanceless star -- a throttled anonymous query drops
+    the parallax, which downstream looks like (and corrupts the fit as) a
+    no-distance source. Retry, lower the fetch concurrency, or authenticate by
+    pointing ``GAIA_CREDS`` at a credentials file.
+    """
+
+
+# Optional Gaia-archive authentication. Off by default (anonymous). Set the
+# GAIA_CREDS env var to a credentials file -- two lines: username, password --
+# and the librarian logs in once per process on the first Gaia query. An
+# authenticated session has a much higher concurrent async-job limit; it matters
+# only for batch/parallel fetching (a single-star fit never hits the anonymous
+# limit), so this stays opt-in.
+_GAIA_LOGIN_ATTEMPTED = False
+
+
+def _maybe_login_gaia():
+    """Authenticate to the Gaia archive once if GAIA_CREDS is set. Idempotent;
+    login failures are non-fatal (falls back to anonymous access)."""
+    global _GAIA_LOGIN_ATTEMPTED
+    if _GAIA_LOGIN_ATTEMPTED:
+        return
+    _GAIA_LOGIN_ATTEMPTED = True
+    creds = os.environ.get("GAIA_CREDS")
+    if creds and os.path.exists(creds):
+        try:
+            Gaia.login(credentials_file=creds)
+            logger.info("Authenticated to the Gaia archive via GAIA_CREDS")
+        except Exception as e:
+            logger.warning("Gaia login failed (%s); continuing anonymously", e)
+
 # Shared executor used by _with_timeout — avoids per-call pool spawn/teardown.
 _TIMEOUT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="librarian")
 
@@ -136,6 +171,7 @@ from ._qc import (
     _qc_sdss,
     _qc_skymapper,
     _qc_wise_band,
+    _qc_wise_blend,
     _qc_wise_extended,
 )
 
@@ -154,7 +190,7 @@ _WISE_BAND_IDX = {"WISE_RSR_W1": 0, "WISE_RSR_W2": 1,
 # search fallback, so high-PM stars (whose catalog-epoch positions sit many
 # arcsec from J2016) are still recovered. AllWISE: mission mean (MJD ~55400 =
 # 2010.56). 2MASS: survey mean (~1999.3).
-_CATALOG_EPOCH = {"2MASS": 1999.3, "Wise": 2010.56,
+_CATALOG_EPOCH = {"2MASS": 1999.3, "Wise": 2010.56, "CatWISE": 2015.4,
                   "AKARI_IRC": 2006.5, "AKARI_FIS": 2006.5, "IRAS": 1983.5,
                   "HPPSC": 2011.0, "HSPSC": 2011.0}
 
@@ -596,12 +632,24 @@ class Librarian:
         """Query Gaia DR3 for parallax, Teff, photometry, and FLAME params."""
         if self._gaia_id is None:
             return
+        _maybe_login_gaia()                          # opt-in (GAIA_CREDS)
 
         main_cats = _with_timeout(
             Vizier.query_constraints,
             catalog="I/355/gaiadr3", Source=str(self._gaia_id),
         )
-        if not main_cats or len(main_cats[0]) == 0:
+        # Distinguish a FAILED query (None from _with_timeout: timeout/throttle)
+        # from a genuinely missing source (a valid, empty result). The former
+        # must fail loudly -- silently continuing drops the parallax and yields
+        # a distanceless star that corrupts the fit. A legitimate 2-parameter
+        # source (no parallax) is NOT affected: its query succeeds, returns a
+        # row, and Plx is simply null below -> handled by norm-mode downstream.
+        if main_cats is None:
+            raise GaiaQueryError(
+                f"Gaia DR3 query for source {self._gaia_id} failed "
+                "(timeout/throttle), not a missing source. Retry, lower the "
+                "fetch concurrency, or authenticate (set GAIA_CREDS).")
+        if len(main_cats[0]) == 0:
             logger.warning("Gaia DR3 source %d not found", self._gaia_id)
             return
         main = main_cats[0][0]
@@ -897,6 +945,11 @@ class Librarian:
                 continue
             self._fetch_by_cone(cat_name, cat_def)
 
+        # CatWISE2020: fill W1/W2 ONLY where AllWISE (both shots above) found
+        # nothing -- the faint, high-PM regime AllWISE never reached.
+        if "CatWISE" not in self._ignore:
+            self._fetch_catwise()
+
         # Jy-native far-IR catalogs (IRAS, AKARI, Herschel) -> IR-excess bands.
         if "far_ir" not in self._ignore:
             self._fetch_far_ir()
@@ -1020,6 +1073,9 @@ class Librarian:
         if cat_name == "Wise" and not _qc_wise_extended(row):
             logger.info("WISE source is extended, skipping")
             return
+        if cat_name == "Wise" and not _qc_wise_blend(row):
+            logger.info("WISE source is a blend (nb>=2), skipping")
+            return
 
         for band in cat_def.bands:
             if band.pyphot in self._magnitudes:
@@ -1129,6 +1185,9 @@ class Librarian:
         if cat_name == "Wise" and not _qc_wise_extended(row):
             logger.info("WISE source is extended (cone fallback), skipping")
             return
+        if cat_name == "Wise" and not _qc_wise_blend(row):
+            logger.info("WISE source is a blend (nb>=2, cone fallback), skipping")
+            return
 
         for band in cat_def.bands:
             if band.pyphot in self._magnitudes:
@@ -1149,6 +1208,66 @@ class Librarian:
             err_f = float(err_v) if err_v is not None else 0.02
             self._add_mag(band.pyphot, float(mag_v), err_f)
         logger.info("Recovered %s via PM-propagated cone fallback", cat_name)
+
+    def _fetch_catwise(self):
+        """Fill WISE W1/W2 from CatWISE2020 where AllWISE is absent.
+
+        CatWISE2020 (VizieR II/365) reaches ~1 mag deeper than AllWISE in W1/W2
+        with motion-fit photometry -- the correct photometry for faint, high-PM
+        sources AllWISE never detected (e.g. faint white dwarfs selected on a
+        CatWISE W1-W2 excess). Cone search at the PM-propagated position
+        (CatWISE reference epoch 2015.4), nearest match; magnitude errors are
+        derived from the per-source SNR (sigma ~ 1.0857/SNR -- CatWISE has no
+        mag-error column). AllWISE takes precedence: only bands still missing
+        are filled (``_add_mag`` is idempotent). CatWISE is W1/W2 only -- no
+        W3/W4. These land on the same WISE_RSR_W1/W2 pyphot bands and route to
+        the IR-excess set downstream exactly like the AllWISE values.
+        """
+        bands = (("W1mproPM", "snrW1pm", "WISE_RSR_W1"),
+                 ("W2mproPM", "snrW2pm", "WISE_RSR_W2"))
+        if all(p in self._magnitudes for _, _, p in bands):
+            return                              # AllWISE already supplied both
+        coord = self._propagated_coord(_CATALOG_EPOCH["CatWISE"])
+        result = _with_timeout(
+            Vizier.query_region, coord,
+            radius=self._search_radius, catalog="II/365/catwise",
+        )
+        if not result:
+            logger.info("No CatWISE2020 cone data")
+            return
+        try:
+            cat = result["II/365/catwise"]
+            cat.sort("_r")
+        except (TypeError, KeyError):
+            return
+        row = cat[0]
+        # CatWISE artifact bit flag (abf): non-zero -> contaminated, skip.
+        abf = _col(row, "abf")
+        if abf is not None:
+            try:
+                if int(abf) != 0:
+                    logger.info("CatWISE source flagged (abf=%s), skipping", abf)
+                    return
+            except (TypeError, ValueError):
+                pass
+        for mcol, scol, pyphot in bands:
+            if pyphot in self._magnitudes:
+                continue
+            mag_v = _col(row, mcol)
+            snr_v = _col(row, scol)
+            if mag_v is None or snr_v is None:
+                continue
+            try:
+                snr = float(snr_v)
+            except (TypeError, ValueError):
+                continue
+            if snr < 3:                         # require a real detection
+                continue
+            err_f = 1.0857 / snr
+            if not _qc_mag(mag_v, err_f):
+                continue
+            self._add_mag(pyphot, float(mag_v), float(err_f))
+            logger.info("Filled %s from CatWISE2020 (AllWISE gap)", pyphot)
 
     def _fetch_far_ir(self):
         """Fetch the Jy-native far-IR catalogs (IRAS, AKARI, Herschel).
