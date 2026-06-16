@@ -1684,6 +1684,24 @@ class SEDPlotter:
                 logger.warning('koester spectra not in cache; WD photosphere '
                                'curve skipped')
                 wave, flux = np.array([]), np.array([])
+        else:
+            # Generic fallback for any other BMA-winnable grid (atmo, bosz,
+            # btdusty, btsettl_cool, sonora, sphinx, stagger, tlusty, ...):
+            # draw straight from its spectra-cache group with the IRX mid-IR
+            # extension. Keeps EVERY grid plottable without a bespoke branch.
+            cached = self._load_from_cache(self.grid)
+            if cached is not None:
+                wave, flux = cached
+                if self.irx:
+                    wave, flux = self._extend_photosphere(
+                        wave, flux, self.theta[0], self.theta[1], self.theta[2])
+                ext = self.av_law(wave * 1e4, Av, Rv)
+                flux = apply(ext, flux) * wave * norm
+                ax.plot(wave, flux, lw=1.25, color=self.model_color, zorder=0)
+            else:
+                logger.warning('no spectra cache for grid %r; photosphere '
+                               'curve skipped', self.grid)
+                wave, flux = np.array([]), np.array([])
         if self.save:
             data = np.vstack((wave, flux)).T
             np.savetxt(f'{self.out_folder}/SED.dat', data, fmt='%s',
