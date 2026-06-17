@@ -173,6 +173,71 @@ _MODBB_LAM0 = 210.0     # um
 # Floor the *observed* error at this fraction of the observed flux.
 _IRX_ABS_CAL_FLOOR = 0.02
 
+# Substellar companion radius ceiling (Rsun) for the IR-excess companion
+# hypothesis on a COMPACT (WD / sdB) primary. A companion detectable ONLY as IR
+# excess -- unresolved, not dominating the optical (the host still fits as a
+# clean WD) -- must be a brown dwarf or giant planet: a luminous M dwarf would
+# swamp the red optical and is the JOINT-BINARY regime, not an IR excess. ~1.5
+# R_Jup is the substellar / young-giant radius plateau (BDs and giant planets
+# pile up at ~1 R_Jup, young/inflated up to ~1.3-1.5); larger R2 is stellar and
+# physically excluded. This is a PHYSICAL prior bound. Without it the compact-
+# primary branch left R2 open to 1 Rsun, letting the companion build a luminous
+# pseudo-star out of any red residual -- the 64% WD-companion over-call, with
+# R2 railing to 0.5-0.72 Rsun. Validated WD+BD benchmarks sit well under it
+# (GD 1400 L6 ~0.10 Rsun, WD 0137-349 BD). (MS primaries cap at R1 itself.)
+_IRX_WD_R2_MAX = 0.15
+
+# Per-band significance threshold for the "detected excess" flag (n_significant,
+# has_excess >= 2 bands). 3 sigma is the conservative default that keeps the
+# single-band false-positive rate low. Lowering it captures marginal excesses
+# but raises false positives and (being a hard cut) only relocates the
+# threshold-flip instability for bands sitting near the new value.
+_IRX_SIG_THRESH = 3.0
+
+# Disk-vs-companion is broadband-DEGENERATE for a compact (WD) primary when the
+# excess is confined to the short-IR (<= W2, 4.6 um): warm circumstellar dust
+# and a cool companion are indistinguishable without a longer-wavelength band to
+# break the SED shape -- the Owens+2023 result (they needed NIR spectroscopy).
+# So a WD whose quantified excess ENDS AT W2 (reddest band <= _IRX_RESOLVE_UM)
+# is reported 'unresolved' rather than given a (coin-flip) disk/companion
+# verdict. A band redward of this (W3 12 um and beyond, also Spitzer IRAC 5.8/8)
+# breaks the degeneracy. At WISE all-sky depth only ~8% of WDs reach it, so this
+# honestly bounds the classifiable WD sample. (MS primaries are NOT gated: a
+# substellar companion can't compete with the host's brightness there, so a
+# short-IR MS excess is unambiguously a disk.)
+_IRX_RESOLVE_UM = 5.0
+
+# Far-IR confusion noise (1 sigma, mJy/beam) by pyphot band. These are MEASURED
+# instrument extragalactic confusion limits -- not tuned thresholds: a far-IR
+# point near the confusion floor carries an irreducible uncertainty its
+# catalogue error omits (the large beam is filled by unresolved background
+# sources). Added in quadrature to the observed error, this lets the Bayesian
+# evidence discount confusion-limited points CONTINUOUSLY -- no distance / SNR /
+# wavelength cut. Distance enters only implicitly (a distant source is fainter,
+# hence nearer the floor); nearby bright disks (eps Eri, eta Crv) sit far above
+# it and are untouched. Refs: SPIRE Nguyen+2010; PACS Berta+2011; MIPS Dole+2004.
+# NOTE: this is the extragalactic term only. Cirrus (position-dependent, scales
+# with the local far-IR background) is the dominant contaminant for distant
+# in-plane sources and is not yet folded in.
+_IRX_CONF_MJY = {
+    'HERSCHEL_SPIRE_PSW': 5.8, 'HERSCHEL_SPIRE_PMW': 6.3, 'HERSCHEL_SPIRE_PLW': 6.8,
+    'HERSCHEL_PACS_BLUE': 0.15, 'HERSCHEL_PACS_GREEN': 0.27, 'HERSCHEL_PACS_RED': 0.92,
+    'SPITZER_MIPS_70': 0.9, 'SPITZER_MIPS_160': 40.0,
+}
+
+
+def _irx_confusion_sigma(band, lam_um):
+    """Far-IR confusion noise for a band as internal F_lambda (erg/s/cm^2/um);
+    0 for bands without a confusion entry. Reuses the librarian's Jy->F_lambda
+    conversion so it lands in the exact internal units."""
+    c = _IRX_CONF_MJY.get(str(band))
+    if not c or not np.isfinite(lam_um) or float(lam_um) <= 0:
+        return 0.0
+    from astropy import units as u
+    return float(((c * 1e-3) * u.Jy).to(
+        u.erg / u.s / u.cm ** 2 / u.um,
+        equivalencies=u.spectral_density(float(lam_um) * u.um)).value)
+
 
 def _modbb_factor(lam_um):
     """Emission-efficiency factor of the modified blackbody at lam_um."""
@@ -577,13 +642,19 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     # degeneracy-supported, so a T dwarf at 0.09-0.10 Rsun is genuinely
     # larger than a late-M primary -- a literal R2 <= R1 against SCR 1845's
     # 0.07-0.10 Rsun primary excludes the true T6 solution and flips the
-    # verdict to "disk". Compact primaries are exempt: a BD companion to a
-    # WD (GD 1400, WD 0137-349) is genuinely LARGER than the primary, so for
-    # R1 <= 0.05 Rsun the full range stays open.
+    # verdict to "disk". Compact (WD/sdB) primaries: a BD companion is genuinely
+    # LARGER than the primary, so R2 <= R1 is wrong -- but leaving the range open
+    # to 1 Rsun (the old behaviour) let the companion build a luminous pseudo-
+    # star (R2 -> 0.5-0.72 Rsun) out of any red residual: the 64% WD-companion
+    # over-call. The physical bound is SUBSTELLAR (an IR-excess-only companion to
+    # a WD that doesn't dominate the optical must be a BD/giant planet; a
+    # luminous dM is the joint-binary regime), so cap at _IRX_WD_R2_MAX.
     r2_hi = 1.0
-    if rad_primary is not None and np.isfinite(rad_primary) \
-            and rad_primary > 0.05:
-        r2_hi = max(float(rad_primary), 0.12)
+    if rad_primary is not None and np.isfinite(rad_primary):
+        if rad_primary > 0.05:
+            r2_hi = max(float(rad_primary), 0.12)   # MS primary: cap at R1
+        else:
+            r2_hi = _IRX_WD_R2_MAX                   # compact: substellar ceiling
     R2g = np.geomspace(0.03, r2_hi, 64)
     t_hi_max = float(teff_primary) if teff_primary else 6000.0
     # --- Joint primary marginalisation (de-biases the companion Teff2) ---
@@ -3071,6 +3142,12 @@ class Fitter:
             # forming the significance (see _IRX_ABS_CAL_FLOOR): the raw
             # catalogue error can be unphysically small for bright IR points.
             obs_e_eff = max(float(fe), _IRX_ABS_CAL_FLOOR * float(fo))
+            # Add the far-IR confusion noise (see _IRX_CONF_MJY): the catalogue
+            # error omits the unresolved background filling a large far-IR beam,
+            # so a confusion-limited point would otherwise look spuriously
+            # significant and could drive a false cold (2-T) component.
+            obs_e_eff = float(np.hypot(obs_e_eff,
+                                       _irx_confusion_sigma(f, float(wv))))
             denom = float(np.hypot(obs_e_eff, model_err))
             sigma = excess / denom if denom > 0 else float('nan')
             result[f] = dict(wave=float(wv), obs=float(fo), obs_err=float(fe),
@@ -3079,7 +3156,7 @@ class Fitter:
                              sigma=sigma, quantified=True)
         q = {k: v for k, v in result.items() if v['quantified']}
         sig = sorted(k for k, v in q.items()
-                     if np.isfinite(v['sigma']) and v['sigma'] >= 3)
+                     if np.isfinite(v['sigma']) and v['sigma'] >= _IRX_SIG_THRESH)
         # Aggregate deviation from the photosphere across the IR bands.
         chi2 = float(np.nansum(
             [v['sigma'] ** 2 for v in q.values() if np.isfinite(v['sigma'])]))
@@ -3145,6 +3222,42 @@ class Fitter:
                 prim_ig=interps.get(gname), logg_primary=bf.get('logg'),
                 teff_primary_err=unc.get('teff'), rad_primary_err=unc.get('rad'),
                 exc_obs=[v['obs'] for v in q.values()], **fkw) or {}
+            # Compact-primary composite demotion: a companion whose radius RAILS
+            # at the substellar cap (_IRX_WD_R2_MAX) is too luminous to be a
+            # brown dwarf -- it is a luminous (dM) companion (the joint-binary
+            # regime) or a blend/contaminant, NOT a clean IR-excess substellar
+            # companion. Relabel it 'composite' so it leaves the companion
+            # sample (the WD over-call: R2 pinned at the cap). A genuine BD/L/T
+            # companion (e.g. GD 1400, R2 ~ 0.08) sits well below the cap and is
+            # untouched; MS primaries (cap = R1) never reach this branch.
+            _rp = bf.get('rad')
+            if (ms.get('excess_class') == 'companion' and _rp is not None
+                    and np.isfinite(float(_rp)) and float(_rp) <= 0.05):
+                _r2 = (ms.get('companion') or {}).get('rad2')
+                if (_r2 is not None and np.isfinite(float(_r2))
+                        and float(_r2) >= 0.95 * _IRX_WD_R2_MAX):
+                    ms = dict(ms)
+                    ms['excess_class'] = 'composite'
+                    ms['composite_reason'] = (
+                        'companion R2 railed at the substellar cap '
+                        '(%.3f Rsun): excess too luminous for a brown dwarf -- '
+                        'luminous (dM) companion or blend, not a clean IR-excess '
+                        'substellar companion' % float(_r2))
+            # Compact-primary degeneracy gate (see _IRX_RESOLVE_UM): a WD whose
+            # quantified excess ends at W2 cannot be classified disk-vs-companion
+            # in broadband -- report 'unresolved' instead of a coin-flip verdict.
+            if (ms.get('excess_class') in ('companion', 'disk', 'disk2',
+                                           'composite')
+                    and _rp is not None and np.isfinite(float(_rp))
+                    and float(_rp) <= 0.05):
+                _reddest = max((v['wave'] for v in q.values()), default=0.0)
+                if float(_reddest) <= _IRX_RESOLVE_UM:
+                    ms = dict(ms)
+                    ms['excess_class'] = 'unresolved'
+                    ms['unresolved_reason'] = (
+                        'excess confined to <= W2 (reddest quantified band '
+                        '%.1f um): disk vs companion is broadband-degenerate '
+                        'without a W3+ band' % float(_reddest))
         # Least-squares single-temperature blackbody fit to the measured
         # excess. This is the curve used by the SED+IRX model overlay: it
         # threads the excess by construction, whereas the evidence-marginalized

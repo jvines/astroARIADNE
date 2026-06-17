@@ -802,15 +802,17 @@ class SEDPlotter:
         ymax = (self.flux * self.wave).max()
 
         if show_irx:
-            # The photosphere at the irx bands sets the floor. Bands beyond the
-            # grid's reach (plot-only, e.g. AKARI FIS) have a NaN model, and a
-            # band the grid returns exactly 0 for (e.g. a koester column with no
-            # IRAC-4.5 coverage) must NOT drag the floor to 0 -- that collapses
-            # the log axis. Use only finite, strictly positive model values.
-            _im = self.irx_model * self.irx_wave
-            _pos = _im[np.isfinite(_im) & (_im > 0)]
-            if _pos.size:
-                ymin = float(_pos.min())
+            # Scale the y-range to the DATA, including the IR excess points --
+            # NOT the declining photosphere model at the irx bands, which (for a
+            # WD especially) plunges far below the data and leaves a swathe of
+            # empty axis with the points crammed at the top. Use the finite,
+            # strictly positive lambda*F_lambda of the irx bands (a NaN or
+            # exactly-0 model band must not collapse the log axis).
+            _ird = np.asarray(self.irx_flux, float) * np.asarray(self.irx_wave, float)
+            _ird = _ird[np.isfinite(_ird) & (_ird > 0)]
+            if _ird.size:
+                ymin = min(float(ymin), float(_ird.min()))
+                ymax = max(float(ymax), float(_ird.max()))
 
         n_filt = self.star.used_filters.sum()
         n_pars = int(len(self.theta) - n_filt)
