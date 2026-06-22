@@ -289,7 +289,7 @@ def _band_support(band):
     """(lo_A, hi_A) where the GALEX transmission exceeds T_FRAC of its peak."""
     from ..phot_utils import _get_filter
     filt = _get_filter(band)
-    wl = filt.wavelength.to('AA').magnitude
+    wl = filt.wavelength.to('AA').value
     tr = np.asarray(filt.transmit, float)
     on = wl[tr > T_FRAC * tr.max()]
     return float(on.min()), float(on.max())
@@ -320,7 +320,8 @@ def synth_galex(wave, flux, err, n_mc=256, seed=0):
     flux error is propagated by Monte-Carlo through the same convolution and
     added in quadrature with the 5% INES absolute-calibration floor.
     """
-    from pyphot import unit as U
+    import astropy.units as u
+    _flam = u.erg / u.s / u.cm ** 2 / u.AA
     from ..phot_utils import _get_filter
     wave = np.asarray(wave, float)
     flux = np.asarray(flux, float)
@@ -338,14 +339,14 @@ def synth_galex(wave, flux, err, n_mc=256, seed=0):
         order = np.argsort(w)
         w, f, e = w[order], f[order], e[order]
         filt = _get_filter(band)
-        abzf = filt.AB_zero_flux.to('erg/s/cm**2/AA').magnitude
-        f_band = filt.get_flux(w * U['AA'],
-                               f * U['erg/s/cm**2/AA']).magnitude
+        abzf = filt.AB_zero_flux.to('erg/s/cm**2/AA').value
+        f_band = filt.get_flux(w * u.AA,
+                               f * _flam).value
         if not (np.isfinite(f_band) and f_band > 0):
             continue
         draws = f[None, :] + e[None, :] * rng.standard_normal((n_mc, f.size))
-        fb = np.array([filt.get_flux(w * U['AA'],
-                                     d * U['erg/s/cm**2/AA']).magnitude
+        fb = np.array([filt.get_flux(w * u.AA,
+                                     d * _flam).value
                        for d in draws])
         sig_f = float(np.nanstd(fb))
         frac = float(np.hypot(sig_f / f_band, ABS_CAL_FLOOR))

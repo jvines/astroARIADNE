@@ -44,7 +44,7 @@ setup(
         "matplotlib>=3.10.0",
         "termcolor>=2.5.0",
         "extinction>=0.4.7",
-        "pyphot>=1.6.0",
+        "pyphot>=2.1.0",
         "dustmaps>=1.0.13",
         "dynesty>=2.1.0",
         "corner>=2.2.3",

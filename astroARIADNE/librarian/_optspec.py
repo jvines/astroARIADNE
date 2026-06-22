@@ -217,7 +217,7 @@ def fetch_boss(ra, dec, radius_arcsec=2.0, source_id=None):
 # --------------------------------------------------------------------------- #
 def _band_support(filt, frac=_SUPPORT_FRAC):
     """(lo_AA, hi_AA) where the filter transmission exceeds ``frac * peak``."""
-    wl = filt.wavelength.to('AA').magnitude
+    wl = filt.wavelength.to('AA').value
     tr = np.asarray(filt.transmit, float)
     on = wl[tr > frac * tr.max()]
     return float(on.min()), float(on.max())
@@ -263,7 +263,7 @@ def synth_phot(wave_AA, flux, ivar, band_names):
         quality cuts. ``mag_err`` is the formal propagated error added in
         quadrature to ``_CAL_FLOOR``.
     """
-    from pyphot.ezunits import unit
+    import astropy.units as u
     from ..phot_utils import _get_filter, flux_to_mag
 
     wave = np.asarray(wave_AA, float)
@@ -301,15 +301,16 @@ def synth_phot(wave_AA, flux, ivar, band_names):
             continue
 
         # Central value: pyphot's exact photon/energy-weighted mean f_lambda.
-        val = filt.get_flux(wave * unit['AA'], phys * unit['flam'])
-        f_aa = float(getattr(val, 'magnitude', getattr(val, 'value', val)))
+        val = filt.get_flux(wave * u.AA,
+                            phys * (u.erg / u.s / u.cm ** 2 / u.AA))
+        f_aa = float(getattr(val, 'value', val))
         if not (np.isfinite(f_aa) and f_aa > 0):
             continue
 
         # Error: propagate the per-pixel variance through the SAME weighting
         # pyphot used (reinterp the passband onto the in-band grid).
         x = wave[inb]
-        pb = filt.reinterp(x * unit['AA'])
+        pb = filt.reinterp(x * u.AA)
         t = np.asarray(pb.transmit, float)
         g = (x * t) if 'photon' in filt.dtype else t
         w = _trapz_weights(x)

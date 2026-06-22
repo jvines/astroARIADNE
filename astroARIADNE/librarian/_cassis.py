@@ -294,11 +294,11 @@ def _vega_zero_flux(name, lo_um, hi_um):
     filt = _CUSTOM_LIB.get(name)
     if filt is None:
         import pyphot
-        from pyphot.ezunits import unit
+        import astropy.units as u
         lo, hi = lo_um * 1e4, hi_um * 1e4        # Angstrom, as build_custom_filters
         wl = np.linspace(lo * 0.98, hi * 1.02, 300)
         tr = ((wl >= lo) & (wl <= hi)).astype(float)
-        filt = pyphot.Filter(wl * unit['AA'], tr, name=name,
+        filt = pyphot.Filter(wl * u.AA, tr, name=name,
                              dtype='energy', unit='Angstrom')
     zp = filt.Vega_zero_flux.to('erg/(um * cm ** 2 * s)').value
     _ZP_CACHE[name] = zp

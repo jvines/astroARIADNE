@@ -49,7 +49,7 @@ def _superband_windows():
     for name, filt in _CUSTOM_LIB.items():
         if not name.startswith('SPHEREX_') or name in WITHHELD:
             continue
-        wl = filt.wavelength.to('um').magnitude
+        wl = filt.wavelength.to('um').value
         tr = np.asarray(filt.transmit, float)
         on = wl[tr > 0.5]
         out[name] = (float(on.min()), float(on.max()))

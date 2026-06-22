@@ -27,7 +27,6 @@ def _load_custom_filters():
     absent so the library degrades to the pyphot default instead of failing.
     """
     import h5py
-    from pyphot.ezunits import unit
     out = {}
     if not os.path.isfile(custom_filters_path):
         return out
@@ -39,7 +38,7 @@ def _load_custom_filters():
             dt = dt.decode() if isinstance(dt, bytes) else dt
             un = un.decode() if isinstance(un, bytes) else un
             out[name] = pyphot.Filter(
-                np.asarray(g['wavelength'][:], float) * unit['AA'],
+                np.asarray(g['wavelength'][:], float) * u.AA,
                 np.asarray(g['transmission'][:], float),
                 name=name, dtype=dt, unit=un)
     return out
