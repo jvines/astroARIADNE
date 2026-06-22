@@ -60,4 +60,9 @@ packages = ["astroARIADNE", "astroARIADNE.librarian"]
 astroARIADNE = ["Datafiles/**/*"]
 
 [tool.setuptools.exclude-package-data]
-astroARIADNE = ["Datafiles/spectra_cache.h5"]
+astroARIADNE = [
+    "Datafiles/spectra_cache.h5",
+    "Datafiles/spectra_cache.h5.*",
+    "Datafiles/model_grids/*.h5.*",
+    "Datafiles/.DS_Store",
+]

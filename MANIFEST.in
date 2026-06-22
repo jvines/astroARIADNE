@@ -1,2 +1,8 @@
 include LICENSE README.md astroARIADNE/Datafiles/*.dat astroARIADNE/Datafiles/model_grids/* astroARIADNE/Datafiles/prior/*
 exclude astroARIADNE/Datafiles/spectra_cache.h5
+# Never ship rebuild backups or scratch: only the bare model_grids/Name.h5 are
+# real grids; the *.h5.<tag> files are pre-operation snapshots, and the spectra
+# cache is distributed via Zenodo.
+recursive-exclude astroARIADNE/Datafiles/model_grids *.h5.*
+recursive-exclude astroARIADNE/Datafiles spectra_cache.h5.*
+global-exclude .DS_Store
