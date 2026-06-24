@@ -3,6 +3,9 @@ chains/
 outs/
 notebooks/
 
+# Local IR-excess experiment output (plots, injection-recovery, catalogs); not source.
+IRX_experiment/
+
 # spectra_cache: 2.8 GB continuous-spectrum cache, distributed via Zenodo
 # (fetched to Datafiles/ at runtime), never committed.
 astroARIADNE/Datafiles/spectra_cache.h5
