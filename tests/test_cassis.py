@@ -92,12 +92,12 @@ def test_vega_zp_onthefly_matches_library_construction():
     identical before and after build_custom_filters adds IRS_* to the library.
     """
     import pyphot
-    from pyphot.ezunits import unit
+    import astropy.units as u
     lo, hi = IRS_TOPHATS['IRS_18000']
     a, b = lo * 1e4, hi * 1e4
     wl = np.linspace(a * 0.98, b * 1.02, 300)
     tr = ((wl >= a) & (wl <= b)).astype(float)
-    filt = pyphot.Filter(wl * unit['AA'], tr, name='IRS_18000',
+    filt = pyphot.Filter(wl * u.AA, tr, name='IRS_18000',
                          dtype='energy', unit='Angstrom')
     lib_zp = filt.Vega_zero_flux.to('erg/(um * cm ** 2 * s)').value
     _cassis._ZP_CACHE.pop('IRS_18000', None)

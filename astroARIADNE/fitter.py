@@ -2177,14 +2177,14 @@ class Fitter:
                     idx = np.where(k == order)[0]
                     self.coordinator[idx] = 1
                     self.fixed[idx] = value
-                    prior_out += k + '\tfixed\t{}\n'.format(value)
+                    prior_out += k + f'\tfixed\t{value}\n'
                     if hasattr(self, 'prior_sources'):
                         self.prior_sources[k] = 'user_fixed'
                 if prior == 'normal':
                     mu = self.prior_setup[k][1]
                     sig = self.prior_setup[k][2]
                     prior_dict[k] = st.norm(loc=mu, scale=sig)
-                    prior_out += k + '\tnormal\t{}\t{}\n'.format(mu, sig)
+                    prior_out += k + f'\tnormal\t{mu}\t{sig}\n'
                     if hasattr(self, 'prior_sources'):
                         self.prior_sources[k] = 'user_normal'
                 if prior == 'truncnorm':
@@ -2195,15 +2195,14 @@ class Fitter:
                     b, a = (up - mu) / sig, (low - mu) / sig
                     prior_dict[k] = st.truncnorm(a=a, b=b, loc=mu, scale=sig)
                     prior_out += k
-                    prior_out += '\ttruncatednormal\t{}\t{}\t{}\t{}\n'.format(
-                        mu, sig, low, up)
+                    prior_out += f'\ttruncatednormal\t{mu}\t{sig}\t{low}\t{up}\n'
                     if hasattr(self, 'prior_sources'):
                         self.prior_sources[k] = 'user_truncnorm'
                 if prior == 'uniform':
                     low = self.prior_setup[k][1]
                     up = self.prior_setup[k][2]
                     prior_dict[k] = st.uniform(loc=low, scale=up - low)
-                    prior_out += k + '\tuniform\t{}\t{}\n'.format(low, up)
+                    prior_out += k + f'\tuniform\t{low}\t{up}\n'
                     if hasattr(self, 'prior_sources'):
                         self.prior_sources[k] = 'user_uniform'
         for par in noise:
@@ -2498,8 +2497,8 @@ class Fitter:
             # near-identical band edges); Teff gating happens in initialize().
             self.models = [g for g in candidates
                            if reaches[g] >= 0.98 * deepest]
-        sel = ', '.join('%s(%.0fum)' % (g, reaches[g]) for g in self.models)
-        print(colored('\t\t*** IRX ensemble: %s ***' % sel, 'cyan'))
+        sel = ', '.join(f'{g}({reaches[g]:.0f}um)' for g in self.models)
+        print(colored(f'\t\t*** IRX ensemble: {sel} ***', 'cyan'))
         if self._norm:
             # Explicit degradation notice: without a physical distance the
             # excess can be detected but not characterized.
@@ -2551,7 +2550,7 @@ class Fitter:
         # above (e.g. btnextgen/btcond drop out for any star above 4000 K).
         if list(self._grids) != list(self.models):
             print(colored('\t\t*** IRX ensemble after Teff gate / coverage '
-                          'guard: %s ***' % ', '.join(self._grids), 'cyan'))
+                          f'guard: {", ".join(self._grids)} ***', 'cyan'))
         self.fit_bma()
 
     # Fit bands that fit_irx(route_mid_ir=True) re-routes to the excess set:
@@ -3662,10 +3661,34 @@ class Fitter:
         evidences = []
         post_samples = []
         model_posteriors = []
-        # Read and extract model posterior information.
-        for o in outputs:
-            with open(o, 'rb') as f:
-                model_posteriors.append(pickle.load(f))
+        # Read each grid's posterior. A grid whose fit never completed leaves no
+        # ``<grid>_out.pkl``; collect those as failures instead of letting a bare
+        # FileNotFoundError (an internal path) surface to the user.
+        failed = []
+        for o, g in zip(outputs, grids):
+            try:
+                with open(o, 'rb') as f:
+                    model_posteriors.append(pickle.load(f))
+            except (FileNotFoundError, EOFError, pickle.UnpicklingError):
+                failed.append(g)
+        # Nothing to average -> report what happened and how to fix it, rather
+        # than crashing downstream on an empty-array reduction (the opaque
+        # "zero-size array to reduction operation minimum which has no identity").
+        if not model_posteriors:
+            grid_list = ', '.join(map(str, grids))
+            raise RuntimeError(
+                f'Bayesian Model Averaging has no models to average: none of '
+                f'the {len(grids)} grid(s) ({grid_list}) produced a completed '
+                f'fit. Every grid was skipped or failed before writing a '
+                f'result. Check the per-grid messages above, make sure the '
+                f'star has enough photometry the grids can synthesise (BMA '
+                f'needs ~6+ in-coverage bands), and that `Fitter.bma = True` '
+                f'was set before `initialize()`.')
+        if failed:
+            failed_list = ', '.join(map(str, failed))
+            print(colored(
+                f'\t\t\tWARNING: {len(failed)} grid(s) produced no fit and are '
+                f'excluded from the average: {failed_list}', 'yellow'))
         # Extract the evidences of each model.
         for o in model_posteriors:
             evidences.append(o['global_lnZ'])

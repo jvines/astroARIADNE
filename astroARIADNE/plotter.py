@@ -1825,7 +1825,7 @@ class SEDPlotter:
                     # Get samples
                     samp = self.out['originals'][m][param]
                     # Plot sample histogram
-                    label = m + ' prob: {:.3f}'.format(self.out['weights'][m])
+                    label = m + f" prob: {self.out['weights'][m]:.3f}"
                     # Normal
                     n, bins1, patches = ax1.hist(samp, alpha=.3, bins=20,
                                                  label=label, density=True,
@@ -2447,7 +2447,7 @@ class SEDPlotter:
         if sel_z > 0:
             metal_add = 'p' + str(sel_z).replace('.', '')
         name = 'ck' + metal_add
-        lgg = 'g{:02.0f}'.format(sel_logg * 10)
+        lgg = f'g{sel_logg * 10:02.0f}'
         selected_SED = self.moddir + 'Castelli_Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
@@ -2487,7 +2487,7 @@ class SEDPlotter:
         if sel_z > 0:
             metal_add = 'p' + str(sel_z).replace('.', '')
         name = 'k' + metal_add
-        lgg = 'g{:02.0f}'.format(sel_logg * 10)
+        lgg = f'g{sel_logg * 10:02.0f}'
         selected_SED = self.moddir + 'Kurucz/' + name + '/' + name
         selected_SED += '_' + str(sel_teff) + '.fits'
         tab = Table(fits.open(selected_SED)[1].data)
@@ -2514,14 +2514,14 @@ class SEDPlotter:
         sel_teff = int(np.unique(self.star.teff)[select_teff])
         sel_logg = np.unique(self.star.logg)[select_logg]
         sel_z = np.unique(self.star.z)[select_z]
-        sel_teff = str(sel_teff) if sel_teff >= 1e5 else '0{}'.format(sel_teff)
+        sel_teff = str(sel_teff) if sel_teff >= 1e5 else f'0{sel_teff}'
         selected_SED = self.moddir + 'Coelho14/t' + sel_teff + '_g'
-        sel_logg = '+{:.1f}'.format(sel_logg) if sel_logg > 0 else '-0.5'
+        sel_logg = f'+{sel_logg:.1f}' if sel_logg > 0 else '-0.5'
         selected_SED += sel_logg
         if sel_z < 0:
-            selected_SED += '_m{:02.0f}'.format(-sel_z * 10)
+            selected_SED += f'_m{-sel_z * 10:02.0f}'
         else:
-            selected_SED += '_p{:02.0f}'.format(sel_z * 10)
+            selected_SED += f'_p{sel_z * 10:02.0f}'
 
         selected_SED = glob.glob(selected_SED + 'p0[04]_sed.fits')
         selected_SED = selected_SED[0]
@@ -2556,18 +2556,18 @@ class SEDPlotter:
             if param == 'inflation':
                 new_titles[i] = r'$\sigma$ ='
             if param == 'rad' or param == 'dist':
-                new_titles[i] += '{:.3f}'.format(theta[i])
+                new_titles[i] += f'{theta[i]:.3f}'
                 new_titles[i] += r'$^{+' + \
-                                 '{:.3f}'.format(theta_up[i] - theta[i])
+                                 f'{theta_up[i] - theta[i]:.3f}'
                 new_titles[i] += r'}_{-' + \
-                                 '{:.3f}'.format(theta[i] - theta_lo[i])
+                                 f'{theta[i] - theta_lo[i]:.3f}'
                 new_titles[i] += r'}$'
             else:
-                new_titles[i] += '{:.2f}'.format(theta[i])
+                new_titles[i] += f'{theta[i]:.2f}'
                 new_titles[i] += r'$^{+' + \
-                                 '{:.2f}'.format(theta_up[i] - theta[i])
+                                 f'{theta_up[i] - theta[i]:.2f}'
                 new_titles[i] += r'}_{-' + \
-                                 '{:.2f}'.format(theta[i] - theta_lo[i])
+                                 f'{theta[i] - theta_lo[i]:.2f}'
                 new_titles[i] += r'}$'
         return new_titles
 

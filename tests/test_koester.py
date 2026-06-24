@@ -28,16 +28,20 @@ BASE_BANDS = set(filter_names) - set(irx_bands)
 
 
 def test_grid_schema_and_degenerate_z():
-    """HDF5 cube is (logg, teff, feh) with a length-1 feh axis and the standard
-    43-band set; fully rectilinear (82x13x1) so no NaNs."""
+    """HDF5 cube is (logg, teff, feh) with a length-1 (degenerate) feh axis.
+    Koester carries the full uniform band schema, but as a ~3 um WD grid it
+    reaches no mid-IR band, so every IRS (far-IR) column is entirely NaN while
+    the photosphere axes stay rectilinear (82 teff x 13 logg x 1 feh)."""
     k = load_grid('koester')
     lg, tf, fe = k.index_columns
-    # Koester (3 um WD) gains no IR band, so it carries exactly the base set.
-    assert set(k.column_index) == BASE_BANDS
+    cols = list(map(str, k.column_index))
+    assert BASE_BANDS <= set(cols)                 # carries the base set...
     assert len(fe) == 1 and float(fe[0]) == 0.0
     assert len(lg) == 13 and len(tf) == 82
-    assert k.grid.shape == (13, 82, 1, 43)
-    assert not np.isnan(k.grid).any()
+    assert k.grid.shape == (13, 82, 1, len(cols))
+    # ...but reaches no mid-IR (IRS) band -> those columns are entirely NaN.
+    irs_idx = [i for i, b in enumerate(cols) if b.startswith('IRS')]
+    assert irs_idx and np.isnan(np.asarray(k.grid)[..., irs_idx]).all()
 
 
 def test_interpolation_finite_with_pinned_z():

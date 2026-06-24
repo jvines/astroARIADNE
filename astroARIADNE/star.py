@@ -703,7 +703,7 @@ class Star:
             print(colored('\t\t\tEstimated log g : ', c), end='')
             print(
                 colored(
-                    '{:.3f} +/- {:.3f}'.format(self.logg, self.logg_e), c)
+                    f'{self.logg:.3f} +/- {self.logg_e:.3f}', c)
             )
 
     def add_mag(self, mag, err, filt):

@@ -98,7 +98,7 @@ def _qc_wise_band(row, band_idx):
         c = ccf[band_idx]
         if c != "0" and (c.isupper() or _WISE_CCF_STRICT):
             return False
-    sat = _col(row, "sat%d" % (band_idx + 1))
+    sat = _col(row, f"sat{band_idx + 1}")
     if sat is not None:
         try:
             if float(sat) > _WISE_SAT_MAX:
