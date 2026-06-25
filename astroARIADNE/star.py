@@ -185,6 +185,9 @@ class Star:
         lookup = self.get_rad + self.get_temp + self.get_plx \
             + self.get_mags + self.get_dist
 
+        # Gaia DR3 RUWE (astrometric-fit quality flag): set by the librarian
+        # lookup below or restored by from_nc; None otherwise.
+        self.ruwe = None
         if lookup:
             if not offline:
                 if verbose:
@@ -205,6 +208,7 @@ class Star:
                 # Spectro-photometric provenance (XP fills; later SPHEREx) --
                 # consumed by Fitter.spectra = False to drop these bands.
                 self.xp_filled = list(adapted.xp_filled)
+                self.ruwe = adapted.ruwe
             else:
                 print(
                     colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)
@@ -559,7 +563,7 @@ class Star:
         f.format_version = '1'
         f.starname = str(self.starname)
         for a in ('ra', 'dec', 'plx', 'plx_e', 'dist', 'dist_e', 'rad', 'rad_e',
-                  'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e'):
+                  'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e', 'ruwe'):
             setattr(f, a, _f(getattr(self, a, None)))
         f.ids = json.dumps({'g_id': self.g_id, 'tic': getattr(self, 'tic', None),
                             'kic': getattr(self, 'kic', None)})
@@ -612,7 +616,7 @@ class Star:
         errs = np.asarray(g.variables['mag_err'][:], float)
         meta = {a: _fa(a) for a in
                 ('ra', 'dec', 'plx', 'plx_e', 'dist', 'dist_e', 'rad', 'rad_e',
-                 'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e')}
+                 'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e', 'ruwe')}
         starname = _attr('starname')
         ids = json.loads(_attr('ids', '{}'))
         spec = json.loads(_attr('spectroscopic_params', 'null'))
@@ -636,6 +640,7 @@ class Star:
                    Av=meta['Av'], Av_e=meta['Av_e'], verbose=verbose)
         star.plx, star.plx_e = meta['plx'], meta['plx_e']
         star.dist, star.dist_e = meta['dist'], meta['dist_e']
+        star.ruwe = meta['ruwe']
         star.Av_e = meta['Av_e']
         star.tic = ids.get('tic')
         star.kic = ids.get('kic')

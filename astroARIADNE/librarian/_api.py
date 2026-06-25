@@ -400,6 +400,11 @@ _FAR_IR_CATALOGS = {
 
 _PLX_ZEROPOINT = 0.037  # Lindegren+21 parallax zero-point (mas)
 _PLX_SYS_ERR = 0.02  # systematic floor (mas), added in quadrature
+# RUWE (Renormalised Unit Weight Error) above which the Gaia single-star
+# astrometric solution is considered a poor fit -- the community-standard
+# unresolved-binary / perturbed-astrometry flag (Lindegren 2018). Above it the
+# parallax (and the SED distance/radius derived from it) is unreliable.
+_RUWE_BINARITY_THRESH = 1.4
 
 
 # ── Librarian ────────────────────────────────────────────────────
@@ -465,6 +470,7 @@ class Librarian:
         self._ids: dict[str, str | int | None] = {}
         self._parallax: float | None = None
         self._parallax_e: float | None = None
+        self._ruwe: float | None = None
         # Gaia proper motion + reference epoch, for PM-propagating the search
         # position to a catalog's epoch (high-PM crossmatch recovery).
         self._pmra: float | None = None
@@ -674,6 +680,24 @@ class Librarian:
             self._parallax = float(plx) + _PLX_ZEROPOINT
             if plx_e is not None:
                 self._parallax_e = np.sqrt(float(plx_e) ** 2 + _PLX_SYS_ERR**2)
+
+        # RUWE -- the Gaia astrometric-fit quality flag. Not carried by the
+        # VizieR I/355/gaiadr3 table, so read it straight from
+        # gaiadr3.gaia_source via the Gaia TAP. A high value is surfaced to the
+        # user in the parameter display (see _RUWE_BINARITY_THRESH): it almost
+        # always means an unresolved companion / perturbed astrometry, so the
+        # parallax (hence distance and radius) is unreliable.
+        ruwe_res = _with_timeout(lambda: Gaia.launch_job(
+            "SELECT ruwe FROM gaiadr3.gaia_source "
+            f"WHERE source_id = {int(self._gaia_id)}").get_results())
+        if ruwe_res is not None and len(ruwe_res) > 0:
+            rv = ruwe_res["ruwe"][0]
+            try:
+                if rv is not None and not np.ma.is_masked(rv) \
+                        and np.isfinite(float(rv)):
+                    self._ruwe = float(rv)
+            except (TypeError, ValueError):
+                pass
 
         # Gaia GSP-Phot Teff is intentionally NOT extracted as a likelihood
         # prior. The photometric SED already constrains Teff via BC tables;
@@ -2536,6 +2560,17 @@ class Librarian:
         if self._distance is not None:
             print(colored(f"{t3}Bailer-Jones distance : ", c), end='')
             print(colored(f"{self._distance:.3f} +/- {self._distance_e:.3f}", c))
+        if self._ruwe is not None:
+            print(colored(f"{t3}Gaia RUWE : ", c), end='')
+            print(colored(f"{self._ruwe:.3f}", c))
+            if self._ruwe > _RUWE_BINARITY_THRESH:
+                print(colored(
+                    f"{t3}*** WARNING: RUWE = {self._ruwe:.2f} > "
+                    f"{_RUWE_BINARITY_THRESH}: the Gaia single-star astrometric "
+                    f"solution fits poorly -- almost always an unresolved "
+                    f"companion or perturbed astrometry. The parallax (and the "
+                    f"SED distance and radius derived from it) is unreliable; "
+                    f"this star may be an unresolved binary. ***", "yellow"))
         if hasattr(self, 'Av') and self.Av is not None:
             print(colored(f"{t3}Maximum Av : ", c), end='')
             print(colored(f"{self.Av:.3f}", c))
@@ -2550,6 +2585,13 @@ class Librarian:
         if self._parallax is None:
             return None
         return (self._parallax, self._parallax_e)
+
+    @property
+    def ruwe(self) -> float | None:
+        """Gaia DR3 RUWE (Renormalised Unit Weight Error). Above
+        ``_RUWE_BINARITY_THRESH`` (1.4) the single-star astrometric solution
+        fits poorly -- typically an unresolved binary or perturbed astrometry."""
+        return self._ruwe
 
     @property
     def teff(self) -> tuple[float, float] | None:

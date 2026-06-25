@@ -102,6 +102,8 @@ class AdaptedStar:
     # SPHEREx) rather than catalog measurements -- lets the Fitter drop them
     # when ``Fitter.spectra = False``.
     xp_filled: tuple = ()
+    # Gaia DR3 RUWE (astrometric-fit quality); None when offline/unavailable.
+    ruwe: float | None = None
 
 
 def _scalar(pair, missing):
@@ -175,4 +177,5 @@ def adapt_librarian(lib) -> AdaptedStar:
         spectroscopic_params=lib.spectroscopic_params,
         xp_filled=tuple(b for b in (getattr(lib, '_xp_filled', ()) or ())
                         if b in ariadne_mags),
+        ruwe=getattr(lib, 'ruwe', None),
     )
