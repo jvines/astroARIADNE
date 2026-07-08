@@ -864,10 +864,13 @@ class SEDPlotter:
         ph_w = ph_f = None
         for _ln in ax.get_lines():
             _yd = np.asarray(_ln.get_ydata())
-            if len(_yd):
+            # Frame the upper y-limit on the solid best-fit model line (and the
+            # data baseline above), NOT the gray posterior draws: a few high
+            # draws would otherwise inflate ymax and cram the SED into the
+            # bottom of the panel.
+            if len(_yd) and _ln.get_color() == self.model_color:
                 ymax = max(ymax, float(np.nanmax(_yd)))
-                if (_ln.get_color() == self.model_color
-                        and (ph_f is None or len(_yd) > len(ph_f))):
+                if ph_f is None or len(_yd) > len(ph_f):
                     ph_w, ph_f = np.asarray(_ln.get_xdata()), _yd
 
         # Model plot
@@ -1241,10 +1244,21 @@ class SEDPlotter:
                     # clean disk keeps the established red styling.
                     disk_color = 'seagreen' if both else 'tab:red'
                     d_ls, t_ls = (':', '--') if both else ('--', '-.')
-                    md = ph_w >= 0.95
-                    ax.plot(ph_w[md], ph_f[md] + _diskbb(ph_w[md]), lw=1.75,
-                            color=disk_color, ls=t_ls, zorder=2,
-                            label='star + disk model')
+                    # Trim the combined star+disk curve to start just blueward
+                    # of the bluest IR-excess band, so it spans every irx band
+                    # (a little before the first one) and no further. Blueward
+                    # of there diskbb << photosphere, so the total equals the
+                    # black photosphere line and drawing it would just paint a
+                    # thick disk-coloured mass over it. Same 0.8x lead the
+                    # companion combined curve uses, so both overlays match.
+                    _iw = np.asarray(self.irx_wave, float)
+                    _iw = _iw[np.isfinite(_iw) & (_iw > 0)]
+                    _w0 = max(0.7 * float(_iw.min()), 0.95) if len(_iw) else 0.95
+                    md = ph_w >= _w0
+                    if md.any():
+                        ax.plot(ph_w[md], ph_f[md] + _diskbb(ph_w[md]), lw=1.75,
+                                color=disk_color, ls=t_ls, zorder=2,
+                                label='star + disk model')
                     lam_um = np.geomspace(0.95, 300.0, 400)
                     if _use2:
                         # Two-temperature disk: warm + cold components shown
@@ -1337,12 +1351,11 @@ class SEDPlotter:
         _nr = np.asarray(norm_res, float)
         _nr = _nr[np.isfinite(_nr)]
         res_std = float(_nr.std()) if _nr.size else 1.0
-        # The IRX view gets extra headroom so the upper-right legend sits in
-        # clean space above the SED peak.
-        # IRX view: enough headroom for the upper-right legend without the
-        # top third of the panel going empty (x3.0 left the SED floating in
-        # blank space for warm-excess stars whose curves end early).
-        ax.set_ylim([ymin * 0.6, ymax * (2.0 if show_irx else 1.5)])
+        # The IRX view gets a little headroom so the upper-right legend sits in
+        # clean space above the SED peak -- but only a little: with ymax now
+        # keyed to the model line (not the high posterior draws) a large
+        # multiplier just leaves the top of the panel empty.
+        ax.set_ylim([ymin * 0.75, ymax * (1.35 if show_irx else 1.2)])
         # ax_r.set_ylim([-5, 5])
         if show_irx:
             # Symmetric scale that snugly fits every residual (fit + irx). Using
