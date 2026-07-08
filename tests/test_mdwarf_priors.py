@@ -91,14 +91,27 @@ def _priors_for(star):
 
 def test_mdwarf_priors_applied():
     ps = _priors_for(_mock_star(3.0, 12.0))          # M dwarf
-    assert ps['teff'] == 'mdwarf_uniform', ps['teff']
+    assert ps['teff'] == 'cool_dwarf_uniform', ps['teff']
     assert ps['logg'] == 'mdwarf_main_sequence', ps['logg']
 
 
 def test_cool_giant_gets_cool_teff_but_not_ms_logg():
     ps = _priors_for(_mock_star(2.5, 0.0))           # red giant
-    assert ps['teff'] == 'mdwarf_uniform'
+    assert ps['teff'] == 'cool_dwarf_uniform'
     assert ps['logg'] != 'mdwarf_main_sequence'
+
+
+def test_cool_teff_floor_tracks_ensemble():
+    # The cool uniform Teff prior floors at the coolest reach of the in-play
+    # grids, not a hard 2300 K -- so an L/T primary is not pinned at the M9 edge.
+    f = Fitter()
+    # Warm-only ensemble keeps the historical M-dwarf floor.
+    f._bma_models = ['phoenix']
+    assert f._cool_teff_floor() == 2300.0
+    # Cloudy/BD grids drop the floor to their reach (BT-Settl ~400 K).
+    f._bma_models = ['btsettl', 'btdusty']
+    lo = f._cool_teff_floor()
+    assert lo < 2300.0 and lo <= 1000.0, lo
 
 
 def test_fgk_unchanged():

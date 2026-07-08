@@ -837,6 +837,13 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                     cfit = np.sum((obs_f[None, :] - mf) ** 2 * finv2[None, :],
                                   axis=1)
                     chi2[k, i] = (cfit - c_fit) + ce      # Delta-fit + excess
+                    # A companion cannot outshine its primary: reject (T2, R2)
+                    # whose bolometric luminosity R2^2 T2^4 exceeds the
+                    # (profiled) primary's R1^2 T1^4 -- a1 IS R1^2, T1 = Tg1[k].
+                    # The brighter body would BE the primary.
+                    chi2[k, i] = np.where(
+                        R2sq * float(T2) ** 4 > a1 * float(Tg1[k]) ** 4,
+                        np.inf, chi2[k, i])
             else:
                 mod = (R2g ** 2)[:, None] * funit[None, :]
                 c0 = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
@@ -846,6 +853,15 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                     if okc.any():
                         c0 = c0 + (R2g ** 4) * float(
                             np.sum(cf[okc] ** 2 * finv2[okc]))
+                # A companion cannot outshine its primary: reject (T2, R2) whose
+                # bolometric luminosity R2^2 T2^4 exceeds the primary's
+                # R1^2 T1^4 -- the brighter body would BE the primary.
+                if rad_primary is not None and np.isfinite(rad_primary) \
+                        and teff_primary and float(teff_primary) > 0:
+                    c0 = np.where(
+                        R2g ** 2 * float(T2) ** 4
+                        > float(rad_primary) ** 2 * float(teff_primary) ** 4,
+                        np.inf, c0)
                 chi2[0, i] = c0
         if np.isfinite(chi2).any():
             comp_per_grid.append((gname_g, T2g, Tg1, chi2))
@@ -1925,6 +1941,33 @@ class Fitter:
             dwarfish = False
         return is_cool, bool(is_cool and dwarfish)
 
+    def _cool_teff_floor(self, cap=2300.0):
+        """Coolest Teff node provided by any candidate BMA grid -- the lower
+        edge of the cool-star uniform Teff prior.
+
+        Read straight from each grid file's Teff axis (cheap: a 1-D dataset,
+        no flux cube), so the prior never excludes a temperature the ensemble
+        can collectively model. Capped at the historical M-dwarf floor
+        (``cap``) so ensembles of only warm grids keep the 2300 K floor.
+        Falls back to ``cap`` if no grid axis can be read.
+        """
+        import h5py
+        from .config import gridsdir, GRID_BASENAMES
+        mods = getattr(self, '_bma_models', None) or (
+            [self._grid] if getattr(self, '_grid', None) else [])
+        lo = None
+        for m in mods:
+            base = GRID_BASENAMES.get(str(m).lower())
+            if base is None:
+                continue
+            try:
+                with h5py.File(f'{gridsdir}/{base}.h5', 'r') as h:
+                    t = float(np.min(h['teff'][:]))
+            except Exception:
+                continue
+            lo = t if lo is None else min(lo, t)
+        return float(cap if lo is None else min(lo, cap))
+
     def _default_priors(self):
         global order
         defaults = dict()
@@ -1985,10 +2028,20 @@ class Fitter:
             self.prior_sources['teff'] = spec_source
             logger.info('Using %s Teff prior (star-specific)', spec_source)
         elif is_cool:
-            # M / late-K dwarf range; uniform avoids imposing the FGK centre.
-            defaults['teff'] = st.uniform(loc=2300, scale=1900)  # 2300-4200 K
-            self.prior_sources['teff'] = 'mdwarf_uniform'
-            logger.info('Using cool-star uniform Teff prior (Gaia Teff < 4000 K)')
+            # Cool dwarf: span the full cool/substellar Teff reach of the
+            # in-play grids, not just the M-dwarf range. A hard 2300 K (M9)
+            # floor pinned L/T primaries (e.g. an L0 at ~1900 K) at the edge
+            # and let a cloudless grid win by default; with the cloudy/BD grids
+            # in the ensemble reaching 400-1000 K the floor is artificial. Floor
+            # at the coolest node any candidate grid provides so the DATA, not
+            # the prior, sets the temperature -- grids that stop warmer simply
+            # contribute no likelihood below their own edge. Capped at 2300 K so
+            # warm-only ensembles are unchanged. uniform avoids the FGK centre.
+            lo = self._cool_teff_floor()
+            defaults['teff'] = st.uniform(loc=lo, scale=4200.0 - lo)
+            self.prior_sources['teff'] = 'cool_dwarf_uniform'
+            logger.info('Using cool-star uniform Teff prior [%.0f, 4200] K '
+                        '(Gaia Teff < 4000 K)', lo)
         else:
             with open(priorsdir + '/teff_ppf.pkl', 'rb') as jar:
                 defaults['teff'] = pickle.load(jar)
@@ -2490,13 +2543,26 @@ class Fitter:
         else:
             candidates = ['btsettl', 'btnextgen', 'btcond', 'btdusty',
                           'sphinx', 'newera', 'bosz', 'ck04', 'kurucz',
-                          'stagger', 'phoenix']
+                          'stagger', 'phoenix', 'atmo', 'sonora']
             reaches = {g: _reach_um(g) for g in candidates}
+            # Keep every grid that reaches the STAR's reddest observed IR-excess
+            # band -- NOT the deepest grid. A grid that can model every excess
+            # band the star actually has (e.g. btdusty/sonora for a cool dwarf
+            # whose excess stops at W4) must not be dropped just because another
+            # grid reaches further into the UNobserved far-IR -- that silently
+            # removes exactly the dusty/substellar photosphere grids cool and
+            # L dwarfs need. Falls back to the deepest grids when the star has
+            # no IR-excess band. (Teff gating + band-coverage guard run later in
+            # initialize().)
+            star_irx = [str(b) for b in np.asarray(self.star.filter_names)[
+                self.star.used_filters == 1] if str(b) in set(irx_bands)]
+            star_reach = max(
+                (get_effective_wavelength(b) for b in star_irx
+                 if np.isfinite(get_effective_wavelength(b))), default=0.0)
             deepest = max(reaches.values())
-            # keep every grid achieving the deepest reach (2% tolerance for
-            # near-identical band edges); Teff gating happens in initialize().
+            thresh = min(star_reach, deepest) if star_reach > 0 else deepest
             self.models = [g for g in candidates
-                           if reaches[g] >= 0.98 * deepest]
+                           if reaches[g] >= 0.98 * thresh]
         sel = ', '.join(f'{g}({reaches[g]:.0f}um)' for g in self.models)
         print(colored(f'\t\t*** IRX ensemble: {sel} ***', 'cyan'))
         if self._norm:
