@@ -685,7 +685,7 @@ to 0. The fit recovers Teff = 5989 K and R = 1.19 R☉ against the literature
 6065 K / 1.16 R☉ — within 2%! Reproduce with
 [`examples/single_coelho.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_coelho.py):
 
-![HD 209458 Coelho fit](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/HD209458_coelho_SED.png)
+![HD 209458 Coelho fit](https://raw.githubusercontent.com/jvines/astroARIADNE/v2/docs/img/HD209458_coelho_SED.png)
 
 #### TLUSTY (hot stars): HD 65041
 
@@ -699,7 +699,7 @@ optical. For hotter stars the optical turns pure Rayleigh–Jeans and you
 `Star.add_mag` when you have it). Reproduce with
 [`examples/single_tlusty.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_tlusty.py):
 
-![HD 65041 TLUSTY fit](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/HD65041_tlusty_SED.png)
+![HD 65041 TLUSTY fit](https://raw.githubusercontent.com/jvines/astroARIADNE/v2/docs/img/HD65041_tlusty_SED.png)
 
 #### Koester (white dwarfs): WDJ031149.21+190055.62
 
@@ -712,7 +712,7 @@ broadband WD temperatures carry ~10% systematics between methods, and they
 lean heavily on the UV (mind the caveats below). Reproduce with
 [`examples/single_koester.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_koester.py):
 
-![WDJ0311+1900 Koester fit](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/WD0311_koester_SED.png)
+![WDJ0311+1900 Koester fit](https://raw.githubusercontent.com/jvines/astroARIADNE/v2/docs/img/WD0311_koester_SED.png)
 
 Under the hood, `koester` mode means uniform Teff over 5000–80000 K, uniform
 log g over 6.5–9.5, a WD-appropriate radius range, and `[Fe/H]` pinned to 0
@@ -1224,7 +1224,7 @@ As a taste of what it does: `examples/irx_disk.py` runs eps Eridani through
 classifies it as a **disk** at T_dust = 62 ± 3 K (literature: 60–65 K), with
 the companion hypothesis rejected at lnBF ≈ 430:
 
-![eps Eri IRX](https://raw.githubusercontent.com/jvines/astroARIADNE/master/docs/img/epsEri_IRX_SED.png)
+![eps Eri IRX](https://raw.githubusercontent.com/jvines/astroARIADNE/v2/docs/img/epsEri_IRX_SED.png)
 
 The full documentation — band routing, ingested catalogs, the evidence
 framework, output keys, validation set and caveats — lives in the
