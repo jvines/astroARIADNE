@@ -24,6 +24,23 @@ Install the latest stable version from PyPI:
 pip install astroariadne
 ```
 
+## ARIADNE 2 (pre-release)
+
+ARIADNE 2 — the IR-excess (disk vs. companion) module, the L/T-capable cool
+ensemble, the rebuilt BT-Dusty/Sonora grids, and the XP/SPHEREx/CASSIS
+spectro-photometry fills — is **not yet on PyPI**. Install it, all model grids
+included, straight from the development branch:
+
+```bash
+pip install git+https://github.com/jvines/astroARIADNE@v2
+```
+
+Then pull the spectra cache once for SED plotting (see *Spectra Cache* below):
+
+```bash
+python -c "from astroARIADNE.fetch import fetch_spectra_cache; fetch_spectra_cache()"
+```
+
 ## Development Install
 
 To install from source for development or to use the latest unreleased features:
@@ -108,10 +125,16 @@ model spectra. If you want SED plots, there are two options:
 
 ### Spectra Cache (Recommended)
 
-Download the pre-computed spectra cache (~2.6 GB) from Zenodo. This contains
-all 7 model grids (Phoenix v2, BT-Settl, BT-NextGen, BT-Cond, Castelli &
-Kurucz, Kurucz, Coelho) broadened to R=1500 and resampled to a common
-wavelength grid. This is all you need for `plot_SED()`.
+Download the pre-computed spectra cache (~3.2 GB) from Zenodo. This contains
+every model grid in the ensemble — Phoenix v2, BT-Settl (+ its cool
+extension), BT-NextGen, BT-Cond, BT-Dusty, Castelli & Kurucz, Kurucz, Coelho,
+BOSZ, SPHINX, TLUSTY, STAGGER, Koester, ATMO 2020, Sonora and PHOENIX-NewEra —
+broadened to R=1500 and resampled to a common wavelength grid. This is all you
+need for `plot_SED()`. The v2.0 cache lives at
+[Zenodo record 21251184](https://doi.org/10.5281/zenodo.21251184) (the concept
+DOI [10.5281/zenodo.19141565](https://doi.org/10.5281/zenodo.19141565) always
+resolves to the latest version); `fetch_spectra_cache()` downloads it and
+verifies the SHA-256.
 
 ```python
 from astroARIADNE.fetch import fetch_spectra_cache
@@ -780,8 +803,13 @@ several hundred K hot, and the broad log g prior admits a spurious giant
 solution. **ARIADNE** therefore handles cool stars automatically, in two steps:
 
 - **Cool stars** — flagged by Gaia colour BP−RP > 1.8 (falling back to a Gaia
-  Teff < 4000 K when colour is unavailable) — get an M/late-K **uniform Teff
-  prior**, `U(2300, 4200)` K, instead of the FGK population prior.
+  Teff < 4000 K when colour is unavailable) — get a cool-dwarf **uniform Teff
+  prior** instead of the FGK population prior. Its lower edge is not a fixed
+  M-dwarf value: it tracks the coolest temperature the in-play grids actually
+  reach, so an L/T primary (e.g. an L0 near 1900 K) is not pinned at the ~2300 K
+  (M9) floor — with the cloudy/brown-dwarf grids in the ensemble the floor drops
+  to ~400–1000 K. Warm-only ensembles keep the historical 2300 K floor; the
+  upper edge is 4200 K.
 - **Cool dwarfs** — cool stars that are *also* on the main sequence, flagged by
   absolute magnitude M_G > 8 (falling back to luminosity < 0.5 L⊙) —
   *additionally* get a tight main-sequence **`N(5.0, 0.25)` log g prior**, which

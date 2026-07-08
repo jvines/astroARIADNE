@@ -58,7 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were pulled ~600 K hot into a spurious hot-giant solution (GJ 1214 with
   default priors: log g 1.7 -> 5.0, Teff 3800 -> 2940 K). Detection is
   colour-primary because M dwarfs frequently lack a Gaia Teff/luminosity
-  estimate; spectroscopic priors still take precedence.
+  estimate; spectroscopic priors still take precedence. The uniform Teff prior's
+  lower edge is not a fixed value — it tracks the coolest node the in-play grids
+  reach (capped at 2300 K), so an L/T primary reaches below the M-dwarf floor
+  when the cloudy/brown-dwarf grids are in the ensemble (see *Changed*).
 - `Star.from_gaia(source_id)` and `Star.from_name(name)` classmethods that
   resolve coordinates (Gaia DR3 TAP / Simbad name resolution) and build the
   `Star` — the documented "I have a Gaia ID" entry point no longer requires
@@ -106,6 +109,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The librarian now fetches **AllWISE W3 (12 µm) and W4 (22 µm)** and routes them
   to the IR-excess set, so excess is measured automatically for any star with
   AllWISE photometry (`qph` upper-limits rejected, Vega mags like W1/W2).
+- **BT-Dusty rebuilt from the SVO Theory Server** — the cloudy (max-dust) BT
+  limit for the L/T transition, now spanning Teff 1000–6000 K, log g 0.5–6.0, 11
+  metallicities (`[M/H]` −4.0…+0.5) and the full 0–1000 µm reach (the previous
+  grid was solar-metallicity only with the far-IR NaN). The cloudless BT members
+  cannot reproduce a dusty L dwarf's flattened NIR; BT-Dusty now wins the
+  photosphere BMA for cloudy L0-type primaries.
+- **Sonora Bobcat grid** (Marley et al. 2021) rebuilt from the source spectra
+  (Zenodo 5063476) across 0.4–50 µm, filling the optical gap the previous Sonora
+  cube left NaN. Cloud-free L/T/Y photospheres for the substellar-companion
+  hypothesis.
+- **Gaia XP synthetic photometry gap-filling**, plus **SPHEREx** QR2 (1–5 µm),
+  **CASSIS / Spitzer-IRS** (5–38 µm) and **IUE/INES** (UV) super-band
+  spectro-photometry — each fetched by the librarian by default (disable per
+  source with `ignore=['XP'|'SPHEREX'|'CASSIS'|'IUE']`) to bridge catalogue gaps
+  and cross-check the broadband SED. Filled bands are provenance-tagged.
+- **RUWE binarity flag.** The librarian fetches the Gaia DR3 RUWE and the fit
+  summary warns when RUWE > 1.4 — the unresolved-binary / perturbed-astrometry
+  regime where the parallax (and hence the radius and luminosity) is unreliable.
 
 ### Changed
 - Bayesian Model Averaging weights: the evidence softmax now shifts by the
@@ -116,6 +137,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly, so the grids no longer depend on the pandas/pickle version they were
   written with and survive numpy/pandas upgrades; pandas is no longer imported
   on the fit path.
+- **The cool-star Teff prior floors at the ensemble's grid reach** instead of a
+  hard 2300 K (M9), so L/T primaries are no longer pinned at the M-dwarf edge and
+  a cloudy solution can win where the data support it — validated on an L0
+  Peter-Pan-disk host (Δln Z = +34.7 for the cool, cloudy fit, which also flipped
+  a false companion classification to the correct disk). Warm-only ensembles are
+  unchanged (capped at 2300 K).
+- **IR-excess companion hypothesis** now enforces L₂ ≤ L₁ (a companion cannot
+  outshine the primary). The `SEDPlotter(ir_excess=True)` disk overlay is trimmed
+  to the excess region (no longer painted over the photosphere line) and the SED
+  upper y-limit is keyed to the best-fit model rather than the gray posterior
+  draws.
+- **Spectra cache republished as v2.0 on Zenodo** (record 21251184, concept DOI
+  10.5281/zenodo.19141565) with all 16 ensemble grids and the rebuilt BT-Dusty /
+  Sonora cubes; `fetch.py` pins the new record ID and SHA-256.
 
 ### Removed
 - **The `'multinest'` sampling engine has been removed** (deprecated in 1.5.0).
