@@ -8,9 +8,9 @@ from importlib.resources import files
 
 # ── Zenodo record ──────────────────────────────────────────────────────
 # Update these after publishing the record.
-ZENODO_RECORD_ID = "19141566"
+ZENODO_RECORD_ID = "21251184"  # v2.0 (concept DOI 10.5281/zenodo.19141565)
 ZENODO_FILENAME = "spectra_cache.h5"
-ZENODO_SHA256 = "0eea6b70d44ebb13291a95fe06a9a2554f5ef6272efb3eec6292acf393932df9"
+ZENODO_SHA256 = "7e48c9d379af02e55f0a3ba193e02b0f01632c4ea9718d4695a4f990504d009e"
 # ──────────────────────────────────────────────────────────────────────
 
 
