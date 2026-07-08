@@ -425,7 +425,7 @@ And a new call to `s.print_mags()` would yield:
 ```
 
 A list of allowed filters can be found
-[here](https://github.com/jvines/astroARIADNE/blob/master/filters.md)
+[here](https://github.com/jvines/astroARIADNE/blob/v2/filters.md)
 
 <!-- DOC:DATASOURCES-START -->
 ### Data sources & spectro-photometry
@@ -683,7 +683,7 @@ GALEX (a G dwarf's UV is chromospheric, not photospheric — and Coelho's
 grid starts at 0.13 µm besides); and at 48 pc the `Av` prior auto-pins
 to 0. The fit recovers Teff = 5989 K and R = 1.19 R☉ against the literature
 6065 K / 1.16 R☉ — within 2%! Reproduce with
-[`examples/single_coelho.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_coelho.py):
+[`examples/single_coelho.py`](https://github.com/jvines/astroARIADNE/blob/v2/examples/single_coelho.py):
 
 ![HD 209458 Coelho fit](https://raw.githubusercontent.com/jvines/astroARIADNE/v2/docs/img/HD209458_coelho_SED.png)
 
@@ -697,7 +697,7 @@ alone, because at this temperature the Balmer jump still lives in the
 optical. For hotter stars the optical turns pure Rayleigh–Jeans and you
 *need* UV photometry (most bright OB stars saturate GALEX — add UV with
 `Star.add_mag` when you have it). Reproduce with
-[`examples/single_tlusty.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_tlusty.py):
+[`examples/single_tlusty.py`](https://github.com/jvines/astroARIADNE/blob/v2/examples/single_tlusty.py):
 
 ![HD 65041 TLUSTY fit](https://raw.githubusercontent.com/jvines/astroARIADNE/v2/docs/img/HD65041_tlusty_SED.png)
 
@@ -710,7 +710,7 @@ within 10%. One honest warning: the Gaia-photometry catalogue (Gentile
 Fusillo et al. 2021) quotes 18185 K for this star from three optical bands —
 broadband WD temperatures carry ~10% systematics between methods, and they
 lean heavily on the UV (mind the caveats below). Reproduce with
-[`examples/single_koester.py`](https://github.com/jvines/astroARIADNE/blob/master/examples/single_koester.py):
+[`examples/single_koester.py`](https://github.com/jvines/astroARIADNE/blob/v2/examples/single_koester.py):
 
 ![WDJ0311+1900 Koester fit](https://raw.githubusercontent.com/jvines/astroARIADNE/v2/docs/img/WD0311_koester_SED.png)
 
@@ -933,7 +933,7 @@ from astroARIADNE.plotter import SEDPlotter
 
 The setup for the plotter is already made for you, but if you really want to
 change them, instructions on how to change it can be found
-[here](https://github.com/jvines/astroARIADNE/blob/master/customization.md)
+[here](https://github.com/jvines/astroARIADNE/blob/v2/customization.md)
 
 If you want SED model plots, make sure you have either the spectra cache
 (recommended) or the full model grids installed — see
@@ -1228,7 +1228,7 @@ the companion hypothesis rejected at lnBF ≈ 430:
 
 The full documentation — band routing, ingested catalogs, the evidence
 framework, output keys, validation set and caveats — lives in the
-[IRX documentation page](https://github.com/jvines/astroARIADNE/blob/master/docs/irx.md)
+[IRX documentation page](https://github.com/jvines/astroARIADNE/blob/v2/docs/irx.md)
 (also on Read the Docs).
 
 <!-- DOC:OUTPUT-END -->
@@ -1239,4 +1239,4 @@ For a more in depth look on the inner workings of **ARIADNE** consider
 [reading the paper!](https://ui.adsabs.harvard.edu/abs/2022MNRAS.tmp..920V/abstract)
 
 Additionally, you can find how to cite **ARIADNE** and its dependencies
-[here](https://github.com/jvines/astroARIADNE/blob/master/citations.md)
+[here](https://github.com/jvines/astroARIADNE/blob/v2/citations.md)
