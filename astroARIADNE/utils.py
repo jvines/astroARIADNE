@@ -258,7 +258,8 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm, grid=None):
         'teff': 'Teff (K)', 'logg': 'log(g) (dex)', 'z': '[Fe/H] (dex)',
         'dist': 'Distance (pc)', 'rad': 'Radius (Rsun)', 'norm': '(R/D)^2',
         'Av': 'Av (mag)', 'grav_mass': 'Grav. mass (Msun)',
-        'lum': 'Luminosity (Lsun)', 'AD': 'Ang. diameter (mas)',
+        'lum': 'Luminosity (Lsun)', 'f_bol': 'Bol. flux (erg/s/cm2)',
+        'AD': 'Ang. diameter (mas)',
         'iso_mass': 'Iso. mass (Msun)', 'age': 'Age (Gyr)', 'eep': 'EEP',
     }
 
@@ -305,7 +306,7 @@ def end(coordinator, elapsed_time, out_folder, engine, use_norm, grid=None):
         derived.append('rad')   # radius from norm + distance (NaN if no distance)
     else:
         derived.append('AD')
-    derived.extend(['grav_mass', 'lum'])
+    derived.extend(['grav_mass', 'lum', 'f_bol'])
     if engine == 'Bayesian Model Averaging':
         derived.extend(['iso_mass', 'age', 'eep'])
 

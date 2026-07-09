@@ -127,6 +127,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RUWE binarity flag.** The librarian fetches the Gaia DR3 RUWE and the fit
   summary warns when RUWE > 1.4 — the unresolved-binary / perturbed-astrometry
   regime where the parallax (and hence the radius and luminosity) is unreliable.
+- **Bolometric flux `f_bol` as a standard output.** Every fit now reports the
+  bolometric flux at Earth, F_bol = σ_SB·Teff⁴·(R/d)² (erg/s/cm²), as a derived
+  quantity beside the luminosity — in the printed summary, the `best_fit*.dat`
+  tables, `to_dict()` (`bolometric_flux`), the NetCDF export and `BMA.pkl`, with
+  full posterior uncertainties. Because it depends only on (R/d)², F_bol is
+  distance-independent and is reported even in norm mode (no parallax), where the
+  luminosity is undefined — the direct SED observable behind the bolometric-flux
+  / IRFM effective temperature. ARIADNE's model flux integrates to σ_SB·Teff⁴ by
+  construction, so this is the full bolometric flux (no truncated-SED tail).
+  Validated against ε Eri (F_bol ≈ 1.06×10⁻⁶ erg/s/cm²).
 
 ### Changed
 - Bayesian Model Averaging weights: the evidence softmax now shifts by the

@@ -2933,6 +2933,11 @@ class Fitter:
         lum_samp = self._get_lum(teff_samp, rad_samp)
         out['posterior_samples']['lum'] = lum_samp
 
+        # Create a distribution of bolometric fluxes (distance-independent).
+
+        out['posterior_samples']['f_bol'] = self._get_fbol(
+            teff_samp, self._rd_squared(out['posterior_samples'], use_norm))
+
         # Create a distribution of angular diameters.
 
         if not use_norm:
@@ -2999,6 +3004,11 @@ class Fitter:
 
             samp = out['posterior_samples']['lum']
             logdat = out_filler(samp, logdat, 'lum', 'lum', out)
+
+            # Add derived bolometric flux (distance-independent) to best fit.
+
+            samp = out['posterior_samples']['f_bol']
+            logdat = out_filler(samp, logdat, 'f_bol', 'f_bol', out, fmt='e')
 
             # Add derived angular diameter to best fit dictionary.
 
@@ -3461,6 +3471,14 @@ class Fitter:
         out['weighted_samples']['lum'] = lum_samp
         out['weighted_average']['lum'] = lum_average
 
+        # Create a distribution of bolometric fluxes (distance-independent, so
+        # it is finite even in norm mode where the luminosity is NaN).
+
+        out['weighted_samples']['f_bol'] = self._get_fbol(
+            teff_samp, self._rd_squared(out['weighted_samples'], use_norm))
+        out['weighted_average']['f_bol'] = self._get_fbol(
+            teff_average, self._rd_squared(out['weighted_average'], use_norm))
+
         # Create a distribution of angular diameters.
 
         if not use_norm:
@@ -3545,6 +3563,15 @@ class Fitter:
                                     method='samples')
         logdat_average = out_filler(sampw, logdat_average, 'lum', 'lum', out,
                                     method='averaged')
+
+        # Add derived bolometric flux (distance-independent) to best fit dict.
+
+        fb_s = out['weighted_samples']['f_bol']
+        fb_w = out['weighted_average']['f_bol']
+        logdat_samples = out_filler(fb_s, logdat_samples, 'f_bol', 'f_bol', out,
+                                    fmt='e', method='samples')
+        logdat_average = out_filler(fb_w, logdat_average, 'f_bol', 'f_bol', out,
+                                    fmt='e', method='averaged')
 
         # Add derived angular diameter to best fit dictionary.
 
@@ -3967,6 +3994,29 @@ class Fitter:
         return L
 
     @staticmethod
+    def _rd_squared(samples, use_norm):
+        """(R/d)^2 (dimensionless) from a results dict: the fitted ``norm`` in
+        norm mode, or (rad/dist)^2 in distance mode. Works on both the
+        per-sample arrays and the scalar averages."""
+        if use_norm:
+            return np.asarray(samples['norm'], float)
+        rad_cm = np.asarray(samples['rad'], float) * u.solRad.to(u.cm)
+        dist_cm = np.asarray(samples['dist'], float) * u.pc.to(u.cm)
+        return (rad_cm / dist_cm) ** 2
+
+    @staticmethod
+    def _get_fbol(teff, scale):
+        """Bolometric flux at Earth [erg/s/cm^2] = sigma_SB * Teff^4 * (R/d)^2.
+
+        ``scale`` is (R/d)^2. F_bol is distance-independent, so unlike the
+        luminosity it is defined even without a parallax (norm mode) -- the
+        direct SED observable behind the bolometric-flux / IRFM Teff. Since
+        ARIADNE's model flux integrates to sigma_SB*Teff^4 by construction, this
+        is the full bolometric flux (no truncated-SED tail)."""
+        sb = sigma_sb.to(u.erg / u.s / u.cm ** 2 / u.K ** 4).value
+        return sb * np.asarray(teff, float) ** 4 * np.asarray(scale, float)
+
+    @staticmethod
     def _get_rad(samples, dist, dist_e):
         """Calculate radius from the normalization constant and distance."""
         norm = samples
@@ -4092,6 +4142,7 @@ class Fitter:
             'z': 'feh',
             'rad': 'radius',
             'lum': 'luminosity',
+            'f_bol': 'bolometric_flux',
             'dist': 'distance',
             'Av': 'Av',
         }

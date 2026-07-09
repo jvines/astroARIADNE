@@ -992,7 +992,11 @@ The most important file holds the best-fitting parameters with their 1σ error
 bars and 3σ confidence intervals. A single-grid run writes it as `best_fit.dat`;
 a BMA run instead writes two — `best_fit_sample.dat` (from the evidence-weighted
 resampled posterior) and `best_fit_average.dat` (from the supersampled weighted
-average). Then there are pickle files for each of the used models
+average). Alongside the fitted parameters these tables carry the derived
+physical quantities: luminosity, gravitational mass, angular diameter, and the
+**bolometric flux** `f_bol` (F_bol = σ·Teff⁴·(R/d)² in erg/s/cm²). F_bol is
+distance-independent, so it is reported even in `norm` mode where the luminosity
+is undefined. Then there are pickle files for each of the used models
 (`{grid}_out.pkl`) plus a last one for the BMA (`BMA.pkl`); these contain raw
 information about the results. There is a `prior.dat` file that shows the priors
 used and a `mags.dat` file with the used magnitudes and filters.
