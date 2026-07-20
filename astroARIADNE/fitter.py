@@ -3081,6 +3081,21 @@ class Fitter:
         except Exception as e:                       # never break the save
             logger.warning('IR-excess quantification skipped: %s', e)
             out['irx'] = {}
+        # Predicted observed synthetic photometry (single-grid fit): flux + mag
+        # for the full band set -> read off a magnitude the star lacks. BMA does
+        # this in save_bma; the per-model saves during a BMA run skip it.
+        if not self.bma:
+            try:
+                synphot = self._synthetic_photometry(out['posterior_samples'])
+            except Exception as e:
+                logger.warning('synthetic photometry skipped: %s', e)
+                synphot = {}
+            out['synthetic_photometry'] = synphot
+            synthdat, magdat = self._synth_phot_tables(synphot)
+            with open(f'{self.out_folder}/synthetic_fluxes.dat', 'w') as fh:
+                fh.write(synthdat)
+            with open(f'{self.out_folder}/synthetic_magnitudes.dat', 'w') as fh:
+                fh.write(magdat)
         pickle.dump(out, open(out_file, 'wb'))
         pass
 
@@ -3376,6 +3391,80 @@ class Fitter:
                              if q else float('nan')))
         return result
 
+    def _synthetic_photometry(self, samples, n_draws=3000):
+        """Predicted observed photometry for the FULL filter set at the fitted SED.
+
+        Propagates the posterior (subsampled to ``n_draws``) through the forward
+        model on the BT-Settl grid -- which spans every ARIADNE band -- so every
+        filter gets an observed synthetic flux and magnitude with 1-sigma errors,
+        distance-, radius- and extinction-scaled exactly as the fit models the
+        data. The point: predict a band the star lacks (a missing G, K, W1, ...)
+        from the bands it has. Bands actually used in the fit are flagged
+        ``observed``; the rest are predictions. For white-dwarf / hot-subdwarf
+        fits the BT-Settl photosphere is only a rough proxy (noted in the header).
+
+        Returns ``{filter: (wave_um, flux, flux_err, mag, mag_err, observed)}``
+        in ``erg s-1 cm-2 um-1`` and the band's native (Vega or AB) mag system.
+        """
+        from .sed_library import model_grid
+        from .phot_utils import flux_to_mag, get_effective_wavelength
+        use_norm = self.norm
+        av_law = self._av_law
+        intp = self.load_interpolator('btsettl')
+        names = [str(f) for f in filter_names]
+        wave = np.array([get_effective_wavelength(f) for f in names])
+
+        def _col(key):
+            return np.atleast_1d(np.asarray(samples[key], dtype=float))
+        cols = ['teff', 'logg', 'z', 'Av'] + (['norm'] if use_norm
+                                              else ['dist', 'rad'])
+        arrs = {k: _col(k) for k in cols}
+        n = max(a.size for a in arrs.values())
+        arrs = {k: np.broadcast_to(a, (n,)) for k, a in arrs.items()}
+        if n > n_draws:
+            sel = np.random.default_rng(0).choice(n, n_draws, replace=False)
+        else:
+            sel = np.arange(n)
+        if use_norm:
+            thetas = np.column_stack([arrs['teff'], arrs['logg'], arrs['z'],
+                                      arrs['norm'], arrs['Av']])[sel]
+        else:
+            thetas = np.column_stack([arrs['teff'], arrs['logg'], arrs['z'],
+                                      arrs['dist'], arrs['rad'], arrs['Av']])[sel]
+        fl = np.array([model_grid(th, filter_names, wave, intp, use_norm, av_law)
+                       for th in thetas])                 # (ndraws, nbands)
+        observed = {str(b) for b in
+                    self.star.filter_names[self.star.used_filters == 1]}
+        photom = {}
+        for j, f in enumerate(names):
+            c = fl[:, j]
+            c = c[np.isfinite(c) & (c > 0)]
+            if c.size < 10:
+                continue
+            fmed = float(np.median(c))
+            ferr = float(0.5 * (np.percentile(c, 84) - np.percentile(c, 16)))
+            mag, mag_err = flux_to_mag(fmed, ferr, f)
+            if not (np.isfinite(mag) and np.isfinite(mag_err)):
+                continue
+            photom[f] = (float(wave[j]), fmed, ferr, float(mag), float(mag_err),
+                         f in observed)
+        return photom
+
+    @staticmethod
+    def _synth_phot_tables(photom):
+        """(flux_table, mag_table) strings for the synthetic-photometry files."""
+        flux = 'Filter\tFlux\n'
+        mag = ('# Predicted observed photometry from the best-fit SED (BT-Settl '
+               'grid).\n# observed=1: band used in the fit; observed=0: '
+               'prediction. Mag in the band native (Vega/AB) system.\n'
+               '# Filter\twavelength_um\tmag\tmag_err\tflux_erg_cm2_s_um\t'
+               'flux_err\tobserved\n')
+        for f, (w, fx, fxe, mg, mge, ob) in photom.items():
+            flux += f'{f}\t{fx:.6e}\n'
+            mag += (f'{f}\t{w:.4f}\t{mg:.4f}\t{mge:.4f}\t{fx:.6e}\t{fxe:.6e}\t'
+                    f'{int(ob)}\n')
+        return flux, mag
+
     def save_bma(self, avgd):
         """Save BMA output and relevant information.
 
@@ -3406,6 +3495,7 @@ class Fitter:
         log_out_average = f'{self.out_folder}/best_fit_average.dat'
         prob_out = f'{self.out_folder}/model_probabilities.dat'
         synth_out = f'{self.out_folder}/synthetic_fluxes.dat'
+        mag_out = f'{self.out_folder}/synthetic_magnitudes.dat'
 
         # Save global evidence of each model.
         out['lnZ'] = avgd['evidences']
@@ -3649,29 +3739,20 @@ class Fitter:
                 max_prob_mod = k
             probdat += f'{k}_probability\t{avgd["weights"][k]:.4f}\n'
 
-        # Get synthetic mag and fluxes for highest probability model.
-        synth_mod = 'btsettl'
-        intp = self.load_interpolator(synth_mod)
-        # Broadcast to a common length: a pinned axis (e.g. Koester's single
-        # [Fe/H] node, or a fixed parameter) is stored as a scalar, which would
-        # otherwise break len()/zip over the posterior samples.
-        ogteff = np.atleast_1d(avgd['originals'][max_prob_mod]['teff'])
-        oglogg = np.atleast_1d(avgd['originals'][max_prob_mod]['logg'])
-        ogfeh = np.atleast_1d(avgd['originals'][max_prob_mod]['z'])
-        n = max(ogteff.size, oglogg.size, ogfeh.size)
-        ogteff = np.broadcast_to(ogteff, (n,))
-        oglogg = np.broadcast_to(oglogg, (n,))
-        ogfeh = np.broadcast_to(ogfeh, (n,))
-        fluxes = np.zeros((len(oglogg), len(filter_names)))
-        for i, t, g, z in zip(range(len(oglogg)), ogteff, oglogg, ogfeh):
-            fluxes[i, :] = get_interpolated_flux(t, g, z, filter_names, intp)
-        synthdat = 'Filter\tFlux\n'
-        for i, filt in enumerate(filter_names):
-            samp = fluxes[:, i]
-            # xx, pdf = estimate_pdf(samp)
-            # cdf = estimate_cdf(samp, hdr=True)
-            b, _, _ = credibility_interval(samp, alpha=1)
-            synthdat += f'{filt}\t{b:.6e}\n'
+        # Predicted OBSERVED synthetic photometry (flux + magnitude) for the
+        # full band set at the fitted SED -- lets a user read off a magnitude
+        # the star lacks (a missing G, K, W1, ...). The max-probability model's
+        # posterior is propagated through the forward model (distance/radius/
+        # extinction-scaled) on the BT-Settl grid. synthetic_fluxes.dat now holds
+        # these OBSERVED fluxes (previously surface fluxes); synthetic_magnitudes
+        # .dat adds the mags. Never break the save if it fails.
+        try:
+            synphot = self._synthetic_photometry(avgd['originals'][max_prob_mod])
+        except Exception as e:
+            logger.warning('synthetic photometry skipped: %s', e)
+            synphot = {}
+        out['synthetic_photometry'] = synphot
+        synthdat, magdat = self._synth_phot_tables(synphot)
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -3715,6 +3796,8 @@ class Fitter:
             logfile.write(probdat)
         with open(synth_out, 'w') as logfile:
             logfile.write(synthdat)
+        with open(mag_out, 'w') as logfile:
+            logfile.write(magdat)
         try:
             out['irx'] = (self._compute_irx(out, list(self._grids), av_law)
                           if getattr(self, '_do_irx', False) else {})

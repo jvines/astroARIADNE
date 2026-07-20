@@ -158,6 +158,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   / IRFM effective temperature. ARIADNE's model flux integrates to σ_SB·Teff⁴ by
   construction, so this is the full bolometric flux (no truncated-SED tail).
   Validated against ε Eri (F_bol ≈ 1.06×10⁻⁶ erg/s/cm²).
+- **Predicted synthetic photometry (`synthetic_magnitudes.dat`).** Every fit now
+  writes the best-fit SED's *observed* synthetic photometry — flux **and
+  magnitude**, with 1σ errors — for the full ARIADNE filter set, so you can read
+  off a magnitude the star lacks (a missing G, K, W1, …) from the bands it has.
+  Each band is flagged observed (used in the fit) or predicted. The posterior is
+  propagated through the forward model (distance/radius/extinction-scaled) on the
+  BT-Settl grid, and mags are in each band's native Vega/AB system. Validated to
+  reproduce the fitted-band catalogue magnitudes to ≈0.02 mag; the un-fit bands
+  are genuine predictions (consistent to <0.01 mag between single-grid and BMA
+  runs). Stored in `out['synthetic_photometry']` and `synthetic_magnitudes.dat`;
+  `synthetic_fluxes.dat` now holds these observed fluxes (previously surface
+  fluxes). WD/hot-subdwarf fits are a caveat — the BT-Settl photosphere is only a
+  proxy there.
 
 ### Changed
 - Bayesian Model Averaging weights: the evidence softmax now shifts by the
