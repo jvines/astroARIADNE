@@ -113,7 +113,20 @@ filter_names = np.array([
        # notebooks/augment_grids_irs.py pending the yuki raw reconvolution.
        'IRS_5500', 'IRS_6500', 'IRS_8000', 'IRS_10000', 'IRS_12000',
        'IRS_13000', 'IRS_15000', 'IRS_18000', 'IRS_23000', 'IRS_30000',
-       'IRS_35000'
+       'IRS_35000',
+       # Roman Space Telescope WFI (launch 2026). Eight imaging broadbands
+       # (~R/z/Y/J/H/(H-K)/Ks + the F146 wide band) and seven P127-prism
+       # super-bands (gap-placed between the imaging centres; see
+       # build_custom_filters.py ROMAN_P127_TOPHATS). All < 2.3 um -> FIT bands,
+       # never irx. Grid columns are cache-derived (augment_grids_roman.py);
+       # STAGED INERT -- no catalogue feeds them until the _roman librarian
+       # lands (WFI science products lag launch ~1-2 yr), so they never enter a
+       # fit today, but the curves + grid columns are in place for day-one
+       # Roman photometry.
+       'ROMAN_F062', 'ROMAN_F087', 'ROMAN_F106', 'ROMAN_F129', 'ROMAN_F146',
+       'ROMAN_F158', 'ROMAN_F184', 'ROMAN_F213',
+       'ROMANP_0800', 'ROMANP_0960', 'ROMANP_1170', 'ROMANP_1400',
+       'ROMANP_1500', 'ROMANP_1680', 'ROMANP_1760'
 ])
 
 # IR-excess bands: redward of ~5 um, where warm-dust / debris-disk excess
@@ -192,6 +205,8 @@ iso_mask = np.array([
     0, 0, 0, 0, 0, 0,
     0, 0, 0,                    # J-PLUS narrow diagnostics
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   # CASSIS/IRS super-bands (not isochrone)
+    0, 0, 0, 0, 0, 0, 0, 0,     # Roman WFI imaging (not isochrone bands)
+    0, 0, 0, 0, 0, 0, 0,        # Roman P127 prism super-bands
 ])
 
 # Filter bands for isochrones.

@@ -46,6 +46,13 @@ CUSTOM_IRS = [f'IRS_{c}' for c in
               ('5500', '6500', '8000', '10000', '12000', '13000',
                '15000', '18000', '23000', '30000', '35000')]
 CUSTOM_JPLUS = ['JPLUS_J0515', 'JPLUS_J0660', 'JPLUS_J0861']
+# Roman WFI: filters + grid columns present (filter_names 93 -> 108), but
+# data-STAGED -- no _roman librarian feeds them yet, so no fit uses them. Eight
+# imaging broadbands (real SVO curves) + seven P127 prism super-band top-hats.
+CUSTOM_ROMAN = ['ROMAN_F062', 'ROMAN_F087', 'ROMAN_F106', 'ROMAN_F129',
+                'ROMAN_F146', 'ROMAN_F158', 'ROMAN_F184', 'ROMAN_F213',
+                'ROMANP_0800', 'ROMANP_0960', 'ROMANP_1170', 'ROMANP_1400',
+                'ROMANP_1500', 'ROMANP_1680', 'ROMANP_1760']
 # Nothing currently staged-inert.
 CUSTOM_STAGED = []
 
@@ -54,8 +61,8 @@ CUSTOM_STAGED = []
 def test_custom_library_loads():
     assert set(pu._CUSTOM_LIB) == \
         set(CUSTOM) | set(CUSTOM_FIS) | set(CUSTOM_SPHEREX) \
-        | set(CUSTOM_JPLUS) | set(CUSTOM_IRS) | set(CUSTOM_STAGED), \
-        set(pu._CUSTOM_LIB)
+        | set(CUSTOM_JPLUS) | set(CUSTOM_IRS) | set(CUSTOM_ROMAN) \
+        | set(CUSTOM_STAGED), set(pu._CUSTOM_LIB)
 
 
 def test_spherex_bands_active():
@@ -67,6 +74,33 @@ def test_spherex_bands_active():
     assert set(CUSTOM_SPHEREX) <= set(filter_names)
     assert len(filter_names) == len(iso_mask), 'iso_mask misaligned'
     assert not (set(CUSTOM_SPHEREX) & set(irx_bands))
+
+
+def test_roman_bands_active():
+    # The 15 Roman bands joined filter_names (the grids carry their columns via
+    # augment_grids_roman.py). All < 2.3 um -> FIT bands, none excess-routed.
+    # They are DATA-staged: inert until a _roman librarian feeds them, but the
+    # band machinery must be wired so a Roman fit works day-one.
+    from astroARIADNE.config import filter_names, irx_bands, iso_mask
+    assert set(CUSTOM_ROMAN) <= set(filter_names)
+    assert len(filter_names) == len(iso_mask), 'iso_mask misaligned'
+    assert not (set(CUSTOM_ROMAN) & set(irx_bands))
+
+
+def test_roman_wfi_is_photon_convention():
+    # WFI's H4RG is a photon counter; SVO tags it DetectorType=1. The prism
+    # top-hats are photon-convention too (H4RG). All 15 must be 'photon'.
+    for b in CUSTOM_ROMAN:
+        assert pu._CUSTOM_LIB[b].dtype == 'photon', b
+
+
+def test_roman_effective_wavelengths_monotonic():
+    # WFI imaging centres must come out ordered and in-band (0.6-2.2 um).
+    wfi = ['ROMAN_F062', 'ROMAN_F087', 'ROMAN_F106', 'ROMAN_F129',
+           'ROMAN_F158', 'ROMAN_F184', 'ROMAN_F213']   # F146 wide excluded
+    cl = [pu.get_effective_wavelength(b) for b in wfi]
+    assert all(0.6 < w < 2.2 for w in cl), cl
+    assert all(a < b for a, b in zip(cl, cl[1:])), cl
 
 
 def test_staged_filters_are_inert():
@@ -109,9 +143,9 @@ def test_filter_sets():
     B = _builder()
     # The common set now matches config.filter_names: AKARI FIS + SPIRE were
     # promoted into _IR_EXTENSION (SPIRE used to be a TLUSTY-only extra).
-    assert len(B.FILTERS) == 93                          # 66+13 SPHEREx+3 J-PLUS+11 IRS
-    assert len(B._filters_for('tlusty')) == 93           # no extras anymore
-    assert len(B._filters_for('bosz')) == 93
+    assert len(B.FILTERS) == 108                         # 93 + 15 Roman (8 WFI + 7 prism)
+    assert len(B._filters_for('tlusty')) == 108          # no extras anymore
+    assert len(B._filters_for('bosz')) == 108
     # every custom band is reachable by the builder's resolver
     fl = {n for n, *_ in B._build_filters(B._filters_for('tlusty'))}
     assert set(CUSTOM).issubset(fl)

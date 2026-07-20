@@ -124,6 +124,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spectro-photometry — each fetched by the librarian by default (disable per
   source with `ignore=['XP'|'SPHEREX'|'CASSIS'|'IUE']`) to bridge catalogue gaps
   and cross-check the broadband SED. Filled bands are provenance-tagged.
+- **Roman Space Telescope readiness (staged).** The eight WFI imaging broadbands
+  (`ROMAN_F062`…`ROMAN_F213`, real SVO curves ≈ R/z/Y/J/H/(H-K)/Ks + the F146
+  wide band) and seven `ROMANP_*` P127-prism super-bands (0.75–1.80 µm, R~100,
+  gap-placed between the imaging centres so the prism adds spectral shape — the
+  1.4 µm H₂O trough no WFI band covers — rather than re-measuring the broadband
+  flux) are in the filter library and convolved into every grid, and are in
+  `filter_names` as fit bands (< 2.3 µm, never IR-excess). They are **data-
+  staged and inert**: no catalogue feeds them yet — the WFI/prism science
+  archives publish ~1–2 yr post-launch — so they never touch a fit today, but
+  the curves + grid columns + the `librarian/_roman.py` binning are in place so a
+  Roman fit works the day photometry lands. Roman's 0.11″ resolution is the draw
+  for ARIADNE's cool/substellar regime: it deblends the close pairs (e.g. the
+  J0446/J0949 binaries) that 2MASS/WISE/SPHEREx merge. The Roman columns are
+  **raw-reconvolved from the model spectra** for 15 of the 16 grids (rebuilt
+  through the full 108-band filter set; the BT-family cool L/T/Y extension is
+  preserved by merging the raw standard nodes with the species-derived cool
+  nodes); Stagger keeps cache-derived columns (its raw spectra are not available)
+  and NewEra fills in from its streamed re-build. Build with
+  `notebooks/build_custom_filters.py` + a `build_model_grids.py` reconvolution
+  (`augment_grids_roman.py` is the cache-derived fallback, exact for these
+  low-resolution bands).
 - **RUWE binarity flag.** The librarian fetches the Gaia DR3 RUWE and the fit
   summary warns when RUWE > 1.4 — the unresolved-binary / perturbed-astrometry
   regime where the parallax (and hence the radius and luminosity) is unreliable.

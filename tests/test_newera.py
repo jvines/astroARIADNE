@@ -17,13 +17,14 @@ from astroARIADNE.sed_library import get_interpolated_flux, load_grid  # noqa: E
 from astroARIADNE.config import filter_names, irx_bands  # noqa: E402
 
 # Base (non-IR-excess) photosphere band set every grid must carry. The
-# SPHEREx fit bands are excepted for NewEra: its cache-derived columns were
-# too sparse (466 nodes) to fit with, so they are blanked until the raw
-# reconvolution fills them -- the band-coverage guard then auto-drops newera
-# from SPHEREx-fed fits instead of letting NaN pockets poison them.
+# SPHEREx and Roman fit bands are excepted for NewEra: its cache-derived
+# columns were too sparse (466 nodes) to fit with, so they are blanked until
+# the raw reconvolution fills them -- the band-coverage guard then auto-drops
+# newera from SPHEREx-/Roman-fed fits instead of letting NaN pockets poison
+# them. (Roman = ROMAN_F* imaging + ROMANP_* prism, both 'ROMAN'-prefixed.)
 BASE_BANDS = (set(filter_names) - set(irx_bands)
               - {f for f in filter_names
-                 if f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_'))})
+                 if f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_', 'ROMAN'))})
 
 
 def test_grid_schema():
@@ -42,7 +43,7 @@ def test_grid_schema():
     # cache-derived and exist only at the 466 plotting-cache nodes until the
     # raw reconvolution fills them (notebooks/augment_grids_spherex.py).
     non_spherex = [i for f, i in ne.column_index.items()
-                   if not f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_'))]
+                   if not f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_', 'ROMAN'))]
     assert np.isfinite(ne.grid[..., non_spherex]).all(axis=-1).sum() > 5000
 
 
