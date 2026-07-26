@@ -36,9 +36,11 @@ photon/scatter error.
 Per-source products are cached under ~/.astroARIADNE/iue/ keyed by position so a
 star is only ever fetched once.
 """
+import contextlib
 import logging
 import os
 import urllib.request
+import warnings
 
 import numpy as np
 
@@ -111,6 +113,20 @@ def _read_vo_spectrum(path):
     return w[order], f[order], s[order], q[order], ap
 
 
+@contextlib.contextmanager
+def _quiet_mast_misses():
+    """Swallow MAST's `NoResultsWarning`.
+
+    It subclasses AstropyWarning, so astropy renders it on stderr as a
+    `WARNING:` line. Most stars simply have no IUE spectrum and every caller
+    here already treats an empty result as the normal outcome, so it is pure
+    console noise -- not a condition anyone can act on."""
+    from astroquery.exceptions import NoResultsWarning
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', NoResultsWarning)
+        yield
+
+
 def _query_lowres(ra, dec, radius_arcsec):
     """Download every LOW-DISP large-aperture INES spectrum near a position.
 
@@ -121,9 +137,10 @@ def _query_lowres(ra, dec, radius_arcsec):
     from astropy.coordinates import SkyCoord
     from astroquery.mast import Observations
     coord = SkyCoord(ra=ra * u.deg, dec=dec * u.deg)
-    obs = Observations.query_criteria(
-        coordinates=coord, radius=radius_arcsec * u.arcsec,
-        obs_collection='IUE', dataproduct_type='spectrum')
+    with _quiet_mast_misses():
+        obs = Observations.query_criteria(
+            coordinates=coord, radius=radius_arcsec * u.arcsec,
+            obs_collection='IUE', dataproduct_type='spectrum')
     if obs is None or not len(obs):
         return {}
     obs = obs[obs['filters'] == 'LOW DISP']
@@ -136,7 +153,8 @@ def _query_lowres(ra, dec, radius_arcsec):
             if channel not in ('SWP', 'LW'):
                 continue
             try:
-                prod = Observations.get_product_list(row)
+                with _quiet_mast_misses():
+                    prod = Observations.get_product_list(row)
             except Exception as e:                       # noqa: BLE001
                 logger.debug('IUE product list failed for %s: %s',
                              row['obs_id'], e)
@@ -201,7 +219,14 @@ def _median_combine(spectra):
         return None
     fstack = np.array(fstack)
     sstack = np.array(sstack)
-    with np.errstate(all='ignore'):
+    # A flagged edge on the reference epoch leaves columns no epoch covers, and
+    # nanmedian warns "All-NaN slice encountered" ONCE PER SLICE there. errstate
+    # cannot suppress that -- it governs FP error states, not warnings.warn --
+    # so both guards are needed: errstate for the real 0/0 in the sigma floor,
+    # the filter for the all-NaN slices. Those columns are dropped by `keep`.
+    with np.errstate(all='ignore'), warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=RuntimeWarning,
+                                message='All-NaN slice encountered')
         flux = np.nanmedian(fstack, axis=0)
         n = np.isfinite(fstack).sum(axis=0)
         mad = np.nanmedian(np.abs(fstack - flux), axis=0)

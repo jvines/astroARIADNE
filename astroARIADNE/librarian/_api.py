@@ -1158,8 +1158,18 @@ class Librarian:
         )
         if self._parallax is not None and float(self._parallax) > 0:
             kw["distance"] = (1000.0 / float(self._parallax)) * u.pc
-        return SkyCoord(**kw).apply_space_motion(
-            Time(epoch_year, format="decimalyear"))
+        # No usable parallax -> no `distance`, and ERFA then flags "distance
+        # overridden" (it floors the parallax at PXMIN) once per star per epoch.
+        # That is exactly what we asked for -- a tangential-only propagation --
+        # so the warning is expected, not actionable, and would otherwise print
+        # for every parallax-less star in a bulk run.
+        import warnings
+        import erfa
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=erfa.ErfaWarning,
+                                    message=".*distance overridden.*")
+            return SkyCoord(**kw).apply_space_motion(
+                Time(epoch_year, format="decimalyear"))
 
     def _fetch_by_cone(self, cat_name, cat_def):
         """Fetch a catalog from a tight cone at the PM-propagated position.
