@@ -445,7 +445,14 @@ def out_filler(samp, logdat, param, name, out, fmt='f', fixed=False,
             cdf = estimate_cdf(samp, hdr=True)
             best, lo, up = credibility_interval_hdr(xx, pdf, cdf, sigma=1)
             _, lo3, up3 = credibility_interval_hdr(xx, pdf, cdf, sigma=3)
-        except ValueError:
+        # A degenerate posterior (effectively zero variance, or NaN samples)
+        # breaks the HDR path in two different ways, and neither is a
+        # ValueError: gaussian_kde raises LinAlgError on a singular covariance,
+        # and a histogram that never accumulates to z leaves
+        # `np.where(cdf >= z)[0]` empty -> IndexError. Both mean the same thing
+        # -- HDR is not computable here -- so both take the documented fallback
+        # instead of killing the whole fit.
+        except (ValueError, IndexError, np.linalg.LinAlgError):
             wrn = f'HDR failed for parameter {param}, reverting to regular CI'
             wrn += ' calculation. Be sure to check the histograms afterwards'
             wrn += ' for diagnosis.'
