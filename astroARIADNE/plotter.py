@@ -411,14 +411,50 @@ class SEDPlotter:
                 teffs = g['teff'][:]
                 loggs = g['logg'][:]
                 zs = g['z'][:]
-                t_val = np.unique(teffs)[np.argmin(np.abs(np.unique(teffs) - teff))]
                 l_val = np.unique(loggs)[np.argmin(np.abs(np.unique(loggs) - logg))]
                 z_val = np.unique(zs)[np.argmin(np.abs(np.unique(zs) - z))]
-                mask = (teffs == t_val) & (loggs == l_val) & (zs == z_val)
-                idx = np.where(mask)[0][0]
                 wave = g['wavelength'][:]
-                flux = g['flux'][idx]
-            return wave.astype(float), flux.astype(float)
+
+                # Teff is INTERPOLATED between the two bracketing cache nodes,
+                # not snapped to the nearest one. The cache is sampled every
+                # 100 K, so snapping quantises the best-fit curve onto a single
+                # node while the gray posterior draws -- which each snap
+                # individually -- spread across the neighbouring nodes. Their
+                # cloud is then a mixture of two nodes and the best-fit line
+                # sits systematically to one side of it, purely as a plotting
+                # artefact (for a 3369 K fit: the line lands on the 3400 K node
+                # while the draws split 2:1 between 3400 and 3300, putting the
+                # line ~2% above the cloud at every wavelength). Interpolating
+                # makes the curve a smooth function of Teff so it lands where
+                # the draws actually centre. logg/[Fe/H] keep nearest-node
+                # snapping: their cache axes are coarse and pockmarked with NaN
+                # holes (the cool nodes exist only at [Fe/H]=0), so blending
+                # across them would propagate NaNs into the curve.
+                tt = np.unique(teffs)
+                lo_i = int(np.searchsorted(tt, teff) - 1)
+                lo_i = min(max(lo_i, 0), len(tt) - 2) if len(tt) > 1 else 0
+
+                def _row(t_val):
+                    m = (teffs == t_val) & (loggs == l_val) & (zs == z_val)
+                    w = np.where(m)[0]
+                    return g['flux'][int(w[0])] if len(w) else None
+
+                flux = None
+                if len(tt) > 1:
+                    t0, t1 = tt[lo_i], tt[lo_i + 1]
+                    f0, f1 = _row(t0), _row(t1)
+                    if f0 is not None and f1 is not None and t1 > t0:
+                        u = float(np.clip((teff - t0) / (t1 - t0), 0.0, 1.0))
+                        cand = (1.0 - u) * np.asarray(f0, float) \
+                            + u * np.asarray(f1, float)
+                        if np.isfinite(cand).all():
+                            flux = cand
+                if flux is None:            # missing/NaN neighbour -> snap
+                    t_val = tt[np.argmin(np.abs(tt - teff))]
+                    flux = _row(t_val)
+                    if flux is None:
+                        return None
+            return wave.astype(float), np.asarray(flux, float)
         except Exception as e:
             logger.warning(f'Failed to load spectra cache for {model_key}: {e}')
             return None
