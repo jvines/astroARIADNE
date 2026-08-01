@@ -187,6 +187,20 @@ _IRX_ABS_CAL_FLOOR = 0.02
 # (GD 1400 L6 ~0.10 Rsun, WD 0137-349 BD). (MS primaries cap at R1 itself.)
 _IRX_WD_R2_MAX = 0.15
 
+# Disk fractional-luminosity ceiling for a WHITE-DWARF host: flat, i.e. the full
+# L_dust/L_* prior range, no temperature-dependent truncation. The main-sequence
+# ceiling (_disk_lmax) encodes the hot-exozodi argument -- sustained hot dust
+# around an MS star is rare (Kral+2017) -- which does NOT transfer to a WD. WD
+# debris sits inside the tidal-disruption radius, is continuously resupplied by
+# disrupted planetesimals, and hot dust at 1000-1800 K is the norm rather than
+# the exception; observed fractional luminosities reach ~3e-2 (G29-38). The MS
+# ceiling at those temperatures is 1e-4 to 1.3e-3, one to two orders of
+# magnitude BELOW real dusty WDs, so it removed the correct answer from the
+# disk hypothesis' support and pushed the excess onto the companion. Widening
+# the support is not a free win: the disk evidence is a mean over that support
+# (see z_disk below), so the extra prior volume carries its own Occam penalty.
+_IRX_WD_DISK_LMAX = 1e-1
+
 # Per-band significance threshold for the "detected excess" flag (n_significant,
 # has_excess >= 2 bands). 3 sigma is the conservative default that keeps the
 # single-band false-positive rate low. Lowering it captures marginal excesses
@@ -245,15 +259,23 @@ def _modbb_factor(lam_um):
     return np.where(lam > _MODBB_LAM0, (_MODBB_LAM0 / lam) ** _MODBB_BETA, 1.0)
 
 
-def _disk_lmax(T):
+def _disk_lmax(T, wd_host=False):
     """Empirical ceiling on the disk fractional luminosity L_dust/L_* vs dust
     temperature. Cold/warm debris disks reach ~1e-1 only in extreme
     (giant-impact) systems; sustained HOT dust is observed only at hot-exozodi
     levels (~1e-4, Kral+2017). Log-linear decline from 1e-1 at <=500 K to 1e-4
     at 1500 K. Without this joint prior, a luminous companion photosphere can
     masquerade as an astrophysically impossible hot, ultra-luminous 'disk'
-    (e.g. a T-dwarf secondary fit as a 1245 K, L/L*=0.16 blackbody)."""
+    (e.g. a T-dwarf secondary fit as a 1245 K, L/L*=0.16 blackbody).
+
+    ``wd_host=True`` returns the flat ``_IRX_WD_DISK_LMAX`` instead: the
+    hot-exozodi argument is main-sequence physics and does not apply to a white
+    dwarf, around which hot, comparatively luminous dust is the norm (see
+    ``_IRX_WD_DISK_LMAX``). Note the ceiling only ever binds above 500 K -- at
+    or below it the MS branch already returns the top of the L grid."""
     T = np.asarray(T, float)
+    if wd_host:
+        return np.full_like(T, _IRX_WD_DISK_LMAX)
     frac = ((np.log10(np.clip(T, 500.0, 1500.0)) - np.log10(500.0))
             / (np.log10(1500.0) - np.log10(500.0)))
     return 10.0 ** (-1.0 - 3.0 * frac)
@@ -492,7 +514,8 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                             teff_primary, fit_names=None, fit_waves=None,
                             fit_errs=None, rad_primary=None, prim_ig=None,
                             logg_primary=None, teff_primary_err=None,
-                            rad_primary_err=None, exc_obs=None, fit_obs=None):
+                            rad_primary_err=None, exc_obs=None, fit_obs=None,
+                            wd_host=False):
     """Bayesian model selection on the IR excess.
 
     Compares three hypotheses for the excess fluxes by their Bayesian evidence:
@@ -511,7 +534,8 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     ``L_dust/L_*`` in [1e-7, 1e-1]; uniform ``Teff2`` in
     [2300 K, min(grid, T_primary)] (a companion is cooler than the primary) and
     log-uniform ``R2`` in [0.03, 1] R_sun. Returns ``None`` if <2 finite bands
-    or distance/luminosity are unknown.
+    or distance/luminosity are unknown. ``wd_host`` lifts the main-sequence
+    hot-dust ceiling on the disk hypothesis (see ``_disk_lmax``).
     """
     from scipy.constants import h as H, c as C, k as KB, sigma as SB
     w = np.asarray(waves_um, float)
@@ -579,7 +603,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             chi2_disk[i] += Omega ** 2 * float(np.sum(Bf ** 2 * finv2))
         # Joint (T, L) prior: fractional luminosities above the empirical
         # ceiling are outside the disk hypothesis' support.
-        chi2_disk[i, Lg > _disk_lmax(T)] = np.inf
+        chi2_disk[i, Lg > _disk_lmax(T, wd_host)] = np.inf
         omega_grid[i] = Omega
 
     # Two-temperature disk (warm + cold modified blackbodies, the asteroid- +
@@ -611,7 +635,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                 Oflat[k] = Om[j]
                 k += 1
         chi2_disk2 = np.full((ncomb, ncomb), np.inf)
-        valid2 = Lflat <= _disk_lmax(Tflat)      # same joint (T, L) ceiling
+        valid2 = Lflat <= _disk_lmax(Tflat, wd_host)  # same joint (T, L) ceiling
         for i in range(ncomb):
             if not valid2[i]:
                 continue
@@ -906,7 +930,21 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     p_none, p_disk, p_comp = z_null / tot, z_disk / tot, z_comp / tot
     p_disk2 = z_disk2 / tot
 
-    wdn = wd / wd.sum()
+    # Posterior SHAPE referenced to the disk's OWN chi^2 minimum, not the global
+    # m0. After normalisation the two are identical (they differ by a constant
+    # factor), but the m0-referenced weights underflow to all-zero when the disk
+    # is catastrophically outfought by another hypothesis -- wd.sum() == 0 then
+    # made every reported disk parameter silently NaN rather than "the best disk
+    # that could be fit, which lost". The EVIDENCE (z_disk above) keeps using m0:
+    # that is what makes the hypothesis ratios commensurable.
+    _c2d_min = float(np.min(chi2_disk)) if np.isfinite(chi2_disk).any() else np.inf
+    if np.isfinite(_c2d_min):
+        with np.errstate(invalid='ignore'):
+            _wshape = np.where(np.isfinite(chi2_disk),
+                               np.exp(-(chi2_disk - _c2d_min) / 2), 0.0)
+    else:                                   # no support at all (cannot normally happen)
+        _wshape = wd
+    wdn = _wshape / _wshape.sum()
     TT, LL = np.meshgrid(Tg, Lg, indexing='ij')
     t_dust = float(np.sum(wdn * TT))
     ld = float(np.sum(wdn * LL))
@@ -3311,7 +3349,7 @@ class Fitter:
                 bf.get('teff'), rad_primary=bf.get('rad'),
                 prim_ig=interps.get(gname), logg_primary=bf.get('logg'),
                 teff_primary_err=unc.get('teff'), rad_primary_err=unc.get('rad'),
-                exc_obs=[v['obs'] for v in q.values()], **fkw) or {}
+                exc_obs=[v['obs'] for v in q.values()], wd_host=wd, **fkw) or {}
             # Compact-primary composite demotion: a companion whose radius RAILS
             # at the substellar cap (_IRX_WD_R2_MAX) is too luminous to be a
             # brown dwarf -- it is a luminous (dM) companion (the joint-binary
