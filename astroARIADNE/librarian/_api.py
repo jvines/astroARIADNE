@@ -34,10 +34,31 @@ warnings.filterwarnings("ignore", category=UserWarning, append=True)
 # Local Vizier instance — never mutate the module-level singleton, which is
 # shared across the whole Python process and breaks any other consumer of
 # astroquery in the same interpreter.
-Vizier = _VizierClass(row_limit=-1, columns=["all"], timeout=60)
-Gaia.TIMEOUT = 60
-XMatch.TIMEOUT = 60
-Catalogs.TIMEOUT = 60
+# PER-SERVICE network timeouts. A single global limit is wrong: these services
+# differ by an order of magnitude in cost. A VizieR cone search is a small
+# indexed lookup; a Gaia TAP async job is a queued server-side query; an XMatch
+# is a bulk upload plus crossmatch; a GaiaXPy retrieval streams
+# continuous-spectrum coefficients. Sizing them all at 60 s means the HEAVY
+# queries are cut first -- and a cut Gaia query falls back to VizieR XMatch,
+# which uses a different catalogue set and silently changes the resulting band
+# list (observed 2026-07-31 with ESA TAP at ~15 s/query: n_fit scattered 3-35
+# instead of ~22, on every machine at once). Each is separately overridable so a
+# degraded archive can be waited out per service.
+_TIMEOUT_DEFAULT = int(os.environ.get('ARIADNE_QUERY_TIMEOUT', '60'))
+_TIMEOUTS = {
+    'gaia':   int(os.environ.get('ARIADNE_TIMEOUT_GAIA', '180')),
+    'xmatch': int(os.environ.get('ARIADNE_TIMEOUT_XMATCH', '120')),
+    'xp':     int(os.environ.get('ARIADNE_TIMEOUT_XP', '300')),
+    'vizier': int(os.environ.get('ARIADNE_TIMEOUT_VIZIER', str(_TIMEOUT_DEFAULT))),
+    'mast':   int(os.environ.get('ARIADNE_TIMEOUT_MAST', str(_TIMEOUT_DEFAULT))),
+}
+
+# The astroquery client-side limits must not undercut the wrapper's per-call
+# budget, or the client aborts before the wrapper's timeout is reached.
+Vizier = _VizierClass(row_limit=-1, columns=["all"], timeout=_TIMEOUTS['vizier'])
+Gaia.TIMEOUT = _TIMEOUTS['gaia']
+XMatch.TIMEOUT = _TIMEOUTS['xmatch']
+Catalogs.TIMEOUT = _TIMEOUTS['mast']
 
 
 class GaiaQueryError(RuntimeError):
@@ -132,30 +153,58 @@ class CatalogDef:
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-_QUERY_TIMEOUT = 60  # seconds per network query
+_QUERY_TIMEOUT = _TIMEOUT_DEFAULT  # generic default (ARIADNE_QUERY_TIMEOUT)
 
 
-def _with_timeout(func, *args, timeout=_QUERY_TIMEOUT, **kwargs):
-    """Run any callable with a hard timeout. Returns None on timeout or error."""
+def _timeout_for(kind):
+    """Per-service timeout (see ``_TIMEOUTS``), else the generic default."""
+    return _TIMEOUTS.get(kind, _QUERY_TIMEOUT)
+
+
+def _with_timeout(func, *args, timeout=None, kind=None, **kwargs):
+    """Run any callable with a hard timeout. Returns None on timeout or error.
+
+    ``kind`` selects the per-service budget; an explicit ``timeout`` still wins.
+    """
     from concurrent.futures import TimeoutError as FuturesTimeout
 
+    if timeout is None:
+        timeout = _timeout_for(kind)
     future = _TIMEOUT_POOL.submit(func, *args, **kwargs)
     try:
         return future.result(timeout=timeout)
     except FuturesTimeout:
-        logger.warning("Query timed out after %ds", timeout)
+        logger.warning("Query timed out after %ds (%s)", timeout, kind or 'default')
         return None
     except Exception as e:
         logger.warning("Query failed: %s", e)
         return None
 
 
-def _tap_query(service, query, timeout=_QUERY_TIMEOUT):
-    """Run a TAP async query with a hard timeout. Returns astropy Table or None."""
-    def _run():
-        job = service.launch_job_async(query)
-        return job.get_results()
-    return _with_timeout(_run, timeout=timeout)
+def _tap_query(service, query, timeout=None, kind='gaia', prefer_sync=True):
+    """Run a TAP query with a hard timeout. Returns astropy Table or None.
+
+    SYNC FIRST. ESA queues async TAP jobs server-side, and that queue congests
+    independently of the service being healthy: measured 2026-07-31, an async
+    job took 92 s while the identical sync query took 10 s and every other
+    archive (VizieR 0.7-1.2 s, Simbad 0.9 s, XMatch 3.2 s) was fine. The
+    librarian's per-star queries return a handful of rows, well inside Gaia's
+    synchronous row cap, so the async path buys nothing and cost ~9x. Async is
+    still used as the fallback, since it is the one that survives a result set
+    above the sync limit.
+    """
+    def _sync():
+        return service.launch_job(query).get_results()
+
+    def _async():
+        return service.launch_job_async(query).get_results()
+
+    if prefer_sync:
+        res = _with_timeout(_sync, timeout=timeout, kind=kind)
+        if res is not None:
+            return res
+        logger.warning("sync TAP failed; retrying async (row cap or transient)")
+    return _with_timeout(_async, timeout=timeout, kind=kind)
 
 
 from ._qc import (
@@ -623,7 +672,7 @@ class Librarian:
             "ORDER BY ang_sep ASC"
         )
         try:
-            res = _with_timeout(lambda: Gaia.launch_job(adql).get_results())
+            res = _with_timeout(lambda: Gaia.launch_job(adql).get_results(), kind='gaia')
             if res is None or len(res) == 0:
                 logger.warning("No Gaia DR3 source within search radius")
                 return
@@ -689,7 +738,7 @@ class Librarian:
         # parallax (hence distance and radius) is unreliable.
         ruwe_res = _with_timeout(lambda: Gaia.launch_job(
             "SELECT ruwe FROM gaiadr3.gaia_source "
-            f"WHERE source_id = {int(self._gaia_id)}").get_results())
+            f"WHERE source_id = {int(self._gaia_id)}").get_results(), kind='gaia')
         if ruwe_res is not None and len(ruwe_res) > 0:
             rv = ruwe_res["ruwe"][0]
             try:
@@ -845,6 +894,7 @@ class Librarian:
 
             xm = _with_timeout(
                 XMatch.query,
+                kind='xmatch',
                 cat1="vizier:I/355/gaiadr3",
                 cat2=vizier_cat,
                 max_distance=self._search_radius,
@@ -1550,6 +1600,7 @@ class Librarian:
         region = CircleSkyRegion(self._coord, radius=self._search_radius)
         xm = _with_timeout(
             XMatch.query,
+            kind='xmatch',
             cat1="vizier:I/355/gaiadr3",
             cat2="vizier:II/312/ais",
             max_distance=self._search_radius,
@@ -1610,6 +1661,7 @@ class Librarian:
         region = CircleSkyRegion(self._coord, radius=5 * u.arcmin)
         xm = _with_timeout(
             XMatch.query,
+            kind='xmatch',
             cat1="vizier:I/355/gaiadr3",
             cat2="vizier:II/168/ubvmeans",
             max_distance=3 * u.arcmin,
@@ -1672,6 +1724,7 @@ class Librarian:
         for cat2, max_dist in xm_configs:
             xm = _with_timeout(
                 XMatch.query,
+                kind='xmatch',
                 cat1="vizier:I/355/gaiadr3",
                 cat2=cat2,
                 max_distance=max_dist,
@@ -1851,7 +1904,7 @@ class Librarian:
         ps = [PhotometricSystem.Stromgren_Std, PhotometricSystem.JKC_Std,
               PhotometricSystem.SDSS_Std, PhotometricSystem.PanSTARRS1_Std,
               PhotometricSystem.Sky_Mapper]      # QC-only (never filled)
-        df = _with_timeout(generate, [str(self._gaia_id)],
+        df = _with_timeout(generate, [str(self._gaia_id)], kind='xp',
                            photometric_system=ps, error_correction=True,
                            save_file=False)
         if df is None or not len(df):
