@@ -8,7 +8,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="astroARIADNE",
-    version="1.5.1",
+    version="1.5.2",
     author="Jose Vines",
     author_email="jose.vines@ug.uchile.cl",
     maintainer="Jose Vines",
@@ -51,7 +51,7 @@ setup(
         "h5py>=3.12.0",
         "tabulate>=0.9.0",
         "isochrones>=2.1",
-        "arviz>=0.19.0",
+        "arviz>=0.23.4",
         "h5netcdf>=1.4.0"
     ],
     package_data={'astroARIADNE': ['Datafiles']},

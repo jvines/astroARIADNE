@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astroARIADNE"
-version = "1.5.1"
+version = "1.5.2"
 description = "Bayesian Model Averaging SED fitter"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -46,7 +46,7 @@ dependencies = [
     "h5py>=3.12.0",
     "tabulate>=0.9.0",
     "isochrones>=2.1",
-    "arviz>=0.19.0",
+    "arviz>=0.23.4",
     "h5netcdf>=1.4.0",
 ]
 
