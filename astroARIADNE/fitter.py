@@ -1990,7 +1990,20 @@ class Fitter:
                     key = f'{stat_key}__{param}'
                     data['constant_data'][key] = np.array(val)
 
-        dt = az.from_dict(data)
+        if int(az.__version__.split('.')[0]) >= 1:
+            dt = az.from_dict(data)
+        else:
+            # arviz < 1 takes one keyword per standard group; a positional
+            # dict would become the posterior. The per-model posteriors are
+            # custom groups, added afterwards.
+            std = ('posterior', 'observed_data', 'constant_data')
+            dt = az.from_dict(**{g: data[g] for g in std})
+            extra = {g: v for g, v in data.items() if g not in std}
+            if extra:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        'ignore', message='.*not defined in the InferenceData')
+                    dt.add_groups(extra)
         dt.to_netcdf(path)
         logger.info(f'Wrote InferenceData to {path}')
 
