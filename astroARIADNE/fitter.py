@@ -3844,9 +3844,8 @@ class Fitter:
             out['irx'] = {}
         pickle.dump(out, open(out_file, 'wb'))
         self.out = out
-        # NetCDF is an optional ecosystem-interop export (needs arviz). Don't
-        # let a missing optional dependency or an export hiccup discard the
-        # primary BMA.pkl result that was just written.
+        # NetCDF is an optional ecosystem-interop export. Don't let an export
+        # failure discard the primary BMA.pkl result that was just written.
         nc_file = f'{self.out_folder}/ariadne_result.nc'
         try:
             self.to_netcdf(nc_file)

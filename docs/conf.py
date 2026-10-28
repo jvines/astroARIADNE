@@ -43,7 +43,7 @@ autodoc_mock_imports = [
     'isochrones', 'dynesty', 'pyphot', 'dustmaps', 'astroquery',
     'extinction', 'regions', 'PyAstronomy', 'healpy',
     'pandas', 'astropy', 'matplotlib', 'termcolor', 'tqdm',
-    'corner', 'tabulate', 'requests', 'arviz',
+    'corner', 'tabulate', 'requests',
 ]
 autodoc_default_options = {'members': True, 'undoc-members': True,
                            'show-inheritance': True}
