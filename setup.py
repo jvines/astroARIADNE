@@ -51,7 +51,6 @@ setup(
         "h5py>=3.12.0",
         "tabulate>=0.9.0",
         "isochrones>=2.1",
-        "h5netcdf>=1.4.0"
     ],
     package_data={'astroARIADNE': ['Datafiles']},
     include_package_data=True,
