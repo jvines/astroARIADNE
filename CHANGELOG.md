@@ -204,6 +204,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed `engine='multinest'`.
 - The legacy human-readable `model_grid_<Name>.dat` grid tables (~90 MB) are
   gone; `Star.load_grid` now reads the grid axes from the HDF5 cube instead.
+- `arviz` and `h5netcdf` are no longer dependencies. `ariadne_result.nc` is now
+  written with `scipy.io` and holds the same dict as `BMA.pkl`; read it with
+  `Fitter.read_netcdf`. 1.x files (arviz InferenceData) are not readable this way.
 
 ### Fixed
 - Single-grid fits crashed at the end-of-run summary: `end()` read the output

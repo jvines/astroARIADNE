@@ -1082,22 +1082,54 @@ stellar components and their sum.
 
 ## NetCDF Export (Ecosystem Interop)
 
-As of version 1.4.0 (extended in 1.4.1), ARIADNE can export its results as an
-[arviz](https://python.arviz.org/) DataTree in netCDF4 format. This is the
-canonical inter-tool format for passing full posterior distributions to
-downstream tools (LACHESIS, PROTEUS, etc.) without reducing to point estimates.
+Every BMA run (`fit_bma()`, and `fit_irx()`, which runs it) writes
+`ariadne_result.nc` next to `BMA.pkl`. It holds the same result dictionary as
+`BMA.pkl`: the BMA-weighted and per-grid posteriors, evidences and weights,
+summary statistics, synthetic photometry and, for `fit_irx()`, the IR-excess
+classification. It is a plain NetCDF3 file written with `scipy.io`, so reading
+it needs only scipy and numpy, and unlike a pickle it does not depend on the
+ARIADNE, numpy or pandas version that wrote it. If the export fails, the fit
+logs a warning and `BMA.pkl` is still written.
 
-### Exporting
-
-After a BMA fit completes, call `to_netcdf` on the `Fitter` object:
+### Reading the output
 
 ```python
-f.fit()             # run the fit as usual
-f.to_netcdf('ariadne_result.nc')
+from astroARIADNE import Fitter
+
+res = Fitter.read_netcdf('ariadne_result.nc')   # same dict as BMA.pkl
+
+teff = res['weighted_samples']['teff']          # BMA-weighted posterior draws
+print(res['best_fit_averaged']['teff'])
+print(res['uncertainties_averaged']['teff'])    # 1σ errors
+print(res['confidence_interval_averaged']['teff'])  # 3σ interval
+print(res['weights'])                           # BMA weight per grid
+print(res['lnZ'])                               # log-evidence per grid
+phoenix_teff = res['originals']['phoenix']['teff']  # one grid's own posterior
 ```
 
-Or get the raw dictionary (useful for programmatic access without writing a
-file):
+Arrays come back as numpy arrays, and scalars, strings and nested dicts as
+themselves. Python objects that are not data, such as the `Star` in
+`res['star']`, are stored as their string form, so `SEDPlotter` still reads
+`BMA.pkl`.
+
+`f.to_netcdf(path)` writes the current `f.out` again, including any keys you
+add to it after the fit.
+
+### Reading without ARIADNE
+
+The global attribute `ariadne_result` is a JSON copy of the result dict. Each
+numeric array in it is replaced by
+`{"__a__": "<variable>", "shape": [...], "dtype": "..."}`, naming one of the
+NetCDF variables `v0`, `v1`, …, and each nested dict is wrapped as
+`{"__d__": {...}}`. The `format` attribute is `ariadne-bma-1`. The reference
+decoder is `_result_nc_to_dict` in `fitter.py`, which `Fitter.read_netcdf` calls.
+
+### Ecosystem view
+
+`f.to_dict()` returns the BMA posterior under the ecosystem parameter names
+(`Teff`, `logg`, `feh`, `radius`, …) as `(1, n_draws)` arrays, together with the
+photometry, evidences and weights. It is computed from `f.out` and is not
+written to the file:
 
 ```python
 result = f.to_dict()
@@ -1105,94 +1137,8 @@ teff_samples = result['posterior']['Teff']      # shape (1, n_draws)
 model_weights = result['sample_stats']['model_weights']
 ```
 
-### Reading the output
-
-```python
-import arviz as az
-
-dt = az.from_netcdf('ariadne_result.nc')
-
-# BMA-weighted posterior (combined across all models)
-teff = dt['posterior'].ds.Teff          # shape (chain=1, draw=100000)
-print(f"Teff = {float(teff.median()):.0f} K")
-
-# Observed photometry used in the fit
-obs = dt['observed_data'].ds
-print(obs.wavelength.values)            # micron
-print(obs.flux.values)                  # erg/s/cm^2/micron
-
-# Model evidence and BMA weights
-cd = dt['constant_data'].ds
-print(cd.model_names.values)            # e.g. ['phoenix', 'kurucz', 'btsettl']
-print(cd.model_weights.values)          # e.g. [0.08, 0.26, 0.66]
-print(float(cd.log_evidence))           # BMA-weighted log evidence
-
-# Per-model posteriors (individual model fits before averaging)
-phoenix = dt['posterior_phoenix'].ds
-print(f"Phoenix Teff = {float(phoenix.Teff.median()):.0f} K")
-print(f"Phoenix log-likelihood median = {float(phoenix.log_likelihood.median()):.2f}")
-
-# Construct a KDE prior for downstream tools
-from scipy.stats import gaussian_kde
-kde = gaussian_kde(teff.values.flatten())
-```
-
-Since 1.4.1 you can attach the best-fit model SED before exporting, so the
-`.nc` file carries everything needed to re-plot it:
-
-```python
-# Assuming `artist` is an SEDPlotter that has been initialized
-f.out['model_sed'] = {
-    'model_flux': artist.model,    # f_λ at filter wavelengths
-    'wavelengths': artist.wave,
-}
-f.to_netcdf('ariadne_result.nc')
-```
-
-### File structure
-
-```
-/
-├── posterior/                          BMA-weighted combined posterior
-│   ├── Teff          (chain, draw)    K
-│   ├── logg          (chain, draw)    dex
-│   ├── feh           (chain, draw)    dex
-│   ├── radius        (chain, draw)    R_sun
-│   ├── luminosity    (chain, draw)    L_sun
-│   ├── distance      (chain, draw)    pc
-│   ├── Av            (chain, draw)    mag
-│   ├── age           (chain, draw)    Gyr          [1.4.1+, from MIST]
-│   ├── iso_mass      (chain, draw)    M_sun        [1.4.1+, from MIST]
-│   └── eep           (chain, draw)                 [1.4.1+, from MIST]
-│
-├── posterior_{model}/                  One group per stellar model used
-│   ├── Teff          (chain, draw)    K
-│   ├── ...
-│   └── log_likelihood (chain, draw)   Per-sample log-likelihood
-│
-├── observed_data/                     Photometry used in the fit
-│   ├── wavelength    (band,)          micron
-│   ├── flux          (band,)          erg/s/cm^2/micron
-│   ├── flux_err      (band,)          erg/s/cm^2/micron
-│   ├── filter_names  (band,)          str           [1.4.1+]
-│   ├── bandwidths    (band,)          micron         [1.4.1+]
-│   └── model_flux    (band,)          erg/s/cm^2/micron  [1.4.1+, if injected]
-│
-├── constant_data/                     Scalar metadata
-│   ├── log_evidence                   BMA-weighted log evidence
-│   ├── model_weights (n_models,)      BMA posterior model probabilities
-│   ├── model_names   (n_models,)      Model grid names
-│   ├── best_fit_averaged__{param}     Summary stats  [1.4.1+]
-│   ├── uncertainties_averaged__{param}               [1.4.1+]
-│   └── confidence_interval_averaged__{param}         [1.4.1+]
-│
-```
-
-Each model's posterior group (e.g. `posterior_phoenix`, `posterior_kurucz`) has
-its own draw count reflecting the nested sampling output for that grid. The
-top-level `posterior/` group contains the BMA-weighted resampled draws across
-all models, including MIST isochrone-derived parameters (age, mass, EEP) when
-available.
+Files written by ARIADNE 1.x use a different layout (an arviz InferenceData);
+read those with `arviz.from_netcdf`.
 
 
 ## Infrared Excess (IRX)
