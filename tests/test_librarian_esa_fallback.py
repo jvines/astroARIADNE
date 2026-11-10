@@ -75,7 +75,9 @@ def _run(vizier_result, esa=_fake_esa):
 
 
 def _tables(esa_m):
-    return [c.args[0] for c in esa_m.call_args_list]
+    """ESA data queries, leaving out the RUWE lookup that always runs."""
+    return [c.args[0] for c in esa_m.call_args_list
+            if not c.args[0].startswith("SELECT ruwe")]
 
 
 def test_mag_err_adds_zero_point_like_vizier():
@@ -123,7 +125,7 @@ def test_esa_first_row_lowercases_and_masks():
 def test_vizier_failure_reads_everything_from_esa():
     lib, esa = _run(None)
     assert lib._parallax == pytest.approx(10.037)
-    assert lib._ruwe is None          # separate RUWE query, mocked to fail
+    assert lib._ruwe == 1.1
     g, g_e = lib._magnitudes["Gaia_G"]
     assert g == 8.5
     assert g_e == pytest.approx(np.hypot(2.5 / np.log(10) / 5000.0, 0.0027553202))
@@ -149,7 +151,7 @@ def test_vizier_empty_does_not_query_esa_for_flame_or_distance():
 def test_vizier_row_does_not_query_esa():
     t = Table({"Plx": [9.0], "e_Plx": [0.1], "Gmag": [8.0], "e_Gmag": [0.01]})
     lib, esa = _run([t])
-    assert esa.call_count == 0
+    assert _tables(esa) == []
     assert lib._parallax == pytest.approx(9.037)
 
 
@@ -168,3 +170,22 @@ def test_esa_failure_after_vizier_empty_does_not_raise():
 def test_esa_absent_source_returns_quietly():
     lib, _ = _run(None, esa=lambda adql: {})
     assert lib._parallax is None
+
+
+def test_ruwe_survives_a_full_sync_queue():
+    """ESA rejects sync jobs when its sync queue is full; RUWE retries async."""
+    job = MagicMock()
+    job.get_results.return_value = Table({"ruwe": [1.23]})
+    gaia = MagicMock()
+    gaia.launch_job.side_effect = Exception("503: maximum number of "
+                                            "synchronous queued jobs")
+    gaia.launch_job_async.return_value = job
+    viz = MagicMock()
+    viz.query_constraints.side_effect = lambda catalog=None, **kw: (
+        [Table({"Plx": [9.0], "e_Plx": [0.1]})] if catalog == "I/355/gaiadr3"
+        else [Table()])
+    lib = _shell()
+    with patch.object(api, "Vizier", viz), patch.object(api, "Gaia", gaia), \
+            patch.object(api, "_GAIA_LOGIN_ATTEMPTED", True):
+        lib._query_gaia_params()
+    assert lib._ruwe == pytest.approx(1.23)

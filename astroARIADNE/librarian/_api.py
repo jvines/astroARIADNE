@@ -846,12 +846,13 @@ class Librarian:
         # gaiadr3.gaia_source via the Gaia TAP. A high value is surfaced to the
         # user in the parameter display (see _RUWE_BINARITY_THRESH): it almost
         # always means an unresolved companion / perturbed astrometry, so the
-        # parallax (hence distance and radius) is unreliable.
-        ruwe_res = _with_timeout(lambda: Gaia.launch_job(
+        # parallax (hence distance and radius) is unreliable. Sync then async,
+        # so a full ESA sync queue does not drop the flag.
+        ruwe_row = _esa_first_row(
             "SELECT ruwe FROM gaiadr3.gaia_source "
-            f"WHERE source_id = {int(self._gaia_id)}").get_results(), kind='gaia')
-        if ruwe_res is not None and len(ruwe_res) > 0:
-            rv = ruwe_res["ruwe"][0]
+            f"WHERE source_id = {int(self._gaia_id)}")
+        if ruwe_row:
+            rv = ruwe_row.get("ruwe")
             try:
                 if rv is not None and not np.ma.is_masked(rv) \
                         and np.isfinite(float(rv)):
