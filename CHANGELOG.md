@@ -5,6 +5,23 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-11-11
+
+### Added
+- **ESA Gaia archive fallback.** When a VizieR query fails, the Gaia DR3 source
+  row, the FLAME parameters and the Bailer-Jones distance are read from the ESA
+  Gaia archive instead (`gaiadr3.gaia_source`,
+  `gaiadr3.astrophysical_parameters`, `external.gaiaedr3_distance`), so a CDS
+  outage no longer leaves stars without parallax, Gaia photometry or distance.
+  An empty VizieR answer still means the source has no FLAME or distance entry;
+  only a failed query goes to ESA. Gaia magnitude errors include the Riello et
+  al. (2021) zero-point term, matching VizieR's `e_Gmag`.
+
+### Fixed
+- ESA archive queries, including the Gaia ID cone search, retry as async jobs
+  when the sync job is rejected. ESA rejects sync jobs when its sync queue is
+  full, which made the Gaia ID lookup fail outright.
+
 ## [1.5.2] - 2026-10-23
 
 ### Fixed
