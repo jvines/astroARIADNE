@@ -99,6 +99,108 @@ def _tap_query(service, query, timeout=_QUERY_TIMEOUT):
     return _with_timeout(_run, timeout=timeout)
 
 
+# ── ESA Gaia archive fallback ───────────────────────────────────
+# The Gaia DR3 source row, FLAME parameters and Bailer-Jones distance come from
+# VizieR (CDS). When a VizieR query fails the same rows are read from the ESA
+# Gaia archive and renamed to the VizieR spellings the parsers expect.
+
+# Gaia DR3 photometric zero-point uncertainties (Riello+21). VizieR's
+# I/355/gaiadr3 e_Gmag/e_BPmag/e_RPmag add these in quadrature to the flux
+# term, so the fallback does the same.
+_GAIA_ZP_ERR = {"G": 0.0027553202, "BP": 0.0027901700, "RP": 0.0037793818}
+
+
+def _esa_first_row(adql):
+    """First row of an ESA Gaia archive query as a dict.
+
+    Tries a sync job first and retries as an async job, because ESA rejects
+    sync jobs when its sync queue is full. Returns None when both failed and
+    {} when the query returned no rows. Masked cells become None, as ``_col``
+    returns for a masked VizieR cell.
+    """
+    res = _with_timeout(lambda: Gaia.launch_job(adql).get_results())
+    if res is None:
+        logger.warning("ESA sync query failed; retrying as an async job")
+        res = _tap_query(Gaia, adql)
+    if res is None:
+        return None
+    if len(res) == 0:
+        return {}
+    row = res[0]
+    return {c.lower(): (None if ma.is_masked(row[c]) else row[c])
+            for c in res.colnames}
+
+
+def _gaia_mag_err(flux_over_error, zp_err):
+    """VizieR-style Gaia magnitude error from a flux_over_error value."""
+    if flux_over_error is None or not np.isfinite(flux_over_error) \
+            or flux_over_error <= 0:
+        return None
+    return float(np.hypot(2.5 / np.log(10) / flux_over_error, zp_err))
+
+
+def _vizier_gaia_main(g):
+    """gaiadr3.gaia_source row -> I/355/gaiadr3 column names."""
+    out = {
+        "Source": g.get("source_id"),
+        "RA_ICRS": g.get("ra"), "DE_ICRS": g.get("dec"),
+        "pmRA": g.get("pmra"), "pmDE": g.get("pmdec"),
+        "Plx": g.get("parallax"), "e_Plx": g.get("parallax_error"),
+        "RUWE": g.get("ruwe"),
+    }
+    for band, col in (("G", "g"), ("BP", "bp"), ("RP", "rp")):
+        out[f"{band}mag"] = g.get(f"phot_{col}_mean_mag")
+        out[f"e_{band}mag"] = _gaia_mag_err(
+            g.get(f"phot_{col}_mean_flux_over_error"), _GAIA_ZP_ERR[band])
+    return out
+
+
+def _vizier_gaia_flame(ap):
+    """gaiadr3.astrophysical_parameters row -> I/355/paramp FLAME names."""
+    out = {}
+    for name, col in (("Rad", "radius_flame"), ("Lum", "lum_flame"),
+                      ("Mass", "mass_flame"), ("Age", "age_flame")):
+        out[f"{name}-Flame"] = ap.get(col)
+        out[f"b_{name}-Flame"] = ap.get(f"{col}_lower")
+        out[f"B_{name}-Flame"] = ap.get(f"{col}_upper")
+    return out
+
+
+def _vizier_bailer_jones(d):
+    """external.gaiaedr3_distance row -> I/352/gedr3dis names."""
+    return {"rgeo": d.get("r_med_geo"), "b_rgeo": d.get("r_lo_geo"),
+            "B_rgeo": d.get("r_hi_geo")}
+
+
+def _esa_gaia_main(source_id):
+    """Gaia DR3 source row from ESA, VizieR-named. None on failure, {} if absent."""
+    g = _esa_first_row(
+        "SELECT source_id, ra, dec, pmra, pmdec, parallax, parallax_error, "
+        "ruwe, phot_g_mean_mag, phot_g_mean_flux_over_error, "
+        "phot_bp_mean_mag, phot_bp_mean_flux_over_error, "
+        "phot_rp_mean_mag, phot_rp_mean_flux_over_error "
+        f"FROM gaiadr3.gaia_source WHERE source_id = {int(source_id)}")
+    return _vizier_gaia_main(g) if g else g
+
+
+def _esa_gaia_flame(source_id):
+    """FLAME row from ESA, VizieR-named. None on failure, {} if absent."""
+    cols = ", ".join(f"{c}, {c}_lower, {c}_upper" for c in
+                     ("radius_flame", "lum_flame", "mass_flame", "age_flame"))
+    ap = _esa_first_row(
+        f"SELECT {cols} FROM gaiadr3.astrophysical_parameters "
+        f"WHERE source_id = {int(source_id)}")
+    return _vizier_gaia_flame(ap) if ap else ap
+
+
+def _esa_bailer_jones(source_id):
+    """Bailer-Jones EDR3 distance row from ESA, VizieR-named."""
+    d = _esa_first_row(
+        "SELECT r_med_geo, r_lo_geo, r_hi_geo FROM external.gaiaedr3_distance "
+        f"WHERE source_id = {int(source_id)}")
+    return _vizier_bailer_jones(d) if d else d
+
+
 from ._qc import (
     _col,
     _qc_2mass_band,
@@ -363,11 +465,15 @@ class Librarian:
             "ORDER BY ang_sep ASC"
         )
         try:
-            res = _with_timeout(lambda: Gaia.launch_job(adql).get_results())
-            if res is None or len(res) == 0:
+            row = _esa_first_row(adql)
+            if row is None:
+                logger.warning("Gaia ID resolution failed: the ESA archive "
+                               "did not answer")
+                return
+            if not row:
                 logger.warning("No Gaia DR3 source within search radius")
                 return
-            self._gaia_id = int(res["source_id"][0])
+            self._gaia_id = int(row["source_id"])
             logger.info("Resolved Gaia DR3 ID: %d", self._gaia_id)
         except Exception as e:
             logger.warning("Gaia ID resolution failed: %s", e)
@@ -383,17 +489,28 @@ class Librarian:
             Vizier.query_constraints,
             catalog="I/355/gaiadr3", Source=str(self._gaia_id),
         )
-        if not main_cats or len(main_cats[0]) == 0:
-            logger.warning("Gaia DR3 source %d not found", self._gaia_id)
-            return
-        main = main_cats[0][0]
+        # A failed (None) or empty VizieR answer falls back to the ESA archive.
+        if main_cats is not None and len(main_cats) and len(main_cats[0]):
+            main = main_cats[0][0]
+        else:
+            logger.warning("VizieR Gaia DR3 query %s for %d; trying the ESA "
+                           "archive", "failed" if main_cats is None
+                           else "returned no row", self._gaia_id)
+            main = _esa_gaia_main(self._gaia_id)
+            if not main:
+                logger.warning("Gaia DR3 source %d not found", self._gaia_id)
+                return
 
-        # FLAME astrophysical parameters table
+        # FLAME astrophysical parameters table. Only a failed VizieR query
+        # goes to ESA; an empty answer means the source has no FLAME row.
         ap_cats = _with_timeout(
             Vizier.query_constraints,
             catalog="I/355/paramp", Source=str(self._gaia_id),
         )
-        ap = ap_cats[0][0] if ap_cats and len(ap_cats[0]) > 0 else None
+        if ap_cats is None:
+            ap = _esa_gaia_flame(self._gaia_id) or None
+        else:
+            ap = ap_cats[0][0] if len(ap_cats) and len(ap_cats[0]) else None
 
         # Parallax (Lindegren+21 correction)
         plx = _col(main, "Plx")
@@ -607,17 +724,20 @@ class Librarian:
     # ── Bailer-Jones distance ────────────────────────────────────
 
     def _query_bailer_jones(self):
-        """Query Bailer-Jones EDR3 geometric distance."""
+        """Query Bailer-Jones EDR3 geometric distance (ESA archive fallback)."""
         if self._gaia_id is None:
             return
         res = _with_timeout(
             Vizier.query_constraints,
             catalog="I/352/gedr3dis", Source=str(self._gaia_id),
         )
-        if not res or len(res[0]) == 0:
+        if res is None:
+            row = _esa_bailer_jones(self._gaia_id)
+        else:
+            row = res[0][0] if len(res) and len(res[0]) else None
+        if not row:
             return
         try:
-            row = res[0][0]
             dist = float(row["rgeo"])
             lo = dist - float(row["b_rgeo"])
             hi = float(row["B_rgeo"]) - dist
