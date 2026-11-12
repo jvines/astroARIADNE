@@ -5,6 +5,31 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-11-12
+
+### Added
+- **Failover for every CDS call.** A CDS Strasbourg outage takes down VizieR
+  and xMatch together, and previously only the Gaia queries had a fallback.
+  Every VizieR query is now retried on the CfA mirror
+  (`vizier.cfa.harvard.edu`; override with `CDS_VIZIER_MIRRORS`), and xMatch
+  (GALEX, Mermilliod, Strömgren and the catalogue-ID recovery) is reproduced
+  locally from two VizieR cone queries. A host that fails is skipped for 10
+  minutes (`CDS_DOWN_SECONDS`). The module is `astroARIADNE/librarian/_cds.py`.
+
+### Fixed
+- The CfA mirror returns shifted, corrupt values for default (`-out=*`) and
+  explicit column lists, so requests sent to a mirror always ask for
+  `-out.all`. A mirror database error arrives as an empty HTTP 200; it is
+  retried (`CDS_MIRROR_TRIES`, default 5) and then raised, so the caller takes
+  its own fallback instead of reading "not in catalogue".
+- While CDS is down, an empty FLAME or Bailer-Jones answer from the mirror is
+  confirmed with the ESA archive: CfA answers `Source=<id>` on `I/355/paramp`
+  with an empty table even when it holds the row.
+- A dead xMatch host is detected by a 10 s TCP probe; astroquery's own table
+  check ignores `XMatch.TIMEOUT` and waited 75 s, past the query budget.
+- Error responses that astroquery cached during an outage are deleted instead
+  of being replayed for a week.
+
 ## [1.5.3] - 2026-11-11
 
 ### Added

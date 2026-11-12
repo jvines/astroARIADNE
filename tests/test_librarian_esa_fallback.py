@@ -155,6 +155,18 @@ def test_vizier_empty_does_not_query_esa_for_flame_or_distance():
     assert lib._parallax == pytest.approx(10.0 + api._PLX_ZEROPOINT)
 
 
+def test_mirror_empty_flame_and_distance_are_confirmed_with_esa():
+    # CfA answers Source=<id> on I/355/paramp with an empty table even when it
+    # holds the row; while CDS is down an empty answer is checked with ESA.
+    from astroARIADNE.librarian import _cds
+    _cds.breaker.trip(api._PRIMARY_VIZIER, "test")
+    lib, queries = _run([Table()])
+    assert any("astrophysical_parameters" in q for q in queries)
+    assert any("gaiaedr3_distance" in q for q in queries)
+    assert lib._radius_flame == 1.0
+    assert lib._distance == 100.0
+
+
 def test_vizier_row_does_not_query_esa():
     t = Table({"Plx": [9.0], "e_Plx": [0.1], "Gmag": [8.0], "e_Gmag": [0.01]})
     lib, queries = _run([t])
