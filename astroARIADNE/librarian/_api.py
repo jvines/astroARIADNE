@@ -21,9 +21,10 @@ from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astroquery.gaia import Gaia
 from astroquery.mast import Catalogs
-from astroquery.vizier import Vizier as _VizierClass
 from astroquery.xmatch import XMatch
 from regions import CircleSkyRegion
+
+from . import _cds
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,11 @@ warnings.filterwarnings("ignore", category=UserWarning, append=True)
 # Local Vizier instance — never mutate the module-level singleton, which is
 # shared across the whole Python process and breaks any other consumer of
 # astroquery in the same interpreter.
-Vizier = _VizierClass(row_limit=-1, columns=["all"], timeout=60)
+# VizieR moves to a mirror when CDS is down (see _cds); xMatch gets a short
+# connect timeout so a dead CDS falls through to the local crossmatch quickly.
+Vizier = _cds.MirroredVizier(row_limit=-1, columns=["all"], timeout=60)
 Gaia.TIMEOUT = 60
-XMatch.TIMEOUT = 60
+XMatch.TIMEOUT = _cds.connect_read(60)
 Catalogs.TIMEOUT = 60
 
 # Shared executor used by _with_timeout — avoids per-call pool spawn/teardown.
@@ -89,6 +92,31 @@ def _with_timeout(func, *args, timeout=_QUERY_TIMEOUT, **kwargs):
     except Exception as e:
         logger.warning("Query failed: %s", e)
         return None
+
+
+def _xmatch(**kw):
+    """CDS xMatch, reproduced from VizieR cone queries when xMatch is down.
+
+    Looks up the module-level ``XMatch`` at call time so test patches apply.
+    """
+    return _cds.xmatch(client=XMatch, timeout=60, **kw)
+
+
+_PRIMARY_VIZIER = Vizier.VIZIER_SERVER
+
+
+def _mirror_empty(res):
+    """True for an empty VizieR answer given while CDS itself is down.
+
+    Such an answer came from a mirror and does not prove absence: the CfA
+    mirror answers Source=<id> on I/355/paramp with an empty table even when
+    it holds the row (HD 209458 on 2026-11-11: empty every time, while a cone
+    on the same table finds Rad-Flame = 1.197). Callers confirm it with the
+    ESA archive. With CDS up, an empty answer still means absent.
+    """
+    if res is None or (len(res) and len(res[0])):
+        return False
+    return _cds.breaker.is_down(_PRIMARY_VIZIER)
 
 
 def _tap_query(service, query, timeout=_QUERY_TIMEOUT):
@@ -507,7 +535,7 @@ class Librarian:
             Vizier.query_constraints,
             catalog="I/355/paramp", Source=str(self._gaia_id),
         )
-        if ap_cats is None:
+        if ap_cats is None or _mirror_empty(ap_cats):
             ap = _esa_gaia_flame(self._gaia_id) or None
         else:
             ap = ap_cats[0][0] if len(ap_cats) and len(ap_cats[0]) else None
@@ -665,7 +693,7 @@ class Librarian:
             vizier_cat, id_cols = _XMATCH_CONFIG[cat_name]
 
             xm = _with_timeout(
-                XMatch.query,
+                _xmatch,
                 cat1="vizier:I/355/gaiadr3",
                 cat2=vizier_cat,
                 max_distance=self._search_radius,
@@ -731,7 +759,7 @@ class Librarian:
             Vizier.query_constraints,
             catalog="I/352/gedr3dis", Source=str(self._gaia_id),
         )
-        if res is None:
+        if res is None or _mirror_empty(res):
             row = _esa_bailer_jones(self._gaia_id)
         else:
             row = res[0][0] if len(res) and len(res[0]) else None
@@ -967,7 +995,7 @@ class Librarian:
         """Query GALEX via VizieR XMatch with Gaia DR3."""
         region = CircleSkyRegion(self._coord, radius=self._search_radius)
         xm = _with_timeout(
-            XMatch.query,
+            _xmatch,
             cat1="vizier:I/355/gaiadr3",
             cat2="vizier:II/312/ais",
             max_distance=self._search_radius,
@@ -1003,7 +1031,7 @@ class Librarian:
         """
         region = CircleSkyRegion(self._coord, radius=5 * u.arcmin)
         xm = _with_timeout(
-            XMatch.query,
+            _xmatch,
             cat1="vizier:I/355/gaiadr3",
             cat2="vizier:II/168/ubvmeans",
             max_distance=3 * u.arcmin,
@@ -1065,7 +1093,7 @@ class Librarian:
 
         for cat2, max_dist in xm_configs:
             xm = _with_timeout(
-                XMatch.query,
+                _xmatch,
                 cat1="vizier:I/355/gaiadr3",
                 cat2=cat2,
                 max_distance=max_dist,
