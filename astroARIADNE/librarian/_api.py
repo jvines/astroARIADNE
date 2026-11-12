@@ -363,10 +363,22 @@ _WISE_BAND_IDX = {"WISE_RSR_W1": 0, "WISE_RSR_W2": 1,
 # catalogs. Used to proper-motion-propagate the Gaia position before a cone-
 # search fallback, so high-PM stars (whose catalog-epoch positions sit many
 # arcsec from J2016) are still recovered. AllWISE: mission mean (MJD ~55400 =
-# 2010.56). 2MASS: survey mean (~1999.3).
+# 2010.56). 2MASS: survey mean (~1999.3). Pan-STARRS1 3pi: 2009.5-2014.5
+# (mean-epoch positions). SDSS imaging: 1998.5-2009.5.
 _CATALOG_EPOCH = {"2MASS": 1999.3, "Wise": 2010.56, "CatWISE": 2015.4,
                   "AKARI_IRC": 2006.5, "AKARI_FIS": 2006.5, "IRAS": 1983.5,
-                  "HPPSC": 2011.0, "HSPSC": 2011.0}
+                  "HPPSC": 2011.0, "HSPSC": 2011.0,
+                  "Pan-STARRS": 2012.0, "SDSS": 2004.0}
+
+# Half-width (yr) of each survey's observing window around _CATALOG_EPOCH.
+# Every source was observed on its own date, so a star moving |PM| can sit up
+# to |PM| x half-span from the mean-epoch position: 2MASS 02025226+0542205
+# moves 2.43"/yr, was observed 2000.67, and lies 3.4" from its 1999.3
+# position -- outside the 3" cone. When the Gaia crossmatch ID is known the
+# cone fallback widens by this much and then accepts only the ID match.
+_CATALOG_EPOCH_HALFSPAN = {"2MASS": 2.0, "Wise": 0.6, "Pan-STARRS": 2.5,
+                           "SDSS": 5.5}
+_MAX_PM_CONE = 60.0 * u.arcsec
 
 
 # ── Catalog registry ────────────────────────────────────────────
@@ -1129,6 +1141,9 @@ class Librarian:
             and self._ids.get(name) is not None
         ]
         cats = {}
+        # Catalogs whose crossmatched row the bulk cone found (QC may still
+        # have rejected its bands); the PM cone fallback skips these.
+        self._bulk_matched = set()
         if viz_ids:
             result = _with_timeout(
                 Vizier.query_region,
@@ -1145,20 +1160,24 @@ class Librarian:
                 continue
             self._fetch_standard(cat_name, _CATALOGS[cat_name], cats, ext_id)
 
-        # Proper-motion-propagated cone fallback for the IR catalogs. The bulk
-        # cone above is centred on the input coordinates; for high-PM stars the
-        # 2MASS (~1999) and AllWISE (~2010) sources sit many arcsec away and are
-        # missed, and AllWISE frequently has no Gaia best_neighbour at all
-        # (Gaia's own crossmatch drops the displaced source). Re-fetch any
-        # still-missing 2MASS/WISE bands from a tight cone at the position
-        # propagated to each catalog's epoch.
-        for cat_name in ("2MASS", "Wise"):
-            if cat_name in self._ignore:
+        # Proper-motion-propagated cone fallback. The bulk cone above is
+        # centred on the input coordinates; for high-PM stars the 2MASS (~1999),
+        # SDSS (~2004), AllWISE (~2010) and PS1 (~2012) sources sit many arcsec
+        # away and are missed, and AllWISE frequently has no Gaia
+        # best_neighbour at all (Gaia's own crossmatch drops the displaced
+        # source). Re-fetch any catalog the bulk cone did not match from a cone
+        # at the position propagated to each catalog's epoch. The optical
+        # catalogs are dense, so they are recovered only by their Gaia
+        # crossmatch ID, never by nearest source.
+        for cat_name in ("2MASS", "Wise", "Pan-STARRS", "SDSS"):
+            if cat_name in self._ignore or cat_name in self._bulk_matched:
                 continue
             cat_def = _CATALOGS[cat_name]
             if all(b.pyphot in self._magnitudes for b in cat_def.bands):
                 continue
-            self._fetch_by_cone(cat_name, cat_def)
+            self._fetch_by_cone(
+                cat_name, cat_def,
+                require_id=cat_name in ("Pan-STARRS", "SDSS"))
 
         # CatWISE2020: fill W1/W2 ONLY where AllWISE (both shots above) found
         # nothing -- the faint, high-PM regime AllWISE never reached.
@@ -1278,6 +1297,8 @@ class Librarian:
         if len(matched) == 0:
             return
         row = matched[0]
+        if hasattr(self, "_bulk_matched"):
+            self._bulk_matched.add(cat_name)
 
         # Catalog-level QC
         if cat_def.qc is not None and not cat_def.qc(row):
@@ -1362,8 +1383,8 @@ class Librarian:
             return SkyCoord(**kw).apply_space_motion(
                 Time(epoch_year, format="decimalyear"))
 
-    def _fetch_by_cone(self, cat_name, cat_def):
-        """Fetch a catalog from a tight cone at the PM-propagated position.
+    def _fetch_by_cone(self, cat_name, cat_def, require_id=False):
+        """Fetch a catalog from a cone at the PM-propagated position.
 
         Fallback for catalogs missed by the primary path -- either because the
         Gaia best_neighbour table is empty (e.g. AllWISE for a high-PM star) or
@@ -1372,15 +1393,32 @@ class Librarian:
         the propagated position; the same per-band QC as the primary path
         guards against false matches. Idempotent: never overwrites a band the
         primary path already attached.
+
+        With a crossmatched ID and a Gaia proper motion the cone is widened by
+        |PM| x the survey's epoch half-span (_CATALOG_EPOCH_HALFSPAN), since a
+        fast mover observed early or late in the survey sits far from its
+        mean-epoch position. Inside a widened cone only the ID match is taken,
+        or a nearest source no farther than the base radius. ``require_id``
+        accepts the ID match only.
         """
         if cat_def.vizier_id is None:
+            return
+        ext_id = self._ids.get(cat_name)
+        if require_id and ext_id is None:
             return
         epoch = _CATALOG_EPOCH.get(cat_name)
         coord = (self._propagated_coord(epoch) if epoch is not None
                  else self._coord)
+        base = self._search_radius.to(u.arcsec)
+        radius = base
+        if (ext_id is not None and epoch is not None
+                and self._pm_available()):
+            pm = float(np.hypot(float(self._pmra), float(self._pmdec)))
+            widen = pm * 1e-3 * _CATALOG_EPOCH_HALFSPAN.get(cat_name, 0.0)
+            radius = min(base + widen * u.arcsec, max(base, _MAX_PM_CONE))
         result = _with_timeout(
             Vizier.query_region, coord,
-            radius=self._search_radius, catalog=cat_def.vizier_id,
+            radius=radius, catalog=cat_def.vizier_id,
         )
         if not result:
             logger.info("No PM-propagated cone data for %s", cat_name)
@@ -1390,11 +1428,13 @@ class Librarian:
             cat.sort("_r")
         except (TypeError, KeyError):
             return
+        if len(cat) == 0:
+            return
 
         # Prefer the crossmatched ID if we have one and it lands in the cone,
-        # else the nearest source to the propagated position.
-        row = cat[0]
-        ext_id = self._ids.get(cat_name)
+        # else the nearest source to the propagated position -- but never a
+        # source the widening alone brought in.
+        row = None
         if ext_id is not None:
             id_cols = cat_def.xmatch_id_cols or ()
             col_name = next((c for c in id_cols if c in cat.colnames), None)
@@ -1402,6 +1442,17 @@ class Librarian:
                 matched = cat[cat[col_name] == ext_id]
                 if len(matched):
                     row = matched[0]
+        if row is None:
+            if require_id:
+                logger.info("%s ID %s not in the PM-propagated cone",
+                            cat_name, ext_id)
+                return
+            sep = self._match_sep_arcsec(cat, cat[0])
+            if radius > base and (sep is None or sep > base.value):
+                logger.info("%s: no ID match and nothing within %.1f\" of the "
+                            "PM-propagated position", cat_name, base.value)
+                return
+            row = cat[0]
 
         # Catalog-level QC (same predicates as the primary path).
         if cat_def.qc is not None and not cat_def.qc(row):
@@ -1414,6 +1465,7 @@ class Librarian:
             logger.info("WISE source is a blend (nb>=2, cone fallback), skipping")
             return
 
+        n_before = len(self._magnitudes)
         for band in cat_def.bands:
             if band.pyphot in self._magnitudes:
                 continue
@@ -1432,7 +1484,13 @@ class Librarian:
                 continue
             err_f = float(err_v) if err_v is not None else 0.02
             self._add_mag(band.pyphot, float(mag_v), err_f)
-        logger.info("Recovered %s via PM-propagated cone fallback", cat_name)
+        n_new = len(self._magnitudes) - n_before
+        if n_new:
+            logger.info("Recovered %d %s band(s) via PM-propagated cone "
+                        "fallback (r=%.1f\")", n_new, cat_name, radius.value)
+        else:
+            logger.info("%s matched in the PM-propagated cone but no band "
+                        "passed QC", cat_name)
 
     def _fetch_catwise(self):
         """Fill WISE W1/W2 from CatWISE2020 where AllWISE is absent.
