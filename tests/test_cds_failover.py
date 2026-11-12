@@ -23,6 +23,7 @@ from astroARIADNE.librarian._api import Librarian  # noqa: E402
 
 # conftest disables the local xMatch for every test; keep the real one here.
 REAL_LOCAL_XMATCH = _cds.local_xmatch
+REAL_REACHABLE = _cds._reachable
 
 CDS = "vizier.cds.unistra.fr"
 CFA = "vizier.cfa.harvard.edu"
@@ -224,11 +225,24 @@ def test_local_xmatch_returns_every_pair_like_xmatch(monkeypatch):
     assert sorted(xm["Source"]) == [1, 2]
 
 
-def test_local_xmatch_renames_clashing_second_catalogue_columns(monkeypatch):
-    _cones(monkeypatch, _gaia(0.0), _tmass(0.2))
+def test_local_xmatch_clash_keeps_the_counterpart_column_name(monkeypatch):
+    # Gaia DR3 carries its own TYC2; the Tycho-2 ID must win the bare name.
+    t1, t2 = _gaia(0.0), _tmass(0.2)
+    t1["TYC2"] = MaskedColumn([0], mask=[True])
+    t2["TYC2"] = [1821]
+    _cones(monkeypatch, t1, t2)
     xm = _local()
-    assert "_RAJ2000" in xm.colnames and "_RAJ2000_2" in xm.colnames
-    assert xm["_RAJ2000"][0] == pytest.approx(_gaia(0.0)["_RAJ2000"][0])
+    assert xm["TYC2"][0] == 1821 and "TYC2_1" in xm.colnames
+    assert xm["_RAJ2000"][0] == pytest.approx(t2["_RAJ2000"][0])
+    assert xm["_RAJ2000_1"][0] == pytest.approx(t1["_RAJ2000"][0])
+
+
+def test_local_xmatch_clash_keeps_the_gaia_source_id(monkeypatch):
+    t1, t2 = _gaia(0.0), _tmass(0.2)
+    t2["Source"] = ["other"]
+    _cones(monkeypatch, t1, t2)
+    xm = _local()
+    assert xm["Source"][0] == 1 and xm["Source_2"][0] == "other"
 
 
 def test_local_xmatch_matches_gaia_at_its_epoch_2016_position(monkeypatch):
@@ -330,6 +344,26 @@ def test_xmatch_does_not_hide_programming_errors(monkeypatch):
     with pytest.raises(TypeError):
         _cds.xmatch("vizier:a", "vizier:b", 1 * u.arcsec, area=AREA,
                     client=_Client(TypeError("bad call")))
+
+
+def test_unreachable_xmatch_goes_local_without_calling_it(monkeypatch):
+    # astroquery's table-name check ignores XMatch.TIMEOUT, so a dead host
+    # must be caught by the TCP probe before the client is ever called.
+    monkeypatch.setattr(_cds, "_reachable", lambda *a, **k: False)
+    local = _record_local(monkeypatch)
+    client = _Client(Table({"angDist": [0.2]}))
+    _cds.xmatch("vizier:a", "vizier:b", 1 * u.arcsec, area=AREA, client=client)
+    assert client.calls == 0 and len(local) == 1
+    assert _cds.breaker.is_down(_cds.XMATCH_HOST)
+
+
+def test_reachable_is_false_for_a_refused_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # nothing listens there now
+    assert REAL_REACHABLE(f"http://127.0.0.1:{port}/x", timeout=2) is False
 
 
 # ── SIMBAD ───────────────────────────────────────────────────────────
