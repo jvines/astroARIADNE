@@ -23,9 +23,10 @@ from astropy.time import Time
 import astropy.units as u
 from astroquery.gaia import Gaia
 from astroquery.mast import Catalogs
-from astroquery.vizier import Vizier as _VizierClass
 from astroquery.xmatch import XMatch
 from regions import CircleSkyRegion
+
+from . import _cds
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,18 @@ _TIMEOUTS = {
 
 # The astroquery client-side limits must not undercut the wrapper's per-call
 # budget, or the client aborts before the wrapper's timeout is reached.
-Vizier = _VizierClass(row_limit=-1, columns=["all"], timeout=_TIMEOUTS['vizier'])
+# VizieR moves to a mirror when CDS is down (see _cds); xMatch gets a short
+# connect timeout so a dead CDS falls through to the local crossmatch quickly.
+Vizier = _cds.MirroredVizier(row_limit=-1, columns=["all"],
+                             timeout=_TIMEOUTS['vizier'])
 Gaia.TIMEOUT = _TIMEOUTS['gaia']
-XMatch.TIMEOUT = _TIMEOUTS['xmatch']
+XMatch.TIMEOUT = _cds.connect_read(_TIMEOUTS['xmatch'])
 Catalogs.TIMEOUT = _TIMEOUTS['mast']
+
+
+def _xmatch(**kwargs):
+    """CDS xMatch, reproduced from VizieR cone queries when xMatch is down."""
+    return _cds.xmatch(client=XMatch, timeout=_TIMEOUTS['vizier'], **kwargs)
 
 
 class GaiaQueryError(RuntimeError):
@@ -1005,7 +1014,7 @@ class Librarian:
             vizier_cat, id_cols = _XMATCH_CONFIG[cat_name]
 
             xm = _with_timeout(
-                XMatch.query,
+                _xmatch,
                 kind='xmatch',
                 cat1="vizier:I/355/gaiadr3",
                 cat2=vizier_cat,
@@ -1714,7 +1723,7 @@ class Librarian:
         """
         region = CircleSkyRegion(self._coord, radius=self._search_radius)
         xm = _with_timeout(
-            XMatch.query,
+            _xmatch,
             kind='xmatch',
             cat1="vizier:I/355/gaiadr3",
             cat2="vizier:II/312/ais",
@@ -1775,7 +1784,7 @@ class Librarian:
         """
         region = CircleSkyRegion(self._coord, radius=5 * u.arcmin)
         xm = _with_timeout(
-            XMatch.query,
+            _xmatch,
             kind='xmatch',
             cat1="vizier:I/355/gaiadr3",
             cat2="vizier:II/168/ubvmeans",
@@ -1838,7 +1847,7 @@ class Librarian:
 
         for cat2, max_dist in xm_configs:
             xm = _with_timeout(
-                XMatch.query,
+                _xmatch,
                 kind='xmatch',
                 cat1="vizier:I/355/gaiadr3",
                 cat2=cat2,
