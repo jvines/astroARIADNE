@@ -223,6 +223,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   covers all grids, and `SED()` skips the continuous model spectrum with a
   warning (still drawing photometry and synthetic fluxes) when a grid has no
   spectra available.
+- A CDS outage no longer strips the photometry. Every VizieR query now fails
+  over to a VizieR mirror (CfA by default, `CDS_VIZIER_MIRRORS` to change).
+  CDS xMatch calls (APASS/2MASS/WISE/PS1/SDSS/Tycho-2 ID recovery, GALEX,
+  Mermilliod UBV, Strömgren) are reproduced locally from two mirror cone
+  queries when xMatch is down. A failed host is skipped for 10 minutes
+  (`CDS_DOWN_SECONDS`), and error responses that astroquery cached during an
+  outage are deleted instead of being replayed for a week.
 
 ## [1.5.0] - 2026-05-23
 
