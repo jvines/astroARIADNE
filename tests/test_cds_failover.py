@@ -29,16 +29,21 @@ CDS = "vizier.cds.unistra.fr"
 CFA = "vizier.cfa.harvard.edu"
 
 
+DB_ERROR = "DB"  # plan value: a 200 carrying VizieR's database-down INFO
+
+
 class _Resp:
-    def __init__(self, status=200, host=None):
+    def __init__(self, status=200, host=None, text=""):
         self.status_code = status
         self.host = host
+        self.text = text
 
 
 @pytest.fixture
 def http(monkeypatch):
     """Fake the HTTP layer under MirroredVizier. Configure ``http.plan``
-    with host -> status code or exception; every call is recorded."""
+    with host -> status code, DB_ERROR, exception, or a list of those (one
+    per call); every call is recorded."""
 
     class _HTTP:
         plan = {}
@@ -48,12 +53,18 @@ def http(monkeypatch):
             host = url.split("/")[2]
             self.calls.append((host, kwargs))
             outcome = self.plan.get(host, 200)
+            if isinstance(outcome, list):
+                outcome = outcome.pop(0)
             if isinstance(outcome, Exception):
                 raise outcome
+            if outcome == DB_ERROR:
+                return _Resp(200, host, '<INFO ID="Error" name="Error" '
+                             'value="The database is not currently reachable."/>')
             return _Resp(outcome, host)
 
     fake = _HTTP()
     fake.plan, fake.calls = {}, []
+    monkeypatch.setattr(_cds.time, "sleep", lambda s: None)
     monkeypatch.setattr(_cds.VizierClass, "_request",
                         lambda s, method, url, **kw: fake(s, method, url, **kw))
     return fake
@@ -154,6 +165,60 @@ def test_mirrored_vizier_keeps_the_vizier_cache_directory():
 
 def test_calling_the_instance_keeps_the_failover():
     assert isinstance(_viz()(columns=["Source"]), _cds.MirroredVizier)
+
+
+# ── mirror data integrity ────────────────────────────────────────────
+
+STAR_BODY = ("-source=II/246/out\n-out.max=50\n-out=*\n-out.add=_r\n"
+             "-c=330.79502759+18.88432490\n-c.rs=5.0\n-out.form=mini")
+
+
+def test_mirror_requests_ask_for_all_columns(http):
+    # CfA returns shifted, corrupt values for -out=* and explicit lists.
+    http.plan = {CDS: 404}
+    _viz()._request(method="POST", url=f"https://{CDS}/viz-bin/votable",
+                    data=STAR_BODY, timeout=60, cache=False)
+    (_, to_cds), (_, to_cfa) = http.calls
+    assert to_cds["data"] == STAR_BODY
+    lines = to_cfa["data"].split("\n")
+    assert "-out.all" in lines and not any(ln.startswith("-out=") for ln in lines)
+    assert "-out.add=_r" in lines and "-out.max=50" in lines
+
+
+def test_all_columns_rewrite():
+    assert _cds._all_columns("-source=X\n-out=Source,Plx\n-sort=_r") == \
+        "-source=X\n-out.all\n-sort=_r"
+    assert _cds._all_columns("-source=X\n-out.all\n-out.add=_r") == \
+        "-source=X\n-out.all\n-out.add=_r"
+    assert _cds._all_columns("-source=X\nSource=1") == "-source=X\nSource=1"
+    assert _cds._all_columns(None) is None
+
+
+def test_database_error_sent_as_200_is_retried_on_the_mirror(http):
+    http.plan = {CDS: 404, CFA: [DB_ERROR, DB_ERROR, 200]}
+    resp = _get(_viz())
+    assert resp.host == CFA and resp.text == ""
+    assert [h for h, _ in http.calls] == [CDS, CFA, CFA, CFA]
+    assert not _cds.breaker.is_down(CFA)
+
+
+def test_database_error_on_every_try_raises_instead_of_reading_empty(http):
+    # An empty answer would read as "not in the catalogue"; raising lets the
+    # caller take its own fallback (e.g. the ESA archive for Gaia).
+    http.plan = {CDS: 404, CFA: DB_ERROR}
+    with pytest.raises(requests.HTTPError, match="database not reachable"):
+        _get(_viz())
+    assert len(http.calls) == 1 + _cds.MIRROR_TRIES
+
+
+def test_database_error_on_the_primary_moves_to_the_mirror(http):
+    http.plan = {CDS: DB_ERROR}
+    assert _get(_viz()).host == CFA
+
+
+def test_a_real_empty_answer_is_not_a_database_error():
+    assert not _cds._db_error(_Resp(200, CFA, "<VOTABLE><RESOURCE/></VOTABLE>"))
+    assert not _cds._db_error(_Resp(200, CFA, '<INFO name="Error" value="bad column"/>'))
 
 
 # ── local xMatch ─────────────────────────────────────────────────────
