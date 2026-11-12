@@ -70,6 +70,23 @@ def _xmatch(**kwargs):
     return _cds.xmatch(client=XMatch, timeout=_TIMEOUTS['vizier'], **kwargs)
 
 
+_PRIMARY_VIZIER = Vizier.VIZIER_SERVER
+
+
+def _mirror_empty(res):
+    """True for an empty VizieR answer given while CDS itself is down.
+
+    Such an answer came from a mirror and does not prove absence: the CfA
+    mirror answers Source=<id> on I/355/paramp with an empty table even when
+    it holds the row (HD 209458 on 2026-11-11: empty every time, while a cone
+    on the same table finds Rad-Flame = 1.197). Callers confirm it with the
+    ESA archive. With CDS up, an empty answer still means absent.
+    """
+    if res is None or (len(res) and len(res[0])):
+        return False
+    return _cds.breaker.is_down(_PRIMARY_VIZIER)
+
+
 class GaiaQueryError(RuntimeError):
     """The core Gaia DR3 astrometry query failed (timeout/throttle), as distinct
     from a genuinely missing source. The librarian raises this instead of
@@ -837,7 +854,7 @@ class Librarian:
             Vizier.query_constraints,
             catalog="I/355/paramp", Source=str(self._gaia_id),
         )
-        if ap_cats is None:
+        if ap_cats is None or _mirror_empty(ap_cats):
             ap = _esa_gaia_flame(self._gaia_id) or None
         else:
             ap = ap_cats[0][0] if len(ap_cats) and len(ap_cats[0]) else None
@@ -1081,7 +1098,7 @@ class Librarian:
             Vizier.query_constraints,
             catalog="I/352/gedr3dis", Source=str(self._gaia_id),
         )
-        if res is None:
+        if res is None or _mirror_empty(res):
             row = _esa_bailer_jones(self._gaia_id)
         else:
             row = res[0][0] if len(res) and len(res[0]) else None
