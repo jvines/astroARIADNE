@@ -18,5 +18,7 @@ def _no_live_cds_fallback(monkeypatch):
         raise requests.ConnectionError("local xMatch disabled in tests")
 
     monkeypatch.setattr(_cds, "local_xmatch", _offline)
+    # No TCP probe of the real xMatch host; tests decide reachability.
+    monkeypatch.setattr(_cds, "_reachable", lambda *a, **k: True)
     yield
     _cds.breaker.clear()

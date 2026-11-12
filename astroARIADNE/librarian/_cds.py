@@ -17,6 +17,7 @@ Environment:
 
 import logging
 import os
+import socket
 import threading
 import time
 from urllib.parse import urlsplit, urlunsplit
@@ -176,6 +177,9 @@ _POSITION_COLUMNS = (
     ("RAdeg", "DEdeg"),
 )
 
+# cat1 columns that keep their name on a clash: the Gaia DR3 ID.
+_CAT1_KEEPS = ("Source",)
+
 
 def _vizier_id(cat):
     cat = str(cat)
@@ -213,8 +217,12 @@ def local_xmatch(cat1, cat2, max_distance, *, area, timeout=60):
     """CDS xMatch reproduced from two VizieR cone queries.
 
     Returns every (cat1, cat2) pair closer than ``max_distance`` inside the
-    circular ``area``, with cat1's columns, then cat2's (renamed ``<name>_2``
-    on a clash), and ``angDist`` in arcsec -- the layout CDS xMatch returns.
+    circular ``area``, with cat1's columns, then cat2's, and ``angDist`` in
+    arcsec -- the layout CDS xMatch returns. On a name clash the matched
+    catalogue (cat2) keeps the name and cat1's column becomes ``<name>_1``:
+    callers read the counterpart's IDs and magnitudes by their VizieR names
+    (Gaia DR3 carries its own ``TYC2``, for one). The exception is cat1's
+    ``Source`` (the Gaia DR3 ID every caller filters on), which keeps its name.
     An empty table means no counterpart; a failed query raises.
     """
     if area is None:
@@ -233,12 +241,33 @@ def local_xmatch(cat1, cat2, max_distance, *, area, timeout=60):
         return empty
     left = t1[rows1[i1]]
     right = t2[rows2[i2]]
-    for name in list(right.colnames):
-        if name in left.colnames:
+    for name in list(left.colnames):
+        if name not in right.colnames:
+            continue
+        if name in _CAT1_KEEPS:
             right.rename_column(name, f"{name}_2")
+        else:
+            left.rename_column(name, f"{name}_1")
     out = hstack([left, right], join_type="exact", metadata_conflicts="silent")
     out.add_column(Column(sep.to_value(u.arcsec), name="angDist"), index=0)
     return out
+
+
+def _reachable(url, timeout=CONNECT_TIMEOUT):
+    """Can a TCP connection to ``url``'s host be opened within ``timeout``?
+
+    astroquery's XMatch first validates the table names with a request that
+    ignores ``XMatch.TIMEOUT``, so a dead host costs the OS connect timeout
+    (75 s on macOS) -- longer than the callers' per-query budget, which then
+    cancels the call before the local fallback can run.
+    """
+    parts = urlsplit(url)
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        socket.create_connection((parts.hostname, port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
 
 
 def xmatch(cat1, cat2, max_distance, *, area=None, client=None, timeout=60,
@@ -249,6 +278,8 @@ def xmatch(cat1, cat2, max_distance, *, area=None, client=None, timeout=60,
     module-level ``XMatch`` so tests that patch it keep working).
     """
     client = XMatch if client is None else client
+    if not breaker.is_down(XMATCH_HOST) and not _reachable(XMatch.URL):
+        breaker.trip(XMATCH_HOST, "no TCP connection")
     if not breaker.is_down(XMATCH_HOST):
         try:
             res = client.query(cat1=cat1, cat2=cat2, max_distance=max_distance,
