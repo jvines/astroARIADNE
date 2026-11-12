@@ -100,12 +100,49 @@ def _order(primary, mirrors):
            [h for h in hosts if breaker.is_down(h)]
 
 
+# A VizieR host whose database is down still answers HTTP 200, with an error
+# INFO and no rows; astroquery parses that into an empty result, which would
+# read as "not in the catalogue". Observed on the CfA mirror (2026-11-11), up
+# to 4 of 6 identical queries failing this way.
+_DB_ERROR_MARKERS = ("not currently reachable", "STDB_ERR", "connect error")
+MIRROR_TRIES = int(os.environ.get("CDS_MIRROR_TRIES", "5"))
+
+
+def _db_error(resp):
+    """True for a 200 response that is a VizieR database error."""
+    text = getattr(resp, "text", "")
+    if not isinstance(text, str) or 'name="Error"' not in text:
+        return False
+    return any(m in text for m in _DB_ERROR_MARKERS)
+
+
+def _all_columns(data):
+    """The request body with any ``-out=<list>`` replaced by ``-out.all``.
+
+    The CfA mirror returns corrupt rows for ``-out=*`` and explicit column
+    lists (values shifted between columns, e.g. 2MASS J/H/Ks = 0.06/999999/
+    0.011 for HD 209458, true 6.591/6.366/6.308) and correct ones for
+    ``-out.all``. Every requested column is in ``-out.all``; computed columns
+    (``-out.add``) and sorting are kept.
+    """
+    if not isinstance(data, str):
+        return data
+    lines = data.split("\n")
+    kept = [ln for ln in lines if not ln.startswith("-out=")]
+    if len(kept) == len(lines) or "-out.all" in kept:
+        return "\n".join(kept)
+    return "\n".join(kept[:1] + ["-out.all"] + kept[1:])
+
+
 class MirroredVizier(VizierClass):
     """astroquery Vizier that moves to a mirror when a host is down.
 
     Failover happens per request, so it is thread-safe and covers every query
     method (query_region, query_constraints, query_object, ...). An empty
-    result is a valid answer and is never retried elsewhere.
+    result is a valid answer and is never retried elsewhere; a database error
+    sent as an empty 200 is not, and is retried. Requests to a mirror always
+    ask for ``-out.all`` (see ``_all_columns``). If every host fails the query
+    raises, so callers take their own fallback instead of reading "no data".
     """
 
     mirrors = VIZIER_MIRRORS
@@ -123,25 +160,41 @@ class MirroredVizier(VizierClass):
             return super()._request(method, url, *args, **kwargs)
         kwargs["timeout"] = connect_read(kwargs.get("timeout"))
         hosts = _order(primary, self.mirrors)
-        last_exc, last_resp = None, None
-        for i, host in enumerate(hosts):
+        last_exc, last_resp, db_failed = None, None, None
+        for host in hosts:
             target = urlunsplit(parts._replace(netloc=host))
-            try:
-                resp = super()._request(method, target, **kwargs)
-            except requests.RequestException as exc:
-                breaker.trip(host, type(exc).__name__)
-                last_exc = exc
-                continue
-            status = getattr(resp, "status_code", 200)
-            if _is_down_status(status):
-                breaker.trip(host, f"HTTP {status}")
-                self._forget(method, target, kwargs)
-                last_resp = resp
-                continue
-            breaker.reset(host)
-            if i:
-                logger.info("VizieR query served by mirror %s", host)
-            return resp
+            send = dict(kwargs)
+            if host in self.mirrors:
+                send["data"] = _all_columns(send.get("data"))
+            tries = MIRROR_TRIES if host in self.mirrors else 1
+            for attempt in range(tries):
+                try:
+                    resp = super()._request(method, target, **send)
+                except requests.RequestException as exc:
+                    breaker.trip(host, type(exc).__name__)
+                    last_exc = exc
+                    break
+                status = getattr(resp, "status_code", 200)
+                if _is_down_status(status):
+                    breaker.trip(host, f"HTTP {status}")
+                    self._forget(method, target, send)
+                    last_resp = resp
+                    break
+                if _db_error(resp):
+                    self._forget(method, target, send)
+                    db_failed = resp
+                    if attempt + 1 < tries:
+                        time.sleep(0.5 * (attempt + 1))
+                    continue
+                breaker.reset(host)
+                if host != primary:
+                    logger.info("VizieR query served by mirror %s", host)
+                return resp
+            else:
+                breaker.trip(host, "database not reachable")
+        if db_failed is not None:
+            raise requests.HTTPError(
+                "VizieR database not reachable on any host", response=db_failed)
         if last_resp is not None:
             return last_resp
         raise last_exc
