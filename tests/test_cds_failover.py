@@ -552,3 +552,21 @@ def test_tables_without_blank_rows_or_numbers_are_untouched():
     out = _cds._drop_blank_rows(_tablelist(a=real, b=text))
     assert len(out["a"]) == 2 and len(out["b"]) == 2
     assert _cds._drop_blank_rows("unparsed raw text") == "unparsed raw text"
+
+
+def test_blank_row_with_int_zero_is_dropped():
+    # I/352 junk row: VOTable ints without a null value read an empty cell as 0.
+    t = Table(masked=True)
+    t["Source"] = MaskedColumn([0, 6668917117751909632], mask=[False, False])
+    t["RA_ICRS"] = MaskedColumn([0.0, 304.118], mask=[True, False])
+    t["rgeo"] = MaskedColumn([0.0, 147.54], mask=[True, False])
+    t["Flag"] = MaskedColumn([0, 10033], mask=[True, False])
+    out = _cds._drop_blank_rows(_tablelist(**{"I/352/gedr3dis": t}))
+    g = out["I/352/gedr3dis"]
+    assert len(g) == 1 and g["rgeo"][0] == 147.54
+
+
+def test_a_real_row_with_a_zero_id_but_finite_floats_is_kept():
+    t = Table({"Seq": [0, 1], "RAJ2000": [10.0, 11.0], "Vmag": [np.nan, 9.1]})
+    out = _cds._drop_blank_rows(_tablelist(a=t))
+    assert len(out["a"]) == 2

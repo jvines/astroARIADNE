@@ -138,27 +138,42 @@ def _malformed(resp):
     return False
 
 
-def _drop_blank_rows(result):
-    """Remove rows with no numeric value from every table of a parsed answer.
+def _empty_cells(col):
+    """Per row: True where every element of the cell is masked/NaN (floats) or
+    masked/0 (ints -- a VOTable int without a null value reads an empty cell
+    as 0)."""
+    data = np.ma.getdata(col)
+    empty = np.ma.getmaskarray(col).copy()
+    if data.dtype.kind in "fc":
+        empty |= ~np.isfinite(data)
+    else:
+        empty |= data == 0
+    return empty.reshape(len(col), -1).all(axis=1)
 
-    The CfA mirror's VOTables (2026-11-13) carry an extra first row in which
-    every numeric cell is masked and the strings are empty or a URL fragment
-    (``https://vizier.idia.ac.za/...``). A single-row lookup -- Gaia DR3 by
-    Source -- read it as THE answer: no PM, no parallax, no G, and the ESA
-    fallback never ran. A real catalogue row always has a numeric value (its
-    coordinates, at least), so a table without numeric columns is left alone.
+
+def _drop_blank_rows(result):
+    """Remove rows with no value in any numeric column from a parsed answer.
+
+    The CfA mirror (2026-11-13) intermittently returned VOTables with an extra
+    first row: every float cell masked, int cells 0 (no null value declared),
+    strings empty or a URL fragment (``https://vizier.idia.ac.za/...``).
+    astroquery caches those answers, so they replay for a week. A single-row
+    lookup read the junk row as THE answer: Gaia DR3 by Source lost PM,
+    parallax and G; I/352 lost the Bailer-Jones distance; the ESA fallbacks
+    never ran because a row was present. A real catalogue row always carries a
+    finite float (coordinates at least), so tables without float columns are
+    left alone.
     """
     if isinstance(result, (str, bytes)) or not hasattr(result, "keys"):
         return result
     for key in list(result.keys()):
         t = result[key]
-        num = [c for c in t.colnames if t[c].dtype.kind in "iufc"]
-        if not num or not len(t):
+        if not len(t) or not any(t[c].dtype.kind in "fc" for c in t.colnames):
             continue
         blank = np.ones(len(t), bool)
-        for c in num:
-            col = t[c]
-            blank &= np.ma.getmaskarray(col) if hasattr(col, "mask") else False
+        for c in t.colnames:
+            if t[c].dtype.kind in "iufc":
+                blank &= _empty_cells(t[c])
         if blank.any():
             logger.info("VizieR %s: dropped %d blank row(s)", key, int(blank.sum()))
             t.remove_rows(np.nonzero(blank)[0])
