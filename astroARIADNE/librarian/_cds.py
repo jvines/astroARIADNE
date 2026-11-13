@@ -116,6 +116,28 @@ def _db_error(resp):
     return any(m in text for m in _DB_ERROR_MARKERS)
 
 
+def _malformed(resp):
+    """True for a 200 VOTable body that is not well-formed XML.
+
+    The CfA mirror intermittently serves corrupted VOTables (2026-11-13:
+    "not well-formed (invalid token)" at a random line). astroquery fails to
+    parse them, the query reads as failed, and the bad body stays in
+    astroquery's request cache, replayed on every rerun.
+    """
+    content = getattr(resp, "content", None)
+    if not isinstance(content, (bytes, bytearray)):
+        text = getattr(resp, "text", "")
+        content = text.encode("utf-8", "replace") if isinstance(text, str) else b""
+    if b"<VOTABLE" not in content[:4096]:
+        return False
+    import xml.etree.ElementTree as ET
+    try:
+        ET.fromstring(content)
+    except ET.ParseError:
+        return True
+    return False
+
+
 def _all_columns(data):
     """The request body with any ``-out=<list>`` replaced by ``-out.all``.
 
@@ -180,7 +202,7 @@ class MirroredVizier(VizierClass):
                     self._forget(method, target, send)
                     last_resp = resp
                     break
-                if _db_error(resp):
+                if _db_error(resp) or _malformed(resp):
                     self._forget(method, target, send)
                     db_failed = resp
                     if attempt + 1 < tries:
@@ -194,7 +216,8 @@ class MirroredVizier(VizierClass):
                 breaker.trip(host, "database not reachable")
         if db_failed is not None:
             raise requests.HTTPError(
-                "VizieR database not reachable on any host", response=db_failed)
+                "VizieR database not reachable (or its answer malformed) on any "
+                "host", response=db_failed)
         if last_resp is not None:
             return last_resp
         raise last_exc

@@ -30,6 +30,9 @@ CFA = "vizier.cfa.harvard.edu"
 
 
 DB_ERROR = "DB"  # plan value: a 200 carrying VizieR's database-down INFO
+MALFORMED = "BAD"  # plan value: a 200 whose VOTable is not well-formed XML
+BAD_VOTABLE = ('<?xml version="1.0"?><VOTABLE version="1.4"><RESOURCE><TABLE>'
+               '<DATA><TABLEDATA><TR><TD>1\x00</TD></TR>')
 
 
 class _Resp:
@@ -57,6 +60,8 @@ def http(monkeypatch):
                 outcome = outcome.pop(0)
             if isinstance(outcome, Exception):
                 raise outcome
+            if outcome == MALFORMED:
+                return _Resp(200, host, BAD_VOTABLE)
             if outcome == DB_ERROR:
                 return _Resp(200, host, '<INFO ID="Error" name="Error" '
                              'value="The database is not currently reachable."/>')
@@ -219,6 +224,37 @@ def test_database_error_on_the_primary_moves_to_the_mirror(http):
 def test_a_real_empty_answer_is_not_a_database_error():
     assert not _cds._db_error(_Resp(200, CFA, "<VOTABLE><RESOURCE/></VOTABLE>"))
     assert not _cds._db_error(_Resp(200, CFA, '<INFO name="Error" value="bad column"/>'))
+
+
+def test_malformed_votable_is_detected():
+    assert _cds._malformed(_Resp(200, CFA, BAD_VOTABLE))
+    assert not _cds._malformed(_Resp(200, CFA, "<VOTABLE><RESOURCE/></VOTABLE>"))
+    assert not _cds._malformed(_Resp(200, CFA, "not xml at all"))   # e.g. TSV
+    assert not _cds._malformed(_Resp(200, CFA, ""))
+
+
+def test_malformed_votable_is_retried_on_the_mirror(http):
+    http.plan = {CDS: 404, CFA: [MALFORMED, MALFORMED, 200]}
+    resp = _get(_viz())
+    assert resp.host == CFA and resp.text == ""
+    assert [h for h, _ in http.calls] == [CDS, CFA, CFA, CFA]
+
+
+def test_malformed_votable_on_every_try_raises(http):
+    http.plan = {CDS: 404, CFA: MALFORMED}
+    with pytest.raises(requests.HTTPError, match="malformed"):
+        _get(_viz())
+    assert len(http.calls) == 1 + _cds.MIRROR_TRIES
+
+
+def test_cached_malformed_response_is_deleted(http, tmp_path):
+    v = _viz()
+    v.cache_location = str(tmp_path)
+    forgotten = []
+    v._forget = lambda method, url, kw: forgotten.append(url)
+    http.plan = {CDS: MALFORMED}          # the primary gets one try
+    assert _get(v).host == CFA
+    assert forgotten == [f"https://{CDS}/viz-bin/votable"]
 
 
 # ── local xMatch ─────────────────────────────────────────────────────
