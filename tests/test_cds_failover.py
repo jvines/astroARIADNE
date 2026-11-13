@@ -686,3 +686,29 @@ def test_tic_from_vizier_matches_the_gaia_id_and_skips_dispositions(monkeypatch)
     assert row["ID"] == 72651515 and row["Tmag"] == pytest.approx(6.196)
     assert row["objType"] == "STAR"
     assert _cds.tic_from_vizier(None, 10 * u.arcsec, 42) is None
+
+
+def test_tess_comes_from_vizier_when_mast_fails(monkeypatch):
+    t = Table()
+    t["TIC"] = [632355485, 72651515]
+    t["GAIA"] = [5117251502218279680, 5117251502218279552]
+    t["Tmag"] = [12.632, 6.196]
+    t["e_Tmag"] = [0.01, 0.006]
+    t["S/G"] = ["STAR", "STAR"]
+    t["Disp"] = ["", ""]
+
+    def mast_down(*a, **k):
+        raise RuntimeError("MAST down")
+
+    monkeypatch.setattr(api.Catalogs, "query_region", mast_down)
+    monkeypatch.setattr(_cds, "_cone", lambda *a, **k: t)
+    lib = Librarian.__new__(Librarian)
+    lib._gaia_id = 5117251502218279552
+    lib._coord = SkyCoord(32.6736, -28.21926, unit="deg")
+    lib._search_radius = 3 * u.arcsec
+    lib._magnitudes = {}
+    lib._ignore = set()
+    lib._tic_id = lib._kic_id = None
+    lib._fetch_tess()
+    assert lib._tic_id == 72651515
+    assert lib._magnitudes["TESS"][0] == pytest.approx(6.196)

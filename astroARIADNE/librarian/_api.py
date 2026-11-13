@@ -894,21 +894,35 @@ class Librarian:
             self._add_mag(band.pyphot, float(mag_v), err_f)
 
     def _fetch_tess(self):
-        """Query TESS TIC via MAST, crossmatched on Gaia ID."""
+        """Query TESS TIC via MAST, crossmatched on Gaia ID; TIC-8 from
+        VizieR when MAST fails (see ``_cds.tic_from_vizier``)."""
         result = _with_timeout(
             Catalogs.query_region,
             self._coord, radius=self._search_radius, catalog="TIC",
         )
-        if result is None or len(result) == 0:
-            return
+        if result is None:
+            # MAST failed (2026-11-13: 401 s for one TIC query, an error after
+            # 90 s for the next); TIC-8 from VizieR instead, 2 s on the mirror.
+            try:
+                row = _cds.tic_from_vizier(self._coord, self._search_radius,
+                                           self._gaia_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("TIC failed on MAST and on VizieR: %s", exc)
+                return
+            if row is None:
+                return
+            logger.info("TIC served by VizieR %s (MAST failed)",
+                        _cds.TIC_VIZIER)
+        else:
+            if len(result) == 0:
+                return
+            result.sort("dstArcSec")
+            gaia_mask = result["GAIA"] == str(self._gaia_id)
+            matched = result[gaia_mask]
+            if len(matched) == 0:
+                return
+            row = matched[0]
 
-        result.sort("dstArcSec")
-        gaia_mask = result["GAIA"] == str(self._gaia_id)
-        matched = result[gaia_mask]
-        if len(matched) == 0:
-            return
-
-        row = matched[0]
         if _col(row, "objType") != "STAR":
             return
 
