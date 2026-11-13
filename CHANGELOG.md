@@ -173,6 +173,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proxy there.
 
 ### Changed
+- `gaiaxpy>=2.1.5` is now a declared dependency (the XP gap-fill imported it
+  without declaring it). The ESA Gaia archive 3.15 (Nov 2026) rejects the
+  `data_structure='raw'` DataLink request gaiaxpy 2.1.4 sends, so on 2.1.4
+  installs the XP gap-fill silently filled nothing.
 - Bayesian Model Averaging weights: the evidence softmax now shifts by the
   maximum log-evidence instead of the minimum, preventing `exp()` overflow to
   `nan` weights when one grid dominates by a large margin (Δln Z ≳ 709).
