@@ -103,8 +103,13 @@ def _order(primary, mirrors):
 # A VizieR host whose database is down still answers HTTP 200, with an error
 # INFO and no rows; astroquery parses that into an empty result, which would
 # read as "not in the catalogue". Observed on the CfA mirror (2026-11-11), up
-# to 4 of 6 identical queries failing this way.
-_DB_ERROR_MARKERS = ("not currently reachable", "STDB_ERR", "connect error")
+# to 4 of 6 identical queries failing this way. Under load (2026-11-13) it
+# also answers "ERROR : temporary unavailable" / "(pipe) Request has been
+# interrupted"; 184 of those were cached in one batch and replayed as empty.
+# Permanent errors ("Table ... does not exist") are deliberately not markers:
+# retrying them is useless and would trip the breaker on a healthy host.
+_DB_ERROR_MARKERS = ("not currently reachable", "STDB_ERR", "connect error",
+                     "temporary unavailable", "Request has been interrupted")
 MIRROR_TRIES = int(os.environ.get("CDS_MIRROR_TRIES", "5"))
 
 
@@ -114,6 +119,86 @@ def _db_error(resp):
     if not isinstance(text, str) or 'name="Error"' not in text:
         return False
     return any(m in text for m in _DB_ERROR_MARKERS)
+
+
+def _empty_votable(resp):
+    """True for a VOTable answer with no data rows.
+
+    From the CfA mirror such an answer is not proof of absence: on 2026-11-13
+    it answered a 3" cone on II/246/out around HIP 66924 with no table (no
+    error, the same warnings as a real empty) and the same query minutes
+    later with the 2MASS row, three times out of three. astroquery cached the
+    false empty, so every rerun of the star lost 2MASS.
+    """
+    text = getattr(resp, "text", "")
+    return isinstance(text, str) and "<VOTABLE" in text and "<TR>" not in text
+
+
+def _malformed(resp):
+    """True for a 200 VOTable body that is not well-formed XML.
+
+    The CfA mirror intermittently serves corrupted VOTables (2026-11-13:
+    "not well-formed (invalid token)" at a random line). astroquery fails to
+    parse them, the query reads as failed, and the bad body stays in
+    astroquery's request cache, replayed on every rerun.
+    """
+    content = getattr(resp, "content", None)
+    if not isinstance(content, (bytes, bytearray)):
+        text = getattr(resp, "text", "")
+        content = text.encode("utf-8", "replace") if isinstance(text, str) else b""
+    if b"<VOTABLE" not in content[:4096]:
+        return False
+    import xml.etree.ElementTree as ET
+    try:
+        ET.fromstring(content)
+    except ET.ParseError:
+        return True
+    return False
+
+
+def _empty_cells(col):
+    """Per row: True where every element of the cell is masked, NaN or 0.
+
+    Ints: a VOTable int without a null value reads an empty cell as 0.
+    Floats: the II/246/out junk row (2026-11-13) carried RAJ2000 = 0.0 with
+    every other number masked, so 0.0 counts as empty too. A real row always
+    has some finite non-zero number (a coordinate at least).
+    """
+    data = np.ma.getdata(col)
+    empty = np.ma.getmaskarray(col).copy()
+    if data.dtype.kind in "fc":
+        empty |= ~np.isfinite(data)
+    empty |= data == 0
+    return empty.reshape(len(col), -1).all(axis=1)
+
+
+def _drop_blank_rows(result):
+    """Remove rows with no value in any numeric column from a parsed answer.
+
+    The CfA mirror (2026-11-13) intermittently returned VOTables with an extra
+    first row: every float cell masked, int cells 0 (no null value declared),
+    strings empty or a URL fragment (``https://vizier.idia.ac.za/...``).
+    astroquery caches those answers, so they replay for a week. A single-row
+    lookup read the junk row as THE answer: Gaia DR3 by Source lost PM,
+    parallax and G; I/352 lost the Bailer-Jones distance; the ESA fallbacks
+    never ran because a row was present. A real catalogue row always carries a
+    finite float (coordinates at least), so tables without float columns are
+    left alone.
+    """
+    if isinstance(result, (str, bytes)) or not hasattr(result, "keys"):
+        return result
+    for key in list(result.keys()):
+        t = result[key]
+        if not len(t) or not any(t[c].dtype.kind in "fc" for c in t.colnames):
+            continue
+        blank = np.ones(len(t), bool)
+        for c in t.colnames:
+            if t[c].dtype.kind in "iufc":
+                blank &= _empty_cells(t[c])
+        if blank.any():
+            logger.info("VizieR %s: dropped %d blank row(s)", key, int(blank.sum()))
+            t.remove_rows(np.nonzero(blank)[0])
+    return result
 
 
 def _all_columns(data):
@@ -143,6 +228,9 @@ class MirroredVizier(VizierClass):
     sent as an empty 200 is not, and is retried. Requests to a mirror always
     ask for ``-out.all`` (see ``_all_columns``). If every host fails the query
     raises, so callers take their own fallback instead of reading "no data".
+    Blank rows are dropped from every result (see ``_drop_blank_rows``). An
+    empty answer from a mirror is never cached and is asked once more (see
+    ``_empty_votable``).
     """
 
     mirrors = VIZIER_MIRRORS
@@ -152,6 +240,9 @@ class MirroredVizier(VizierClass):
         # Share astroquery's "Vizier" cache directory instead of starting an
         # empty "MirroredVizier" one.
         self.name = "Vizier"
+
+    def _parse_result(self, response, **kwargs):
+        return _drop_blank_rows(super()._parse_result(response, **kwargs))
 
     def _request(self, method, url, *args, **kwargs):
         parts = urlsplit(url)
@@ -167,6 +258,7 @@ class MirroredVizier(VizierClass):
             if host in self.mirrors:
                 send["data"] = _all_columns(send.get("data"))
             tries = MIRROR_TRIES if host in self.mirrors else 1
+            empty_retried = False
             for attempt in range(tries):
                 try:
                     resp = super()._request(method, target, **send)
@@ -180,12 +272,21 @@ class MirroredVizier(VizierClass):
                     self._forget(method, target, send)
                     last_resp = resp
                     break
-                if _db_error(resp):
+                if _db_error(resp) or _malformed(resp):
                     self._forget(method, target, send)
                     db_failed = resp
                     if attempt + 1 < tries:
                         time.sleep(0.5 * (attempt + 1))
                     continue
+                if host in self.mirrors and _empty_votable(resp):
+                    # A mirror's empty answer can be false, with nothing in it
+                    # to tell it from a real one (see _empty_votable). Never
+                    # keep it in the cache, where it would be replayed for
+                    # every later query, and ask once more, live.
+                    self._forget(method, target, send)
+                    if not empty_retried and attempt + 1 < tries:
+                        empty_retried = True
+                        continue
                 breaker.reset(host)
                 if host != primary:
                     logger.info("VizieR query served by mirror %s", host)
@@ -194,7 +295,8 @@ class MirroredVizier(VizierClass):
                 breaker.trip(host, "database not reachable")
         if db_failed is not None:
             raise requests.HTTPError(
-                "VizieR database not reachable on any host", response=db_failed)
+                "VizieR database not reachable (or its answer malformed) on any "
+                "host", response=db_failed)
         if last_resp is not None:
             return last_resp
         raise last_exc
@@ -253,6 +355,42 @@ def _cone(catalog, center, radius, timeout):
     if "_r" in tbl.colnames:
         tbl.remove_column("_r")
     return tbl
+
+
+TIC_VIZIER = "IV/39/tic82"
+
+
+def tic_from_vizier(center, radius, gaia_id, timeout=60):
+    """A star's TIC-8 row from VizieR (IV/39/tic82), keyed like MAST's TIC.
+
+    For when MAST's catalogue service fails: on 2026-11-13 one TIC query took
+    401 s and the next failed after 90 s, while VizieR (through the mirror
+    failover) served the same TIC-8 in 2 s. Matches on the Gaia ID as the
+    MAST path does. A Gaia source can carry several TIC rows (DUPLICATE,
+    SPLIT, ARTIFACT in ``Disp``); the row without a disposition wins. VizieR
+    names MAST's ``ID`` ``TIC`` and its ``objType`` ``S/G``. Returns None when
+    the star is not in the answer; raises when VizieR fails.
+    """
+    tbl = _cone(TIC_VIZIER, center, radius, timeout)
+    if tbl is None or "GAIA" not in tbl.colnames:
+        return None
+
+    def val(row, col):
+        if col not in tbl.colnames or np.ma.is_masked(row[col]):
+            return None
+        return row[col]
+
+    gid = str(int(gaia_id))
+    rows = [r for r in tbl
+            if val(r, "GAIA") is not None and str(int(r["GAIA"])) == gid]
+    if not rows:
+        return None
+    rows.sort(key=lambda r: bool(str(val(r, "Disp") or "").strip()))
+    r = rows[0]
+    s_g = val(r, "S/G")
+    return {"ID": int(r["TIC"]), "GAIA": gid, "Tmag": val(r, "Tmag"),
+            "e_Tmag": val(r, "e_Tmag"), "KIC": val(r, "KIC"),
+            "objType": None if s_g is None else str(s_g).strip()}
 
 
 def _coords(tbl):

@@ -30,6 +30,9 @@ CFA = "vizier.cfa.harvard.edu"
 
 
 DB_ERROR = "DB"  # plan value: a 200 carrying VizieR's database-down INFO
+MALFORMED = "BAD"  # plan value: a 200 whose VOTable is not well-formed XML
+BAD_VOTABLE = ('<?xml version="1.0"?><VOTABLE version="1.4"><RESOURCE><TABLE>'
+               '<DATA><TABLEDATA><TR><TD>1\x00</TD></TR>')
 
 
 class _Resp:
@@ -57,6 +60,8 @@ def http(monkeypatch):
                 outcome = outcome.pop(0)
             if isinstance(outcome, Exception):
                 raise outcome
+            if outcome == MALFORMED:
+                return _Resp(200, host, BAD_VOTABLE)
             if outcome == DB_ERROR:
                 return _Resp(200, host, '<INFO ID="Error" name="Error" '
                              'value="The database is not currently reachable."/>')
@@ -219,6 +224,37 @@ def test_database_error_on_the_primary_moves_to_the_mirror(http):
 def test_a_real_empty_answer_is_not_a_database_error():
     assert not _cds._db_error(_Resp(200, CFA, "<VOTABLE><RESOURCE/></VOTABLE>"))
     assert not _cds._db_error(_Resp(200, CFA, '<INFO name="Error" value="bad column"/>'))
+
+
+def test_malformed_votable_is_detected():
+    assert _cds._malformed(_Resp(200, CFA, BAD_VOTABLE))
+    assert not _cds._malformed(_Resp(200, CFA, "<VOTABLE><RESOURCE/></VOTABLE>"))
+    assert not _cds._malformed(_Resp(200, CFA, "not xml at all"))   # e.g. TSV
+    assert not _cds._malformed(_Resp(200, CFA, ""))
+
+
+def test_malformed_votable_is_retried_on_the_mirror(http):
+    http.plan = {CDS: 404, CFA: [MALFORMED, MALFORMED, 200]}
+    resp = _get(_viz())
+    assert resp.host == CFA and resp.text == ""
+    assert [h for h, _ in http.calls] == [CDS, CFA, CFA, CFA]
+
+
+def test_malformed_votable_on_every_try_raises(http):
+    http.plan = {CDS: 404, CFA: MALFORMED}
+    with pytest.raises(requests.HTTPError, match="malformed"):
+        _get(_viz())
+    assert len(http.calls) == 1 + _cds.MIRROR_TRIES
+
+
+def test_cached_malformed_response_is_deleted(http, tmp_path):
+    v = _viz()
+    v.cache_location = str(tmp_path)
+    forgotten = []
+    v._forget = lambda method, url, kw: forgotten.append(url)
+    http.plan = {CDS: MALFORMED}          # the primary gets one try
+    assert _get(v).host == CFA
+    assert forgotten == [f"https://{CDS}/viz-bin/votable"]
 
 
 # ── local xMatch ─────────────────────────────────────────────────────
@@ -489,3 +525,164 @@ def test_mermilliod_survives_a_cds_xmatch_outage(monkeypatch):
     assert lib._magnitudes["GROUND_JOHNSON_V"][0] == pytest.approx(7.65)
     assert lib._magnitudes["GROUND_JOHNSON_B"][0] == pytest.approx(8.24)
     assert lib._magnitudes["GROUND_JOHNSON_U"][0] == pytest.approx(8.34)
+
+
+# ── blank rows from the mirror's VOTables ────────────────────────────
+
+def _tablelist(**tables):
+    from astroquery.utils import commons
+    return commons.TableList(tables)
+
+
+def test_blank_mirror_row_is_dropped():
+    t = Table(masked=True)
+    t["Source"] = MaskedColumn([0, 4888833115509354496], mask=[True, False])
+    t["pmRA"] = MaskedColumn([0.0, 28.72], mask=[True, False])
+    t["Plx"] = MaskedColumn([0.0, np.nan], mask=[True, True])   # a real NULL
+    t["2MASS"] = ["", ""]
+    out = _cds._drop_blank_rows(_tablelist(**{"I/355/gaiadr3": t}))
+    g = out["I/355/gaiadr3"]
+    assert len(g) == 1 and g["Source"][0] == 4888833115509354496
+    assert np.ma.is_masked(g["Plx"][0])                     # NULLs survive
+
+
+def test_tables_without_blank_rows_or_numbers_are_untouched():
+    real = Table({"RAJ2000": [1.0, 2.0], "Name": ["a", "b"]})
+    text = Table({"Name": ["", ""]})
+    out = _cds._drop_blank_rows(_tablelist(a=real, b=text))
+    assert len(out["a"]) == 2 and len(out["b"]) == 2
+    assert _cds._drop_blank_rows("unparsed raw text") == "unparsed raw text"
+
+
+def test_blank_row_with_int_zero_is_dropped():
+    # I/352 junk row: VOTable ints without a null value read an empty cell as 0.
+    t = Table(masked=True)
+    t["Source"] = MaskedColumn([0, 6668917117751909632], mask=[False, False])
+    t["RA_ICRS"] = MaskedColumn([0.0, 304.118], mask=[True, False])
+    t["rgeo"] = MaskedColumn([0.0, 147.54], mask=[True, False])
+    t["Flag"] = MaskedColumn([0, 10033], mask=[True, False])
+    out = _cds._drop_blank_rows(_tablelist(**{"I/352/gedr3dis": t}))
+    g = out["I/352/gedr3dis"]
+    assert len(g) == 1 and g["rgeo"][0] == 147.54
+
+
+def test_a_real_row_with_a_zero_id_but_finite_floats_is_kept():
+    t = Table({"Seq": [0, 1], "RAJ2000": [10.0, 11.0], "Vmag": [np.nan, 9.1]})
+    out = _cds._drop_blank_rows(_tablelist(a=t))
+    assert len(out["a"]) == 2
+
+
+# ── synced from astroLACHESIS: mirror overload and false empties (2026-11-13) ──
+
+
+
+# The CfA mirror's overload answer (2026-11-13), verbatim INFO lines.
+OVERLOAD = ('<INFO name="QUERY_STATUS" value="ERROR"/>'
+            '<INFO name="Error" value="(pipe) Request has been interrupted"/>'
+            '<INFO name="Error" value="ERROR : temporary unavailable"/>')
+
+
+def test_mirror_overload_answer_is_a_database_error():
+    assert _cds._db_error(_Resp(200, CFA, OVERLOAD))
+    assert _cds._db_error(_Resp(200, CFA, '<INFO name="Error" '
+                                          'value="ERROR : temporary unavailable"/>'))
+
+
+def test_a_missing_table_is_not_an_outage():
+    # Permanent: retrying is useless and would trip the breaker on CfA.
+    missing = ('<INFO name="QUERY_STATUS" value="ERROR"/><INFO name="Error" '
+               'value="Table \'allstars\' does not exist in catalog: III/286"/>')
+    assert not _cds._db_error(_Resp(200, CFA, missing))
+
+
+def test_mirror_overload_is_retried_not_read_as_empty(monkeypatch):
+    calls = []
+
+    def fake(self, method, url, **kw):
+        calls.append(url.split("/")[2])
+        text = OVERLOAD if len(calls) <= 2 else ""
+        return _Resp(200, url.split("/")[2], text)
+
+    monkeypatch.setattr(_cds.time, "sleep", lambda s: None)
+    monkeypatch.setattr(_cds.VizierClass, "_request", fake)
+    _cds.breaker.trip(CDS, "test")
+    resp = _get(_viz())
+    assert resp.text == "" and calls == [CFA, CFA, CFA]
+    assert not _cds.breaker.is_down(CFA)
+
+
+
+EMPTY_VOT = ('<?xml version="1.0"?><VOTABLE><RESOURCE></RESOURCE>'
+             '<INFO name="Warning" value="vc_coo can\'t change epoch"/></VOTABLE>')
+ROW_VOT = '<?xml version="1.0"?><VOTABLE><TABLE><DATA><TABLEDATA><TR><TD>1</TD></TR>' \
+          '</TABLEDATA></DATA></TABLE></VOTABLE>'
+
+
+def _fake_seq(monkeypatch, answers):
+    """Fake HTTP returning answers[i] on call i (host -> text); records calls
+    and every cache purge."""
+    calls, forgotten = [], []
+
+    def fake(self, method, url, **kw):
+        host = url.split("/")[2]
+        calls.append(host)
+        return _Resp(200, host, answers[len(calls) - 1])
+
+    monkeypatch.setattr(_cds.time, "sleep", lambda s: None)
+    monkeypatch.setattr(_cds.VizierClass, "_request", fake)
+    monkeypatch.setattr(_cds.MirroredVizier, "_forget",
+                        lambda self, m, u, k: forgotten.append(u.split("/")[2]))
+    return calls, forgotten
+
+
+def test_mirror_empty_answer_is_not_cached_and_asked_again(monkeypatch):
+    # CfA, 2026-11-13: a false empty for a 2MASS cone, the row minutes later.
+    calls, forgotten = _fake_seq(monkeypatch, [EMPTY_VOT, ROW_VOT])
+    _cds.breaker.trip(CDS, "test")
+    resp = _get(_viz())
+    assert "<TR>" in resp.text
+    assert calls == [CFA, CFA] and forgotten == [CFA]
+
+
+def test_mirror_empty_twice_is_returned_uncached_without_tripping(monkeypatch):
+    calls, forgotten = _fake_seq(monkeypatch, [EMPTY_VOT, EMPTY_VOT])
+    _cds.breaker.trip(CDS, "test")
+    resp = _get(_viz())
+    assert "<TR>" not in resp.text
+    assert calls == [CFA, CFA] and forgotten == [CFA, CFA]
+    assert not _cds.breaker.is_down(CFA)
+
+
+def test_primary_empty_answer_is_trusted_and_cached(monkeypatch):
+    calls, forgotten = _fake_seq(monkeypatch, [EMPTY_VOT])
+    resp = _get(_viz())
+    assert resp.host == CDS and calls == [CDS] and forgotten == []
+
+
+
+def test_blank_row_with_a_float_zero_coordinate_is_dropped():
+    # II/246/out junk row (2026-11-13): RAJ2000 = 0.0, everything else masked.
+    t = Table(masked=True)
+    t["RAJ2000"] = MaskedColumn([0.0, 205.729261], mask=[False, False])
+    t["DEJ2000"] = MaskedColumn([0.0, -41.401066], mask=[True, False])
+    t["Kmag"] = MaskedColumn([0.0, 3.1], mask=[True, False])
+    t["Opt"] = ["Opt", "Opt"]
+    out = _cds._drop_blank_rows(_tablelist(**{"II/246/out": t}))
+    assert list(out["II/246/out"]["Kmag"]) == [3.1]
+
+
+def test_tic_from_vizier_matches_the_gaia_id_and_skips_dispositions(monkeypatch):
+    # IV/39/tic82 around HIP 10164 (CfA mirror, 2026-11-13).
+    t = Table()
+    t["TIC"] = [632355485, 632355484, 72651516, 72651515]
+    t["GAIA"] = [5117251502218279680, 5117251502217614848,
+                 5117251502217614848, 5117251502218279552]
+    t["Tmag"] = [12.632, 12.174, 12.174, 6.196]
+    t["e_Tmag"] = [0.01, 0.006, 0.006, 0.006]
+    t["S/G"] = ["STAR"] * 4
+    t["Disp"] = ["", "DUPLICATE", "SPLIT", ""]
+    monkeypatch.setattr(_cds, "_cone", lambda *a, **k: t)
+    row = _cds.tic_from_vizier(None, 10 * u.arcsec, 5117251502218279552)
+    assert row["ID"] == 72651515 and row["Tmag"] == pytest.approx(6.196)
+    assert row["objType"] == "STAR"
+    assert _cds.tic_from_vizier(None, 10 * u.arcsec, 42) is None
