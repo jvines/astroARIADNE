@@ -46,6 +46,10 @@ dependencies = [
     "h5py>=3.12.0",
     "tabulate>=0.9.0",
     "isochrones>=2.1",
+    # Gaia XP gap-fill (librarian _fetch_xp_synth). >=2.1.5: the ESA archive
+    # 3.15 (Nov 2026) rejects the data_structure="raw" DataLink request 2.1.4
+    # sends, so XP fill silently returned nothing on 2.1.4 installs.
+    "gaiaxpy>=2.1.5",
 ]
 
 [project.urls]
