@@ -5,6 +5,31 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-11-13
+
+### Fixed
+- **False empty answers from the CfA mirror are no longer cached.** The
+  mirror sometimes answers "nothing here" for a source it holds, with no
+  error and nothing to tell it from a real empty (HIP 66924's 2MASS cone,
+  2026-11-13; the row came back minutes later). astroquery cached those and
+  replayed them on every rerun, so stars silently lost 2MASS, WISE and
+  Strömgren. An empty answer from a mirror is now never cached and is asked
+  once more; poisoned cache entries are purged when next read.
+- **The mirror's overload answer is a database error.** "ERROR : temporary
+  unavailable" / "(pipe) Request has been interrupted" arrive as HTTP 200 and
+  read as empty; they are now retried like the other database errors and
+  never cached. Permanent errors ("Table ... does not exist") are not.
+- **Malformed VOTables from the mirror are retried** like a database error
+  and never cached, instead of failing the query.
+- **Blank rows from the mirror are dropped.** The mirror puts an all-empty
+  row first in some answers (`Source=0` on `I/355/gaiadr3` and
+  `I/352/gedr3dis`, `RAJ2000=0` on `II/246/out`); code reading row 0 lost the
+  Gaia astrometry, the Bailer-Jones distance or the 2MASS bands.
+- **TIC from VizieR when MAST fails.** MAST's catalogue service stalled on
+  2026-11-13 (one TIC query took 401 s, the next failed after 90 s), so every
+  star lost its TESS band. TIC-8 is now read from VizieR (IV/39/tic82,
+  through the mirror failover) when MAST fails, matched on the Gaia ID.
+
 ## [1.5.4] - 2026-11-12
 
 ### Added
