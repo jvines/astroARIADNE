@@ -138,6 +138,33 @@ def _malformed(resp):
     return False
 
 
+def _drop_blank_rows(result):
+    """Remove rows with no numeric value from every table of a parsed answer.
+
+    The CfA mirror's VOTables (2026-11-13) carry an extra first row in which
+    every numeric cell is masked and the strings are empty or a URL fragment
+    (``https://vizier.idia.ac.za/...``). A single-row lookup -- Gaia DR3 by
+    Source -- read it as THE answer: no PM, no parallax, no G, and the ESA
+    fallback never ran. A real catalogue row always has a numeric value (its
+    coordinates, at least), so a table without numeric columns is left alone.
+    """
+    if isinstance(result, (str, bytes)) or not hasattr(result, "keys"):
+        return result
+    for key in list(result.keys()):
+        t = result[key]
+        num = [c for c in t.colnames if t[c].dtype.kind in "iufc"]
+        if not num or not len(t):
+            continue
+        blank = np.ones(len(t), bool)
+        for c in num:
+            col = t[c]
+            blank &= np.ma.getmaskarray(col) if hasattr(col, "mask") else False
+        if blank.any():
+            logger.info("VizieR %s: dropped %d blank row(s)", key, int(blank.sum()))
+            t.remove_rows(np.nonzero(blank)[0])
+    return result
+
+
 def _all_columns(data):
     """The request body with any ``-out=<list>`` replaced by ``-out.all``.
 
@@ -174,6 +201,9 @@ class MirroredVizier(VizierClass):
         # Share astroquery's "Vizier" cache directory instead of starting an
         # empty "MirroredVizier" one.
         self.name = "Vizier"
+
+    def _parse_result(self, response, **kwargs):
+        return _drop_blank_rows(super()._parse_result(response, **kwargs))
 
     def _request(self, method, url, *args, **kwargs):
         parts = urlsplit(url)
