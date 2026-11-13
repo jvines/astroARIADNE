@@ -103,8 +103,13 @@ def _order(primary, mirrors):
 # A VizieR host whose database is down still answers HTTP 200, with an error
 # INFO and no rows; astroquery parses that into an empty result, which would
 # read as "not in the catalogue". Observed on the CfA mirror (2026-11-11), up
-# to 4 of 6 identical queries failing this way.
-_DB_ERROR_MARKERS = ("not currently reachable", "STDB_ERR", "connect error")
+# to 4 of 6 identical queries failing this way. Under load (2026-11-13) it
+# also answers "ERROR : temporary unavailable" / "(pipe) Request has been
+# interrupted"; 184 of those were cached in one batch and replayed as empty.
+# Permanent errors ("Table ... does not exist") are deliberately not markers:
+# retrying them is useless and would trip the breaker on a healthy host.
+_DB_ERROR_MARKERS = ("not currently reachable", "STDB_ERR", "connect error",
+                     "temporary unavailable", "Request has been interrupted")
 MIRROR_TRIES = int(os.environ.get("CDS_MIRROR_TRIES", "5"))
 
 
@@ -114,6 +119,19 @@ def _db_error(resp):
     if not isinstance(text, str) or 'name="Error"' not in text:
         return False
     return any(m in text for m in _DB_ERROR_MARKERS)
+
+
+def _empty_votable(resp):
+    """True for a VOTable answer with no data rows.
+
+    From the CfA mirror such an answer is not proof of absence: on 2026-11-13
+    it answered a 3" cone on II/246/out around HIP 66924 with no table (no
+    error, the same warnings as a real empty) and the same query minutes
+    later with the 2MASS row, three times out of three. astroquery cached the
+    false empty, so every rerun of the star lost 2MASS.
+    """
+    text = getattr(resp, "text", "")
+    return isinstance(text, str) and "<VOTABLE" in text and "<TR>" not in text
 
 
 def _malformed(resp):
@@ -139,15 +157,18 @@ def _malformed(resp):
 
 
 def _empty_cells(col):
-    """Per row: True where every element of the cell is masked/NaN (floats) or
-    masked/0 (ints -- a VOTable int without a null value reads an empty cell
-    as 0)."""
+    """Per row: True where every element of the cell is masked, NaN or 0.
+
+    Ints: a VOTable int without a null value reads an empty cell as 0.
+    Floats: the II/246/out junk row (2026-11-13) carried RAJ2000 = 0.0 with
+    every other number masked, so 0.0 counts as empty too. A real row always
+    has some finite non-zero number (a coordinate at least).
+    """
     data = np.ma.getdata(col)
     empty = np.ma.getmaskarray(col).copy()
     if data.dtype.kind in "fc":
         empty |= ~np.isfinite(data)
-    else:
-        empty |= data == 0
+    empty |= data == 0
     return empty.reshape(len(col), -1).all(axis=1)
 
 
@@ -207,6 +228,9 @@ class MirroredVizier(VizierClass):
     sent as an empty 200 is not, and is retried. Requests to a mirror always
     ask for ``-out.all`` (see ``_all_columns``). If every host fails the query
     raises, so callers take their own fallback instead of reading "no data".
+    Blank rows are dropped from every result (see ``_drop_blank_rows``). An
+    empty answer from a mirror is never cached and is asked once more (see
+    ``_empty_votable``).
     """
 
     mirrors = VIZIER_MIRRORS
@@ -234,6 +258,7 @@ class MirroredVizier(VizierClass):
             if host in self.mirrors:
                 send["data"] = _all_columns(send.get("data"))
             tries = MIRROR_TRIES if host in self.mirrors else 1
+            empty_retried = False
             for attempt in range(tries):
                 try:
                     resp = super()._request(method, target, **send)
@@ -253,6 +278,15 @@ class MirroredVizier(VizierClass):
                     if attempt + 1 < tries:
                         time.sleep(0.5 * (attempt + 1))
                     continue
+                if host in self.mirrors and _empty_votable(resp):
+                    # A mirror's empty answer can be false, with nothing in it
+                    # to tell it from a real one (see _empty_votable). Never
+                    # keep it in the cache, where it would be replayed for
+                    # every later query, and ask once more, live.
+                    self._forget(method, target, send)
+                    if not empty_retried and attempt + 1 < tries:
+                        empty_retried = True
+                        continue
                 breaker.reset(host)
                 if host != primary:
                     logger.info("VizieR query served by mirror %s", host)
