@@ -525,3 +525,30 @@ def test_mermilliod_survives_a_cds_xmatch_outage(monkeypatch):
     assert lib._magnitudes["GROUND_JOHNSON_V"][0] == pytest.approx(7.65)
     assert lib._magnitudes["GROUND_JOHNSON_B"][0] == pytest.approx(8.24)
     assert lib._magnitudes["GROUND_JOHNSON_U"][0] == pytest.approx(8.34)
+
+
+# ── blank rows from the mirror's VOTables ────────────────────────────
+
+def _tablelist(**tables):
+    from astroquery.utils import commons
+    return commons.TableList(tables)
+
+
+def test_blank_mirror_row_is_dropped():
+    t = Table(masked=True)
+    t["Source"] = MaskedColumn([0, 4888833115509354496], mask=[True, False])
+    t["pmRA"] = MaskedColumn([0.0, 28.72], mask=[True, False])
+    t["Plx"] = MaskedColumn([0.0, np.nan], mask=[True, True])   # a real NULL
+    t["2MASS"] = ["", ""]
+    out = _cds._drop_blank_rows(_tablelist(**{"I/355/gaiadr3": t}))
+    g = out["I/355/gaiadr3"]
+    assert len(g) == 1 and g["Source"][0] == 4888833115509354496
+    assert np.ma.is_masked(g["Plx"][0])                     # NULLs survive
+
+
+def test_tables_without_blank_rows_or_numbers_are_untouched():
+    real = Table({"RAJ2000": [1.0, 2.0], "Name": ["a", "b"]})
+    text = Table({"Name": ["", ""]})
+    out = _cds._drop_blank_rows(_tablelist(a=real, b=text))
+    assert len(out["a"]) == 2 and len(out["b"]) == 2
+    assert _cds._drop_blank_rows("unparsed raw text") == "unparsed raw text"
