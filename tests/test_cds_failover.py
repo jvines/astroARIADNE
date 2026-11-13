@@ -669,3 +669,20 @@ def test_blank_row_with_a_float_zero_coordinate_is_dropped():
     t["Opt"] = ["Opt", "Opt"]
     out = _cds._drop_blank_rows(_tablelist(**{"II/246/out": t}))
     assert list(out["II/246/out"]["Kmag"]) == [3.1]
+
+
+def test_tic_from_vizier_matches_the_gaia_id_and_skips_dispositions(monkeypatch):
+    # IV/39/tic82 around HIP 10164 (CfA mirror, 2026-11-13).
+    t = Table()
+    t["TIC"] = [632355485, 632355484, 72651516, 72651515]
+    t["GAIA"] = [5117251502218279680, 5117251502217614848,
+                 5117251502217614848, 5117251502218279552]
+    t["Tmag"] = [12.632, 12.174, 12.174, 6.196]
+    t["e_Tmag"] = [0.01, 0.006, 0.006, 0.006]
+    t["S/G"] = ["STAR"] * 4
+    t["Disp"] = ["", "DUPLICATE", "SPLIT", ""]
+    monkeypatch.setattr(_cds, "_cone", lambda *a, **k: t)
+    row = _cds.tic_from_vizier(None, 10 * u.arcsec, 5117251502218279552)
+    assert row["ID"] == 72651515 and row["Tmag"] == pytest.approx(6.196)
+    assert row["objType"] == "STAR"
+    assert _cds.tic_from_vizier(None, 10 * u.arcsec, 42) is None

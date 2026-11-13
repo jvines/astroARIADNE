@@ -357,6 +357,42 @@ def _cone(catalog, center, radius, timeout):
     return tbl
 
 
+TIC_VIZIER = "IV/39/tic82"
+
+
+def tic_from_vizier(center, radius, gaia_id, timeout=60):
+    """A star's TIC-8 row from VizieR (IV/39/tic82), keyed like MAST's TIC.
+
+    For when MAST's catalogue service fails: on 2026-11-13 one TIC query took
+    401 s and the next failed after 90 s, while VizieR (through the mirror
+    failover) served the same TIC-8 in 2 s. Matches on the Gaia ID as the
+    MAST path does. A Gaia source can carry several TIC rows (DUPLICATE,
+    SPLIT, ARTIFACT in ``Disp``); the row without a disposition wins. VizieR
+    names MAST's ``ID`` ``TIC`` and its ``objType`` ``S/G``. Returns None when
+    the star is not in the answer; raises when VizieR fails.
+    """
+    tbl = _cone(TIC_VIZIER, center, radius, timeout)
+    if tbl is None or "GAIA" not in tbl.colnames:
+        return None
+
+    def val(row, col):
+        if col not in tbl.colnames or np.ma.is_masked(row[col]):
+            return None
+        return row[col]
+
+    gid = str(int(gaia_id))
+    rows = [r for r in tbl
+            if val(r, "GAIA") is not None and str(int(r["GAIA"])) == gid]
+    if not rows:
+        return None
+    rows.sort(key=lambda r: bool(str(val(r, "Disp") or "").strip()))
+    r = rows[0]
+    s_g = val(r, "S/G")
+    return {"ID": int(r["TIC"]), "GAIA": gid, "Tmag": val(r, "Tmag"),
+            "e_Tmag": val(r, "e_Tmag"), "KIC": val(r, "KIC"),
+            "objType": None if s_g is None else str(s_g).strip()}
+
+
 def _coords(tbl):
     for ra, de in _POSITION_COLUMNS:
         if ra in tbl.colnames and de in tbl.colnames \
