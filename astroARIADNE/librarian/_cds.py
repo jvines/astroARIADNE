@@ -45,6 +45,8 @@ SIMBAD_MIRRORS = _hosts("CDS_SIMBAD_MIRRORS", "simbad.harvard.edu")
 DOWN_SECONDS = float(os.environ.get("CDS_DOWN_SECONDS", "600"))
 CONNECT_TIMEOUT = 10.0
 XMATCH_HOST = urlsplit(XMatch.URL).hostname
+# ESA Gaia archive: not CDS, but it shares the breaker and its down window.
+ESA_HOST = "gea.esac.esa.int"
 
 # HTTP statuses that mean the service is broken rather than the query bad.
 # CDS answers 404 on every VizieR path while it is down.

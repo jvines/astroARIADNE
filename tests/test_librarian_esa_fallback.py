@@ -192,6 +192,7 @@ def test_gaia_id_resolution_survives_a_full_sync_queue():
     gaia.launch_job.side_effect = Exception("503: synchronous queue full")
     gaia.launch_job_async.return_value = _job(
         Table({"source_id": [777], "ang_sep": [0.0001]}))
-    with patch.object(api, "Gaia", gaia):
+    with patch.object(api, "Gaia", gaia), \
+            patch.object(api, "Vizier", MagicMock(**{"query_region.return_value": None})):
         lib._resolve_gaia_id()
     assert lib._gaia_id == 777
