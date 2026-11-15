@@ -60,6 +60,16 @@ _TIMEOUTS = {
 # connect timeout so a dead CDS falls through to the local crossmatch quickly.
 Vizier = _cds.MirroredVizier(row_limit=-1, columns=["all"],
                              timeout=_TIMEOUTS['vizier'])
+
+
+def _vizier_columns(columns):
+    """A mirrored VizieR client asking for ``columns`` (non-default columns
+    must be named), limited to 50 rows."""
+    viz = _cds.MirroredVizier(row_limit=50, columns=columns,
+                              timeout=_TIMEOUTS['vizier'])
+    return viz
+
+
 Gaia.TIMEOUT = _TIMEOUTS['gaia']
 XMatch.TIMEOUT = _cds.connect_read(_TIMEOUTS['xmatch'])
 Catalogs.TIMEOUT = _TIMEOUTS['mast']
@@ -721,6 +731,10 @@ _RUWE_BINARITY_THRESH = 1.4
 
 
 # ── Librarian ────────────────────────────────────────────────────
+
+
+# LAMOST DR11 LRS stellar parameters for A, F, G and K stars.
+_LAMOST_TABLE = "V/162/dr11sl"
 
 
 class Librarian:
@@ -2516,161 +2530,185 @@ class Librarian:
     def _query_spectroscopic_priors(self):
         """Assemble spectroscopic priors (Teff, logg, [Fe/H]).
 
-        Teff/logg come from the survey priority chain (first match wins):
-        PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6 > LAMOST DR11.
+        With ``feh_source == "hypatia"`` (default) the Hypatia Catalog is the
+        first link: if it gives Teff, logg AND [Fe/H] for the star it is the
+        hit (source "Hypatia", Teff/logg errors 150 K / 0.3 dex, no later
+        link is queried). Otherwise Teff/logg come from the survey priority
+        chain (first match wins): PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6
+        > LAMOST DR11, and a Hypatia [Fe/H] still overrides the chain's.
 
-        [Fe/H] depends on ``feh_source``:
-          * "hypatia" (default) — the Hypatia Catalog, a multi-study
-            high-resolution-spectroscopy compilation whose spread gives a
-            realistic σ; falls back to the survey-chain [Fe/H] on a Hypatia
-            miss.
-          * "survey" — use the survey-chain [Fe/H] (legacy behaviour).
+        With ``feh_source == "survey"`` Hypatia is never queried and the
+        chain's own [Fe/H] is used. The Hypatia composition is requested once
+        per star.
         """
-        base = None
-        for query_fn, source_name in [
-            (self._query_pastel, "PASTEL"),
-            (self._query_apogee, "APOGEE_DR17"),
-            (self._query_galah, "GALAH_DR3"),
-            (self._query_rave, "RAVE_DR6"),
-            (self._query_lamost, "LAMOST_DR11"),
-        ]:
-            result = query_fn()
-            if result is not None:
-                result["source"] = source_name
-                base = result
-                logger.info("Spectroscopic params from %s", source_name)
-                break
-
+        hyp = None
         if self._feh_source == "hypatia":
             hyp = self._query_hypatia()
-            if hyp is not None:
-                if base is None:
-                    base = {"teff": None, "teff_err": None,
-                            "logg": None, "logg_err": None,
-                            "source": None}
-                base["feh"] = hyp["feh"]
-                base["feh_err"] = hyp["feh_err"]
-                base["feh_source"] = "Hypatia"
-                base["feh_n_meas"] = hyp["n_meas"]
-                base["feh_solarnorm"] = hyp["solarnorm"]
-                base["feh_statistic"] = hyp["statistic"]
-                base["feh_uncertainty"] = hyp["uncertainty"]
-                logger.info("[Fe/H] from Hypatia: %.3f ± %.3f (n=%d, %s)",
-                            hyp["feh"], hyp["feh_err"], hyp["n_meas"],
-                            hyp["matched_name"])
+
+        base = None
+        if hyp is not None:
+            star = self._query_hypatia_star()
+            if star is not None:
+                base = {"teff": star["teff"], "teff_err": star["teff_err"],
+                        "logg": star["logg"], "logg_err": star["logg_err"],
+                        "source": "Hypatia"}
+                logger.info("Spectroscopic params from Hypatia (%s)",
+                            star["matched_name"])
+
+        if base is None:
+            for query_fn, source_name in [
+                (self._query_pastel, "PASTEL"),
+                (self._query_apogee, "APOGEE_DR17"),
+                (self._query_galah, "GALAH_DR3"),
+                (self._query_rave, "RAVE_DR6"),
+                (self._query_lamost, "LAMOST_DR11"),
+            ]:
+                result = query_fn()
+                if result is not None:
+                    result["source"] = source_name
+                    base = result
+                    logger.info("Spectroscopic params from %s", source_name)
+                    break
+
+        if hyp is not None:
+            if base is None:
+                base = {"teff": None, "teff_err": None,
+                        "logg": None, "logg_err": None,
+                        "source": None}
+            base["feh"] = hyp["feh"]
+            base["feh_err"] = hyp["feh_err"]
+            base["feh_source"] = "Hypatia"
+            base["feh_n_meas"] = hyp["n_meas"]
+            base["feh_solarnorm"] = hyp["solarnorm"]
+            base["feh_statistic"] = hyp["statistic"]
+            base["feh_uncertainty"] = hyp["uncertainty"]
+            logger.info("[Fe/H] from Hypatia: %.3f ± %.3f (n=%d, %s)",
+                        hyp["feh"], hyp["feh_err"], hyp["n_meas"],
+                        hyp["matched_name"])
 
         self._spectroscopic_params = base
+
+    def _hypatia_names(self) -> list:
+        tmass = self._ids.get("2MASS") if self._ids else None
+        return [f"2MASS J{tmass}"] if tmass else []
 
     def _query_hypatia(self) -> dict | None:
         """Query the Hypatia Catalog for [Fe/H] using the configured options."""
         from ._hypatia import query_hypatia_feh
-        names = []
-        tmass = self._ids.get("2MASS") if self._ids else None
-        if tmass:
-            names.append(f"2MASS J{tmass}")
         return query_hypatia_feh(
-            self._gaia_id, names,
+            self._gaia_id, self._hypatia_names(),
             statistic=self._hypatia_statistic,
             uncertainty=self._hypatia_uncertainty,
             solarnorm=self._hypatia_solarnorm,
             floor=self._feh_floor,
         )
 
+    def _query_hypatia_star(self) -> dict | None:
+        """Query the Hypatia star endpoint for Teff and logg."""
+        from ._hypatia import query_hypatia_star
+        return query_hypatia_star(self._gaia_id, self._hypatia_names())
+
     def _query_apogee(self) -> dict | None:
-        """Query APOGEE DR17 via VizieR (III/286).
+        """Query APOGEE DR17 via VizieR (III/286/catalog) on the Gaia DR3 id.
 
-        Crossmatches via 2MASS ID. Rejects entries with ASPCAPFLAG != 0.
-        Uses [M/H] as proxy for [Fe/H] (close enough for priors).
-        """
-        tmass_id = self._ids.get("2MASS")
-        if tmass_id is None:
-            return None
-
-        try:
-            cat = _with_timeout(
-                Vizier.query_constraints,
-                catalog="III/286/allstars", **{"2MASS": str(tmass_id)},
-            )
-            if not cat or len(cat[0]) == 0:
-                return None
-
-            row = cat[0][0]
-
-            # Reject flagged entries
-            flag = _col(row, "ASPCAPFLAG")
-            if flag is not None and int(flag) != 0:
-                return None
-
-            teff = _col(row, "Teff")
-            teff_e = _col(row, "e_Teff")
-            logg = _col(row, "logg")
-            logg_e = _col(row, "e_logg")
-            mh = _col(row, "__M_H_")
-            mh_e = _col(row, "e__M_H_")
-
-            if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, mh)):
-                return None
-
-            return {
-                "teff": float(teff),
-                "teff_err": float(teff_e) if teff_e is not None else 100.0,
-                "logg": float(logg),
-                "logg_err": float(logg_e) if logg_e is not None else 0.2,
-                "feh": float(mh),
-                "feh_err": float(mh_e) if mh_e is not None else 0.1,
-            }
-        except Exception as e:
-            logger.warning("APOGEE DR17 query failed: %s", e)
-            return None
-
-    def _query_galah(self) -> dict | None:
-        """Query GALAH DR3 via VizieR (J/MNRAS/506/150).
-
-        Pre-matched to Gaia DR3 source_id. Rejects entries with quality flags.
+        Crossmatches on the ``GaiaEDR3`` column. ``III/286/allstars`` is not a
+        VizieR table, and a ``2MASS=`` constraint on ``III/286/catalog`` is
+        silently ignored (no such column), returning unfiltered rows. A star
+        can have several ASPCAP entries; the highest SNR wins.
         """
         if self._gaia_id is None:
             return None
 
         try:
+            viz = _vizier_columns(["*", "e_Teff", "e_logg", "[Fe/H]",
+                                   "e_[Fe/H]", "f_[Fe/H]", "SNR"])
             cat = _with_timeout(
-                Vizier.query_constraints,
-                catalog="J/MNRAS/506/150/catalog",
-                Source=str(self._gaia_id),
+                viz.query_constraints,
+                catalog="III/286/catalog", GaiaEDR3=str(self._gaia_id),
             )
             if not cat or len(cat[0]) == 0:
                 return None
+            tbl = cat[0]
+            if "SNR" in tbl.colnames:
+                tbl.sort("SNR")
+                tbl.reverse()
+            return self._parse_apogee(tbl[0])
+        except Exception as e:
+            logger.warning("APOGEE DR17 query failed: %s", e)
+            return None
 
-            row = cat[0][0]
+    @staticmethod
+    def _parse_apogee(row) -> dict | None:
+        """Parse one III/286/catalog row (no network).
 
-            # Quality flags: reject if flagged
-            flag_sp = _col(row, "flag_sp")
-            flag_fe_h = _col(row, "flag_fe_h")
-            if flag_sp is not None and int(flag_sp) != 0:
+        Returns the direct [Fe/H], gated on its own flag ``f_[Fe/H] == 0``.
+        ASPCAPFLAG is not a gate: its info bits fire on otherwise fine stars.
+        """
+        fe_flag = _col(row, "f_[Fe/H]")
+        if fe_flag is not None:
+            try:
+                if int(fe_flag) != 0:
+                    return None
+            except (TypeError, ValueError):
+                pass
+        return Librarian._spectro_row(row)
+
+    @staticmethod
+    def _spectro_row(row) -> dict | None:
+        """Teff, logg and [Fe/H] with errors, from VizieR bracket names."""
+        teff = _col(row, "Teff")
+        teff_e = _col(row, "e_Teff")
+        logg = _col(row, "logg")
+        logg_e = _col(row, "e_logg")
+        feh = _col(row, "[Fe/H]")
+        feh_e = _col(row, "e_[Fe/H]")
+        if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
+            return None
+        return {
+            "teff": float(teff),
+            "teff_err": float(teff_e) if teff_e is not None else 100.0,
+            "logg": float(logg),
+            "logg_err": float(logg_e) if logg_e is not None else 0.2,
+            "feh": float(feh),
+            "feh_err": float(feh_e) if feh_e is not None else 0.1,
+        }
+
+    def _query_galah(self) -> dict | None:
+        """Query GALAH DR3 via VizieR (J/MNRAS/506/150/stars) on the Gaia id.
+
+        The ``.../catalog`` subtable does not exist and ``Source=`` matches no
+        column. Errors and flags are non-default columns and are requested.
+        """
+        if self._gaia_id is None:
+            return None
+
+        try:
+            viz = _vizier_columns(["*", "e_Teff", "e_logg", "e_[Fe/H]",
+                                   "Flagsp", "q_[Fe/H]"])
+            cat = _with_timeout(
+                viz.query_constraints,
+                catalog="J/MNRAS/506/150/stars", GaiaEDR3=str(self._gaia_id),
+            )
+            if not cat or len(cat[0]) == 0:
                 return None
-            if flag_fe_h is not None and int(flag_fe_h) != 0:
-                return None
-
-            teff = _col(row, "Teff")
-            teff_e = _col(row, "e_Teff")
-            logg = _col(row, "logg")
-            logg_e = _col(row, "e_logg")
-            feh = _col(row, "fe_h")
-            feh_e = _col(row, "e_fe_h")
-
-            if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
-                return None
-
-            return {
-                "teff": float(teff),
-                "teff_err": float(teff_e) if teff_e is not None else 100.0,
-                "logg": float(logg),
-                "logg_err": float(logg_e) if logg_e is not None else 0.2,
-                "feh": float(feh),
-                "feh_err": float(feh_e) if feh_e is not None else 0.1,
-            }
+            return self._parse_galah(cat[0][0])
         except Exception as e:
             logger.warning("GALAH DR3 query failed: %s", e)
             return None
+
+    @staticmethod
+    def _parse_galah(row) -> dict | None:
+        """Parse one J/MNRAS/506/150/stars row (no network): reject a flagged
+        solution (``Flagsp != 0``) or [Fe/H] (``q_[Fe/H] != 0``)."""
+        for flag_col in ("Flagsp", "q_[Fe/H]"):
+            flag = _col(row, flag_col)
+            if flag is not None:
+                try:
+                    if int(flag) != 0:
+                        return None
+                except (TypeError, ValueError):
+                    pass
+        return Librarian._spectro_row(row)
 
     def _query_rave(self) -> dict | None:
         """Query RAVE DR6 for spectroscopic Teff, logg, [Fe/H]."""
@@ -2704,23 +2742,27 @@ class Librarian:
             return None
 
     def _query_lamost(self) -> dict | None:
-        """Query LAMOST DR9 stellar parameters via VizieR (V/162).
+        """Query LAMOST DR11 LRS AFGK parameters via VizieR (V/162/dr11sl).
 
         Crossmatches via positional cone search since LAMOST has no
-        pre-matched Gaia source_id. Requires SNR_g > 30.
+        pre-matched Gaia source_id. Requires SNR_g > 30. Asks for the
+        parameter table by name: a cone on all of V/162 answers with the
+        general LRS table (dr11l, no Teff/logg/[Fe/H]) first.
         """
         try:
             cats = _with_timeout(
                 Vizier.query_region,
-                self._coord, radius=self._search_radius, catalog="V/162",
+                self._coord, radius=self._search_radius, catalog=_LAMOST_TABLE,
             )
-            if cats is None:
+            try:
+                cat = cats[_LAMOST_TABLE]
+            except (TypeError, KeyError):
                 return None
-            if not cats or len(cats[0]) == 0:
+            if len(cat) == 0:
                 return None
 
-            cats[0].sort("_r")
-            row = cats[0][0]
+            cat.sort("_r")
+            row = cat[0]
 
             # SNR quality cut
             snrg = _col(row, "snrg")
@@ -2731,8 +2773,8 @@ class Librarian:
             teff_e = _col(row, "e_Teff")
             logg = _col(row, "logg")
             logg_e = _col(row, "e_logg")
-            feh = _col(row, "__Fe_H_")
-            feh_e = _col(row, "e__Fe_H_")
+            feh = _col(row, "[Fe/H]")
+            feh_e = _col(row, "e_[Fe/H]")
 
             if any(v is None for v in (teff, logg, feh)):
                 return None
@@ -2768,14 +2810,14 @@ class Librarian:
 
             teff = _col(row, "Teff")
             logg = _col(row, "logg")
-            feh = _col(row, "__Fe_H_")
+            feh = _col(row, "[Fe/H]")
 
             if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
                 return None
 
             teff_e = _col(row, "e_Teff")
             logg_e = _col(row, "e_logg")
-            feh_e = _col(row, "e__Fe_H_")
+            feh_e = _col(row, "e_[Fe/H]")
 
             return {
                 "teff": float(teff),

@@ -153,3 +153,55 @@ def query_hypatia_feh(
         }
 
     return None
+
+
+STAR_URL = "https://hypatiacatalog.com/hypatia/api/v2/star/"
+
+# Hypatia gives no errors on Teff or logg; use PASTEL's compilation defaults.
+STAR_TEFF_ERR = 150.0
+STAR_LOGG_ERR = 0.3
+
+
+def query_hypatia_star(
+    gaia_id: int | None = None,
+    names: Iterable[str] = (),
+    *,
+    timeout: float = 30.0,
+) -> dict | None:
+    """Query Hypatia's star endpoint for Teff and logg.
+
+    ``GET /hypatia/api/v2/star/?name=<name>`` (the trailing slash is required;
+    without it the server answers 301). Names are tried in the same order as
+    :func:`query_hypatia_feh`. The response is a JSON list whose first element
+    has ``status`` ("found" or "not-found") and ``teff`` / ``logg`` (float or
+    null). Returns ``{"teff", "teff_err", "logg", "logg_err", "matched_name"}``,
+    or ``None`` when no candidate has both Teff and logg or on error.
+    """
+    import requests
+
+    for qname in _name_candidates(gaia_id, names):
+        try:
+            resp = requests.get(STAR_URL, params={"name": qname},
+                                timeout=timeout)
+        except Exception as e:
+            logger.warning("Hypatia star request failed for %s: %s", qname, e)
+            continue
+        if resp.status_code != 200:
+            logger.warning("Hypatia star HTTP %s for %s", resp.status_code,
+                           qname)
+            continue
+        try:
+            payload = resp.json()
+        except Exception:
+            continue
+        rec = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(rec, dict) or rec.get("status") != "found":
+            continue
+        teff, logg = rec.get("teff"), rec.get("logg")
+        if teff is None or logg is None:
+            continue
+        return {"teff": float(teff), "teff_err": STAR_TEFF_ERR,
+                "logg": float(logg), "logg_err": STAR_LOGG_ERR,
+                "matched_name": qname}
+
+    return None
