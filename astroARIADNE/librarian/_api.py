@@ -596,6 +596,10 @@ _RUWE_BINARITY_THRESH = 1.4
 # ── Librarian ────────────────────────────────────────────────────
 
 
+# LAMOST DR11 LRS stellar parameters for A, F, G and K stars.
+_LAMOST_TABLE = "V/162/dr11sl"
+
+
 class Librarian:
     """Automated photometry and astrometry retrieval for isochrone fitting.
 
@@ -2594,23 +2598,27 @@ class Librarian:
             return None
 
     def _query_lamost(self) -> dict | None:
-        """Query LAMOST DR9 stellar parameters via VizieR (V/162).
+        """Query LAMOST DR11 LRS AFGK parameters via VizieR (V/162/dr11sl).
 
         Crossmatches via positional cone search since LAMOST has no
-        pre-matched Gaia source_id. Requires SNR_g > 30.
+        pre-matched Gaia source_id. Requires SNR_g > 30. Asks for the
+        parameter table by name: a cone on all of V/162 answers with the
+        general LRS table (dr11l, no Teff/logg/[Fe/H]) first.
         """
         try:
             cats = _with_timeout(
                 Vizier.query_region,
-                self._coord, radius=self._search_radius, catalog="V/162",
+                self._coord, radius=self._search_radius, catalog=_LAMOST_TABLE,
             )
-            if cats is None:
+            try:
+                cat = cats[_LAMOST_TABLE]
+            except (TypeError, KeyError):
                 return None
-            if not cats or len(cats[0]) == 0:
+            if len(cat) == 0:
                 return None
 
-            cats[0].sort("_r")
-            row = cats[0][0]
+            cat.sort("_r")
+            row = cat[0]
 
             # SNR quality cut
             snrg = _col(row, "snrg")
@@ -2621,8 +2629,8 @@ class Librarian:
             teff_e = _col(row, "e_Teff")
             logg = _col(row, "logg")
             logg_e = _col(row, "e_logg")
-            feh = _col(row, "__Fe_H_")
-            feh_e = _col(row, "e__Fe_H_")
+            feh = _col(row, "[Fe/H]")
+            feh_e = _col(row, "e_[Fe/H]")
 
             if any(v is None for v in (teff, logg, feh)):
                 return None
@@ -2658,14 +2666,14 @@ class Librarian:
 
             teff = _col(row, "Teff")
             logg = _col(row, "logg")
-            feh = _col(row, "__Fe_H_")
+            feh = _col(row, "[Fe/H]")
 
             if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
                 return None
 
             teff_e = _col(row, "e_Teff")
             logg_e = _col(row, "e_logg")
-            feh_e = _col(row, "e__Fe_H_")
+            feh_e = _col(row, "e_[Fe/H]")
 
             return {
                 "teff": float(teff),
