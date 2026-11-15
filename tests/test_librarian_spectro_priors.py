@@ -209,3 +209,152 @@ def test_query_galah_live():
     res = _query_shell(36734515982599808)._query_galah()
     assert res is not None
     assert 3000 < res["teff"] < 8000 and res["feh"] is not None
+
+
+# -- Hypatia as the first link of the chain -----------------------------------
+def _chain_shell(feh_source="hypatia"):
+    lib = _query_shell(1779546757669063552)
+    lib._feh_source = feh_source
+    lib._hypatia_statistic, lib._hypatia_uncertainty = "median", "std"
+    lib._hypatia_solarnorm, lib._feh_floor = "asplund09", 0.10
+    lib.calls = []
+    for name in ("pastel", "apogee", "galah", "rave", "lamost"):
+        setattr(lib, f"_query_{name}", _stub(lib, name))
+    return lib
+
+
+def _stub(lib, name):
+    def _q():
+        lib.calls.append(name)
+        return {"teff": 5000.0, "teff_err": 100.0, "logg": 4.0,
+                "logg_err": 0.2, "feh": -0.5, "feh_err": 0.1} \
+            if name == "pastel" else None
+    return _q
+
+
+HYP_FEH = {"feh": 0.02, "feh_err": 0.05, "n_meas": 7, "source": "Hypatia",
+           "solarnorm": "asplund09", "statistic": "median",
+           "uncertainty": "std", "matched_name": "Gaia DR3 1779546757669063552"}
+HYP_STAR = {"teff": 6075.0, "teff_err": 150.0, "logg": 4.37,
+            "logg_err": 0.3, "matched_name": "Gaia DR3 1779546757669063552"}
+
+
+def _hypatia(lib, feh, star):
+    lib.hyp_calls = {"feh": 0, "star": 0}
+
+    def _f():
+        lib.hyp_calls["feh"] += 1
+        return feh
+
+    def _s():
+        lib.hyp_calls["star"] += 1
+        return star
+    lib._query_hypatia, lib._query_hypatia_star = _f, _s
+
+
+def test_hypatia_first_link_wins_and_skips_later_links():
+    lib = _chain_shell()
+    _hypatia(lib, HYP_FEH, HYP_STAR)
+    lib._query_spectroscopic_priors()
+    p = lib._spectroscopic_params
+    assert lib.calls == []
+    assert p["source"] == "Hypatia"
+    assert (p["teff"], p["teff_err"], p["logg"], p["logg_err"]) == \
+        (6075.0, 150.0, 4.37, 0.3)
+    assert p["feh"] == 0.02 and p["feh_source"] == "Hypatia"
+    assert p["feh_n_meas"] == 7 and p["feh_solarnorm"] == "asplund09"
+    assert lib.hyp_calls == {"feh": 1, "star": 1}
+
+
+def test_hypatia_without_teff_logg_continues_chain_and_overrides_feh():
+    lib = _chain_shell()
+    _hypatia(lib, HYP_FEH, None)
+    lib._query_spectroscopic_priors()
+    p = lib._spectroscopic_params
+    assert lib.calls == ["pastel"]
+    assert p["source"] == "PASTEL" and p["teff"] == 5000.0
+    assert p["feh"] == 0.02 and p["feh_source"] == "Hypatia"
+    assert lib.hyp_calls["feh"] == 1
+
+
+def test_hypatia_not_found_leaves_chain_untouched():
+    lib = _chain_shell()
+    _hypatia(lib, None, None)
+    lib._query_spectroscopic_priors()
+    p = lib._spectroscopic_params
+    assert p["source"] == "PASTEL" and p["feh"] == -0.5
+    assert "feh_source" not in p
+    assert lib.hyp_calls == {"feh": 1, "star": 0}
+
+
+def test_survey_feh_source_never_queries_hypatia():
+    lib = _chain_shell("survey")
+    _hypatia(lib, HYP_FEH, HYP_STAR)
+    lib._query_spectroscopic_priors()
+    assert lib.hyp_calls == {"feh": 0, "star": 0}
+    assert lib._spectroscopic_params["source"] == "PASTEL"
+    assert lib._spectroscopic_params["feh"] == -0.5
+
+
+class _Resp:
+    def __init__(self, payload, status=200):
+        self.payload, self.status_code = payload, status
+
+    def json(self):
+        return self.payload
+
+
+def test_one_composition_request_per_star(monkeypatch):
+    import requests
+    seen = []
+
+    def _get(url, params=None, timeout=None):
+        seen.append(url)
+        if url.endswith("/composition"):
+            return _Resp([{"name": "x", "median_value": 0.02,
+                           "all_values": [{"value": 0.0}, {"value": 0.04}]}])
+        return _Resp([{"status": "found", "teff": 6075.0, "logg": 4.37}])
+
+    monkeypatch.setattr(requests, "get", _get)
+    lib = _chain_shell()
+    lib._query_spectroscopic_priors()
+    assert sum(u.endswith("/composition") for u in seen) == 1
+    assert lib._spectroscopic_params["source"] == "Hypatia"
+    assert lib.calls == []
+
+
+def test_query_hypatia_star_url_names_and_not_found(monkeypatch):
+    import requests
+    from astroARIADNE.librarian._hypatia import query_hypatia_star
+    seen = []
+
+    def _get(url, params=None, timeout=None):
+        seen.append((url, params["name"], timeout))
+        if params["name"].startswith("Gaia"):
+            return _Resp([{"status": "not-found", "teff": None, "logg": None}])
+        return _Resp([{"status": "found", "teff": 6075.0, "logg": 4.37}])
+
+    monkeypatch.setattr(requests, "get", _get)
+    out = query_hypatia_star(1779546757669063552, ["2MASS J22031079+1859330"])
+    assert [s[1] for s in seen] == ["Gaia DR3 1779546757669063552",
+                                    "2MASS J22031079+1859330"]
+    assert seen[0][0] == "https://hypatiacatalog.com/hypatia/api/v2/star/"
+    assert out["teff"] == 6075.0 and out["teff_err"] == 150.0
+    assert out["logg"] == 4.37 and out["logg_err"] == 0.3
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp(
+        [{"status": "not-found", "teff": None, "logg": None}]))
+    assert query_hypatia_star(6031016407317733376) is None
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp(
+        [{"status": "found", "teff": 6000.0, "logg": None}]))
+    assert query_hypatia_star(1) is None
+
+
+@_LIVE
+def test_hypatia_star_live_hd209458():
+    from astroARIADNE.librarian._hypatia import query_hypatia_star
+    out = query_hypatia_star(1779546757669063552)
+    assert out is not None
+    assert out["teff"] == pytest.approx(6075.0)
+    assert out["logg"] == pytest.approx(4.37)
+    assert query_hypatia_star(6031016407317733376) is None

@@ -2530,65 +2530,83 @@ class Librarian:
     def _query_spectroscopic_priors(self):
         """Assemble spectroscopic priors (Teff, logg, [Fe/H]).
 
-        Teff/logg come from the survey priority chain (first match wins):
-        PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6 > LAMOST DR11.
+        With ``feh_source == "hypatia"`` (default) the Hypatia Catalog is the
+        first link: if it gives Teff, logg AND [Fe/H] for the star it is the
+        hit (source "Hypatia", Teff/logg errors 150 K / 0.3 dex, no later
+        link is queried). Otherwise Teff/logg come from the survey priority
+        chain (first match wins): PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6
+        > LAMOST DR11, and a Hypatia [Fe/H] still overrides the chain's.
 
-        [Fe/H] depends on ``feh_source``:
-          * "hypatia" (default) — the Hypatia Catalog, a multi-study
-            high-resolution-spectroscopy compilation whose spread gives a
-            realistic σ; falls back to the survey-chain [Fe/H] on a Hypatia
-            miss.
-          * "survey" — use the survey-chain [Fe/H] (legacy behaviour).
+        With ``feh_source == "survey"`` Hypatia is never queried and the
+        chain's own [Fe/H] is used. The Hypatia composition is requested once
+        per star.
         """
-        base = None
-        for query_fn, source_name in [
-            (self._query_pastel, "PASTEL"),
-            (self._query_apogee, "APOGEE_DR17"),
-            (self._query_galah, "GALAH_DR3"),
-            (self._query_rave, "RAVE_DR6"),
-            (self._query_lamost, "LAMOST_DR11"),
-        ]:
-            result = query_fn()
-            if result is not None:
-                result["source"] = source_name
-                base = result
-                logger.info("Spectroscopic params from %s", source_name)
-                break
-
+        hyp = None
         if self._feh_source == "hypatia":
             hyp = self._query_hypatia()
-            if hyp is not None:
-                if base is None:
-                    base = {"teff": None, "teff_err": None,
-                            "logg": None, "logg_err": None,
-                            "source": None}
-                base["feh"] = hyp["feh"]
-                base["feh_err"] = hyp["feh_err"]
-                base["feh_source"] = "Hypatia"
-                base["feh_n_meas"] = hyp["n_meas"]
-                base["feh_solarnorm"] = hyp["solarnorm"]
-                base["feh_statistic"] = hyp["statistic"]
-                base["feh_uncertainty"] = hyp["uncertainty"]
-                logger.info("[Fe/H] from Hypatia: %.3f ± %.3f (n=%d, %s)",
-                            hyp["feh"], hyp["feh_err"], hyp["n_meas"],
-                            hyp["matched_name"])
+
+        base = None
+        if hyp is not None:
+            star = self._query_hypatia_star()
+            if star is not None:
+                base = {"teff": star["teff"], "teff_err": star["teff_err"],
+                        "logg": star["logg"], "logg_err": star["logg_err"],
+                        "source": "Hypatia"}
+                logger.info("Spectroscopic params from Hypatia (%s)",
+                            star["matched_name"])
+
+        if base is None:
+            for query_fn, source_name in [
+                (self._query_pastel, "PASTEL"),
+                (self._query_apogee, "APOGEE_DR17"),
+                (self._query_galah, "GALAH_DR3"),
+                (self._query_rave, "RAVE_DR6"),
+                (self._query_lamost, "LAMOST_DR11"),
+            ]:
+                result = query_fn()
+                if result is not None:
+                    result["source"] = source_name
+                    base = result
+                    logger.info("Spectroscopic params from %s", source_name)
+                    break
+
+        if hyp is not None:
+            if base is None:
+                base = {"teff": None, "teff_err": None,
+                        "logg": None, "logg_err": None,
+                        "source": None}
+            base["feh"] = hyp["feh"]
+            base["feh_err"] = hyp["feh_err"]
+            base["feh_source"] = "Hypatia"
+            base["feh_n_meas"] = hyp["n_meas"]
+            base["feh_solarnorm"] = hyp["solarnorm"]
+            base["feh_statistic"] = hyp["statistic"]
+            base["feh_uncertainty"] = hyp["uncertainty"]
+            logger.info("[Fe/H] from Hypatia: %.3f ± %.3f (n=%d, %s)",
+                        hyp["feh"], hyp["feh_err"], hyp["n_meas"],
+                        hyp["matched_name"])
 
         self._spectroscopic_params = base
+
+    def _hypatia_names(self) -> list:
+        tmass = self._ids.get("2MASS") if self._ids else None
+        return [f"2MASS J{tmass}"] if tmass else []
 
     def _query_hypatia(self) -> dict | None:
         """Query the Hypatia Catalog for [Fe/H] using the configured options."""
         from ._hypatia import query_hypatia_feh
-        names = []
-        tmass = self._ids.get("2MASS") if self._ids else None
-        if tmass:
-            names.append(f"2MASS J{tmass}")
         return query_hypatia_feh(
-            self._gaia_id, names,
+            self._gaia_id, self._hypatia_names(),
             statistic=self._hypatia_statistic,
             uncertainty=self._hypatia_uncertainty,
             solarnorm=self._hypatia_solarnorm,
             floor=self._feh_floor,
         )
+
+    def _query_hypatia_star(self) -> dict | None:
+        """Query the Hypatia star endpoint for Teff and logg."""
+        from ._hypatia import query_hypatia_star
+        return query_hypatia_star(self._gaia_id, self._hypatia_names())
 
     def _query_apogee(self) -> dict | None:
         """Query APOGEE DR17 via VizieR (III/286/catalog) on the Gaia DR3 id.
