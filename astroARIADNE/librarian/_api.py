@@ -79,19 +79,28 @@ class CatalogDef:
 _QUERY_TIMEOUT = 60  # seconds per network query
 
 
-def _with_timeout(func, *args, timeout=_QUERY_TIMEOUT, **kwargs):
-    """Run any callable with a hard timeout. Returns None on timeout or error."""
+class _TimedOut(Exception):
+    """Marker: a query exceeded its hard timeout."""
+
+
+def _call_with_timeout(func, *args, timeout=_QUERY_TIMEOUT, **kwargs):
+    """Run a callable under a hard timeout. Returns (value, exception)."""
     from concurrent.futures import TimeoutError as FuturesTimeout
 
     future = _TIMEOUT_POOL.submit(func, *args, **kwargs)
     try:
-        return future.result(timeout=timeout)
+        return future.result(timeout=timeout), None
     except FuturesTimeout:
         logger.warning("Query timed out after %ds", timeout)
-        return None
+        return None, _TimedOut()
     except Exception as e:
         logger.warning("Query failed: %s", e)
-        return None
+        return None, e
+
+
+def _with_timeout(func, *args, timeout=_QUERY_TIMEOUT, **kwargs):
+    """Run any callable with a hard timeout. Returns None on timeout or error."""
+    return _call_with_timeout(func, *args, timeout=timeout, **kwargs)[0]
 
 
 def _xmatch(**kw):
@@ -138,18 +147,67 @@ def _tap_query(service, query, timeout=_QUERY_TIMEOUT):
 _GAIA_ZP_ERR = {"G": 0.0027553202, "BP": 0.0027901700, "RP": 0.0037793818}
 
 
+class GaiaQueryError(RuntimeError):
+    """The Gaia source could not be resolved because every service failed.
+
+    Distinct from "no Gaia source at this position", which is a valid answer.
+    """
+
+
+def _esa_unreachable(exc):
+    """True when ``exc`` says the ESA host is unreachable, not that the query
+    was refused (an HTTP 4xx/5xx such as a full sync queue is the latter)."""
+    import urllib.error
+
+    import requests
+
+    if isinstance(exc, (requests.HTTPError, urllib.error.HTTPError)):
+        return False
+    return isinstance(exc, (_TimedOut, OSError))
+
+
+def _esa_table(adql, *, sync=True):
+    """Run an ADQL query on the ESA Gaia archive behind the ESA breaker.
+
+    Returns an astropy Table, or None on failure (or at once while the host is
+    marked down). A sync job is tried first when ``sync`` and retried as an
+    async job, because ESA rejects sync jobs when its sync queue is full; an
+    unreachable host skips the retry. A timeout or connection error trips the
+    breaker, any answer resets it.
+    """
+    host = _cds.ESA_HOST
+    if _cds.breaker.is_down(host):
+        logger.info("ESA Gaia archive marked down; skipping query")
+        return None
+    if sync:
+        res, exc = _call_with_timeout(
+            lambda: Gaia.launch_job(adql).get_results())
+        if exc is None:
+            _cds.breaker.reset(host)
+            return res
+        if _esa_unreachable(exc):
+            _cds.breaker.trip(host, type(exc).__name__)
+            return None
+        logger.warning("ESA sync query failed; retrying as an async job")
+
+    res, exc = _call_with_timeout(
+        lambda: Gaia.launch_job_async(adql).get_results())
+    if exc is None:
+        _cds.breaker.reset(host)
+        return res
+    if _esa_unreachable(exc):
+        _cds.breaker.trip(host, type(exc).__name__)
+    return None
+
+
 def _esa_first_row(adql):
     """First row of an ESA Gaia archive query as a dict.
 
-    Tries a sync job first and retries as an async job, because ESA rejects
-    sync jobs when its sync queue is full. Returns None when both failed and
-    {} when the query returned no rows. Masked cells become None, as ``_col``
-    returns for a masked VizieR cell.
+    Returns None when the query failed (or the ESA breaker is open) and {}
+    when it returned no rows. Masked cells become None, as ``_col`` returns
+    for a masked VizieR cell.
     """
-    res = _with_timeout(lambda: Gaia.launch_job(adql).get_results())
-    if res is None:
-        logger.warning("ESA sync query failed; retrying as an async job")
-        res = _tap_query(Gaia, adql)
+    res = _esa_table(adql)
     if res is None:
         return None
     if len(res) == 0:
@@ -157,6 +215,62 @@ def _esa_first_row(adql):
     row = res[0]
     return {c.lower(): (None if ma.is_masked(row[c]) else row[c])
             for c in res.colnames}
+
+
+def _nearest_source_id(tbl, coord):
+    """Source id of the row nearest ``coord`` in a VizieR I/355/gaiadr3 cone.
+
+    VizieR returns cone rows unsorted, so row 0 is not the nearest. Uses
+    ``_r`` when present, else the separation from RA_ICRS/DE_ICRS.
+    """
+    if "_r" in tbl.colnames:
+        sep = np.asarray(tbl["_r"], dtype=float)
+    elif "RA_ICRS" in tbl.colnames and "DE_ICRS" in tbl.colnames:
+        pos = SkyCoord(np.asarray(tbl["RA_ICRS"], dtype=float) * u.deg,
+                       np.asarray(tbl["DE_ICRS"], dtype=float) * u.deg)
+        sep = coord.separation(pos).deg
+    else:
+        return None
+    return int(tbl["Source"][int(np.argmin(sep))])
+
+
+def _resolve_gaia_source(coord, radius):
+    """Gaia DR3 source_id nearest ``coord`` within ``radius``; the one resolver.
+
+    VizieR (I/355/gaiadr3, through the mirrors) first, the ESA archive only
+    when VizieR failed or gave an empty answer that a mirror cannot vouch for.
+    Returns None when no source is there. Raises GaiaQueryError when both
+    services failed, so "service down" is never read as "no source".
+    """
+    cats = _with_timeout(
+        Vizier.query_region, coord, radius=radius, catalog="I/355/gaiadr3")
+    if cats is not None and not _mirror_empty(cats):
+        if not len(cats) or not len(cats[0]):
+            return None
+        sid = _nearest_source_id(cats[0], coord)
+        if sid is not None:
+            return sid
+        logger.warning("VizieR Gaia cone has no position columns; "
+                       "trying the ESA archive")
+    else:
+        logger.warning("VizieR Gaia DR3 cone %s; trying the ESA archive",
+                       "failed" if cats is None else "was empty on a mirror")
+
+    ra, dec = coord.ra.deg, coord.dec.deg
+    adql = (
+        "SELECT source_id, "
+        f"DISTANCE(POINT('ICRS', ra, dec), POINT('ICRS', {ra}, {dec})) "
+        "AS ang_sep FROM gaiadr3.gaia_source "
+        "WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), "
+        f"CIRCLE('ICRS', {ra}, {dec}, {radius.to(u.deg).value})) "
+        "ORDER BY ang_sep ASC"
+    )
+    row = _esa_first_row(adql)
+    if row is None:
+        raise GaiaQueryError(
+            f"Gaia source resolution failed at ({ra:.6f}, {dec:.6f}): "
+            "neither VizieR nor the ESA archive answered")
+    return int(row["source_id"]) if row else None
 
 
 def _gaia_mag_err(flux_over_error, zp_err):
@@ -472,39 +586,19 @@ class Librarian:
     # ── Gaia ID resolution ───────────────────────────────────────
 
     def _resolve_gaia_id(self):
-        """Find Gaia DR3 source_id via a Gaia TAP cone query if not provided.
+        """Find the nearest Gaia DR3 source_id if not provided.
 
-        Uses an ADQL cone search against gaiadr3.gaia_source ordered by angular
-        separation (nearest match). This is more robust than the VizieR cone
-        search and avoids astroquery's ``Gaia.cone_search`` whose ``radius``
-        argument became keyword-only in recent versions.
+        Goes through ``_resolve_gaia_source`` (VizieR first, ESA as fallback);
+        raises GaiaQueryError when both are down.
         """
         if self._gaia_id is not None:
             return
-        ra = self._coord.ra.deg
-        dec = self._coord.dec.deg
-        radius_deg = self._search_radius.to(u.deg).value
-        adql = (
-            "SELECT source_id, "
-            f"DISTANCE(POINT('ICRS', ra, dec), POINT('ICRS', {ra}, {dec})) "
-            "AS ang_sep FROM gaiadr3.gaia_source "
-            "WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), "
-            f"CIRCLE('ICRS', {ra}, {dec}, {radius_deg})) "
-            "ORDER BY ang_sep ASC"
-        )
-        try:
-            row = _esa_first_row(adql)
-            if row is None:
-                logger.warning("Gaia ID resolution failed: the ESA archive "
-                               "did not answer")
-                return
-            if not row:
-                logger.warning("No Gaia DR3 source within search radius")
-                return
-            self._gaia_id = int(row["source_id"])
-            logger.info("Resolved Gaia DR3 ID: %d", self._gaia_id)
-        except Exception as e:
-            logger.warning("Gaia ID resolution failed: %s", e)
+        sid = _resolve_gaia_source(self._coord, self._search_radius)
+        if sid is None:
+            logger.warning("No Gaia DR3 source within search radius")
+            return
+        self._gaia_id = sid
+        logger.info("Resolved Gaia DR3 ID: %d", self._gaia_id)
 
     # ── Gaia stellar parameters ──────────────────────────────────
 
@@ -621,7 +715,9 @@ class Librarian:
             return
 
         self._ids["Gaia"] = self._gaia_id
-        tap_down = False
+        # While the ESA breaker is open go straight to the XMatch/cone
+        # fallback instead of paying one timeout per catalogue.
+        tap_down = _cds.breaker.is_down(_cds.ESA_HOST)
         xmatch_needed = []
 
         for cat_name, cat_def in _CATALOGS.items():
@@ -643,7 +739,7 @@ class Librarian:
                 f"WHERE xmatch.source_id = {int(self._gaia_id)}"
             )
 
-            result = _tap_query(Gaia, query)
+            result = _esa_table(query, sync=False)
             if result is None:
                 tap_down = True
                 xmatch_needed.append(cat_name)
@@ -959,7 +1055,7 @@ class Librarian:
             f"WHERE xmatch.source_id = {int(self._gaia_id)}"
         )
 
-        result = _tap_query(Gaia, query)
+        result = _esa_table(query, sync=False)
         if result is None or len(result) == 0:
             return
 

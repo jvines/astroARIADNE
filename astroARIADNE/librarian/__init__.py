@@ -20,6 +20,7 @@ from ._api import (
     CatalogDef,
     Catalogs,
     Gaia,
+    GaiaQueryError,
     Librarian,
     MagSpec,
     Vizier,
