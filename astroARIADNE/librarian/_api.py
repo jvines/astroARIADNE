@@ -60,6 +60,16 @@ _TIMEOUTS = {
 # connect timeout so a dead CDS falls through to the local crossmatch quickly.
 Vizier = _cds.MirroredVizier(row_limit=-1, columns=["all"],
                              timeout=_TIMEOUTS['vizier'])
+
+
+def _vizier_columns(columns):
+    """A mirrored VizieR client asking for ``columns`` (non-default columns
+    must be named), limited to 50 rows."""
+    viz = _cds.MirroredVizier(row_limit=50, columns=columns,
+                              timeout=_TIMEOUTS['vizier'])
+    return viz
+
+
 Gaia.TIMEOUT = _TIMEOUTS['gaia']
 XMatch.TIMEOUT = _cds.connect_read(_TIMEOUTS['xmatch'])
 Catalogs.TIMEOUT = _TIMEOUTS['mast']
@@ -2471,100 +2481,106 @@ class Librarian:
         )
 
     def _query_apogee(self) -> dict | None:
-        """Query APOGEE DR17 via VizieR (III/286).
+        """Query APOGEE DR17 via VizieR (III/286/catalog) on the Gaia DR3 id.
 
-        Crossmatches via 2MASS ID. Rejects entries with ASPCAPFLAG != 0.
-        Uses [M/H] as proxy for [Fe/H] (close enough for priors).
-        """
-        tmass_id = self._ids.get("2MASS")
-        if tmass_id is None:
-            return None
-
-        try:
-            cat = _with_timeout(
-                Vizier.query_constraints,
-                catalog="III/286/allstars", **{"2MASS": str(tmass_id)},
-            )
-            if not cat or len(cat[0]) == 0:
-                return None
-
-            row = cat[0][0]
-
-            # Reject flagged entries
-            flag = _col(row, "ASPCAPFLAG")
-            if flag is not None and int(flag) != 0:
-                return None
-
-            teff = _col(row, "Teff")
-            teff_e = _col(row, "e_Teff")
-            logg = _col(row, "logg")
-            logg_e = _col(row, "e_logg")
-            mh = _col(row, "__M_H_")
-            mh_e = _col(row, "e__M_H_")
-
-            if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, mh)):
-                return None
-
-            return {
-                "teff": float(teff),
-                "teff_err": float(teff_e) if teff_e is not None else 100.0,
-                "logg": float(logg),
-                "logg_err": float(logg_e) if logg_e is not None else 0.2,
-                "feh": float(mh),
-                "feh_err": float(mh_e) if mh_e is not None else 0.1,
-            }
-        except Exception as e:
-            logger.warning("APOGEE DR17 query failed: %s", e)
-            return None
-
-    def _query_galah(self) -> dict | None:
-        """Query GALAH DR3 via VizieR (J/MNRAS/506/150).
-
-        Pre-matched to Gaia DR3 source_id. Rejects entries with quality flags.
+        Crossmatches on the ``GaiaEDR3`` column. ``III/286/allstars`` is not a
+        VizieR table, and a ``2MASS=`` constraint on ``III/286/catalog`` is
+        silently ignored (no such column), returning unfiltered rows. A star
+        can have several ASPCAP entries; the highest SNR wins.
         """
         if self._gaia_id is None:
             return None
 
         try:
+            viz = _vizier_columns(["*", "e_Teff", "e_logg", "[Fe/H]",
+                                   "e_[Fe/H]", "f_[Fe/H]", "SNR"])
             cat = _with_timeout(
-                Vizier.query_constraints,
-                catalog="J/MNRAS/506/150/catalog",
-                Source=str(self._gaia_id),
+                viz.query_constraints,
+                catalog="III/286/catalog", GaiaEDR3=str(self._gaia_id),
             )
             if not cat or len(cat[0]) == 0:
                 return None
+            tbl = cat[0]
+            if "SNR" in tbl.colnames:
+                tbl.sort("SNR")
+                tbl.reverse()
+            return self._parse_apogee(tbl[0])
+        except Exception as e:
+            logger.warning("APOGEE DR17 query failed: %s", e)
+            return None
 
-            row = cat[0][0]
+    @staticmethod
+    def _parse_apogee(row) -> dict | None:
+        """Parse one III/286/catalog row (no network).
 
-            # Quality flags: reject if flagged
-            flag_sp = _col(row, "flag_sp")
-            flag_fe_h = _col(row, "flag_fe_h")
-            if flag_sp is not None and int(flag_sp) != 0:
+        Returns the direct [Fe/H], gated on its own flag ``f_[Fe/H] == 0``.
+        ASPCAPFLAG is not a gate: its info bits fire on otherwise fine stars.
+        """
+        fe_flag = _col(row, "f_[Fe/H]")
+        if fe_flag is not None:
+            try:
+                if int(fe_flag) != 0:
+                    return None
+            except (TypeError, ValueError):
+                pass
+        return Librarian._spectro_row(row)
+
+    @staticmethod
+    def _spectro_row(row) -> dict | None:
+        """Teff, logg and [Fe/H] with errors, from VizieR bracket names."""
+        teff = _col(row, "Teff")
+        teff_e = _col(row, "e_Teff")
+        logg = _col(row, "logg")
+        logg_e = _col(row, "e_logg")
+        feh = _col(row, "[Fe/H]")
+        feh_e = _col(row, "e_[Fe/H]")
+        if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
+            return None
+        return {
+            "teff": float(teff),
+            "teff_err": float(teff_e) if teff_e is not None else 100.0,
+            "logg": float(logg),
+            "logg_err": float(logg_e) if logg_e is not None else 0.2,
+            "feh": float(feh),
+            "feh_err": float(feh_e) if feh_e is not None else 0.1,
+        }
+
+    def _query_galah(self) -> dict | None:
+        """Query GALAH DR3 via VizieR (J/MNRAS/506/150/stars) on the Gaia id.
+
+        The ``.../catalog`` subtable does not exist and ``Source=`` matches no
+        column. Errors and flags are non-default columns and are requested.
+        """
+        if self._gaia_id is None:
+            return None
+
+        try:
+            viz = _vizier_columns(["*", "e_Teff", "e_logg", "e_[Fe/H]",
+                                   "Flagsp", "q_[Fe/H]"])
+            cat = _with_timeout(
+                viz.query_constraints,
+                catalog="J/MNRAS/506/150/stars", GaiaEDR3=str(self._gaia_id),
+            )
+            if not cat or len(cat[0]) == 0:
                 return None
-            if flag_fe_h is not None and int(flag_fe_h) != 0:
-                return None
-
-            teff = _col(row, "Teff")
-            teff_e = _col(row, "e_Teff")
-            logg = _col(row, "logg")
-            logg_e = _col(row, "e_logg")
-            feh = _col(row, "fe_h")
-            feh_e = _col(row, "e_fe_h")
-
-            if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
-                return None
-
-            return {
-                "teff": float(teff),
-                "teff_err": float(teff_e) if teff_e is not None else 100.0,
-                "logg": float(logg),
-                "logg_err": float(logg_e) if logg_e is not None else 0.2,
-                "feh": float(feh),
-                "feh_err": float(feh_e) if feh_e is not None else 0.1,
-            }
+            return self._parse_galah(cat[0][0])
         except Exception as e:
             logger.warning("GALAH DR3 query failed: %s", e)
             return None
+
+    @staticmethod
+    def _parse_galah(row) -> dict | None:
+        """Parse one J/MNRAS/506/150/stars row (no network): reject a flagged
+        solution (``Flagsp != 0``) or [Fe/H] (``q_[Fe/H] != 0``)."""
+        for flag_col in ("Flagsp", "q_[Fe/H]"):
+            flag = _col(row, flag_col)
+            if flag is not None:
+                try:
+                    if int(flag) != 0:
+                        return None
+                except (TypeError, ValueError):
+                    pass
+        return Librarian._spectro_row(row)
 
     def _query_rave(self) -> dict | None:
         """Query RAVE DR6 for spectroscopic Teff, logg, [Fe/H]."""

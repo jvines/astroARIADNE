@@ -113,3 +113,99 @@ def test_query_lamost_live():
     assert res is not None
     assert res["teff"] == pytest.approx(5534.95, abs=0.1)
     assert res["feh"] == pytest.approx(0.088, abs=1e-3)
+
+
+# -- APOGEE DR17 and GALAH DR3 ------------------------------------------------
+def _query_shell(gaia_id=2851858288640):
+    lib = _shell()
+    lib._gaia_id = gaia_id
+    lib._ids = {}
+    return lib
+
+
+class _FakeClient:
+    def __init__(self, table):
+        self.table = table
+        self.seen = {}
+
+    def query_constraints(self, catalog=None, **constraints):
+        self.seen = {"catalog": catalog, **constraints}
+        return _TableList({catalog: self.table})
+
+
+def _patched(client, columns_out):
+    def _make(columns):
+        columns_out.extend(columns)
+        return client
+    return patch.object(api, "_vizier_columns", _make)
+
+
+APOGEE_ROW = {"Teff": 5000, "e_Teff": 20, "logg": 3.1, "e_logg": 0.05,
+              "[Fe/H]": -0.3, "e_[Fe/H]": 0.01, "f_[Fe/H]": 0, "SNR": 100}
+GALAH_ROW = {"Teff": 5800, "e_Teff": 30, "logg": 4.4, "e_logg": 0.06,
+             "[Fe/H]": 0.1, "e_[Fe/H]": 0.02, "Flagsp": 0, "q_[Fe/H]": 0}
+
+
+def test_parse_apogee_reads_direct_feh_and_gates_on_its_flag():
+    out = Librarian._parse_apogee(_vizier_table(APOGEE_ROW)[0])
+    assert out == {"teff": 5000.0, "teff_err": 20.0, "logg": pytest.approx(3.1),
+                   "logg_err": pytest.approx(0.05), "feh": pytest.approx(-0.3),
+                   "feh_err": pytest.approx(0.01)}
+    assert Librarian._parse_apogee(
+        _vizier_table({**APOGEE_ROW, "f_[Fe/H]": 1})[0]) is None
+
+
+def test_parse_galah_gates_on_flags_and_reads_bracket_names():
+    out = Librarian._parse_galah(_vizier_table(GALAH_ROW)[0])
+    assert out["teff"] == 5800.0 and out["feh"] == pytest.approx(0.1)
+    assert out["feh_err"] == pytest.approx(0.02)
+    for bad in ({"Flagsp": 1}, {"q_[Fe/H]": 1}):
+        assert Librarian._parse_galah(
+            _vizier_table({**GALAH_ROW, **bad})[0]) is None
+
+
+def test_query_apogee_asks_catalog_by_gaia_id_and_takes_highest_snr():
+    low = {**APOGEE_ROW, "SNR": 20, "Teff": 4000}
+    t = _vizier_table(low)
+    t.add_row(list(_vizier_table(APOGEE_ROW)[0]))   # SNR 100 row, Teff 5000
+    client, cols = _FakeClient(t), []
+    with _patched(client, cols):
+        out = _query_shell()._query_apogee()
+    assert client.seen == {"catalog": "III/286/catalog",
+                           "GaiaEDR3": "2851858288640"}
+    assert "f_[Fe/H]" in cols and "SNR" in cols
+    assert out["teff"] == 5000.0
+
+
+def test_query_galah_asks_stars_table_by_gaia_id():
+    client, cols = _FakeClient(_vizier_table(GALAH_ROW)), []
+    with _patched(client, cols):
+        out = _query_shell(36734515982599808)._query_galah()
+    assert client.seen == {"catalog": "J/MNRAS/506/150/stars",
+                           "GaiaEDR3": "36734515982599808"}
+    assert "Flagsp" in cols and "q_[Fe/H]" in cols
+    assert out["feh"] == pytest.approx(0.1)
+
+
+def test_query_apogee_galah_need_gaia_id():
+    lib = _query_shell(None)
+    assert lib._query_apogee() is None and lib._query_galah() is None
+
+
+_LIVE = pytest.mark.skipif(
+    os.environ.get("ARIADNE_LIVE_TESTS", "0") in ("0", "", "false", "False"),
+    reason="hits the live VizieR archive; set ARIADNE_LIVE_TESTS=1 to run")
+
+
+@_LIVE
+def test_query_apogee_live():
+    res = _query_shell(2851858288640)._query_apogee()
+    assert res is not None
+    assert 3000 < res["teff"] < 8000 and res["feh"] is not None
+
+
+@_LIVE
+def test_query_galah_live():
+    res = _query_shell(36734515982599808)._query_galah()
+    assert res is not None
+    assert 3000 < res["teff"] < 8000 and res["feh"] is not None
