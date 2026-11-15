@@ -213,6 +213,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Fitter.read_netcdf`. 1.x files (arviz InferenceData) are not readable this way.
 
 ### Fixed
+- The modified-blackbody disk model crashed with numpy >= 2.4, which removed
+  `np.trapz`. `_modbb_bolo_frac` now integrates with `scipy.integrate.trapezoid`.
 - Single-grid fits crashed at the end-of-run summary: `end()` read the output
   back as `{engine}_out.pkl` (e.g. `dynesty_out.pkl`) while `save()` writes it
   as `{grid}_out.pkl`. `end()` now reads the grid-named pickle. The results were

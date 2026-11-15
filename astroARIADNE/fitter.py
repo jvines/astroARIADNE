@@ -285,11 +285,12 @@ def _modbb_bolo_frac(T):
     """Bolometric fraction int(B_mod)/int(B): corrects the Omega <-> L_dust
     relation for the flux the modification removes from the submm tail."""
     from scipy.constants import h, c, k as kB
+    from scipy.integrate import trapezoid   # np.trapz is gone in numpy 2.4
     lam = np.geomspace(1.0, 5000.0, 400) * 1e-6        # m
     with np.errstate(over='ignore'):
         B = (2 * h * c ** 2 / lam ** 5) / np.expm1(h * c / (lam * kB * T))
-    return float(np.trapz(B * _modbb_factor(lam * 1e6), lam)
-                 / np.trapz(B, lam))
+    return float(trapezoid(B * _modbb_factor(lam * 1e6), lam)
+                 / trapezoid(B, lam))
 
 
 def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
