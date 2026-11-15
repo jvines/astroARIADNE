@@ -389,21 +389,21 @@ class Star:
         InputError
             If the source_id cannot be resolved (not found, or query failed).
         """
-        from astroquery.gaia import Gaia
-        adql = ('SELECT ra, dec FROM gaiadr3.gaia_source '
-                f'WHERE source_id = {int(source_id)}')
-        try:
-            res = Gaia.launch_job(adql).get_results()
-        except Exception as e:
+        # Shared ESA helper: timeout, circuit breaker and login handling.
+        from .librarian._api import _esa_first_row
+        row = _esa_first_row('SELECT ra, dec FROM gaiadr3.gaia_source '
+                             f'WHERE source_id = {int(source_id)}')
+        if row is None:
             InputError(
-                f'Failed to resolve Gaia source_id {source_id}: {e}'
+                f'Failed to resolve Gaia source_id {source_id}: the ESA Gaia '
+                'archive is unreachable or timed out.'
             ).__raise__()
-        if len(res) == 0:
+        if not row:
             InputError(
                 f'Gaia DR3 source_id {source_id} not found.'
             ).__raise__()
-        ra = float(res['ra'][0])
-        dec = float(res['dec'][0])
+        ra = float(row['ra'])
+        dec = float(row['dec'])
         starname = kwargs.pop('starname', f'Gaia DR3 {source_id}')
         return cls(starname, ra, dec, g_id=int(source_id), **kwargs)
 
