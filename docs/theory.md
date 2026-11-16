@@ -126,11 +126,15 @@ likelihood). ARIADNE's defaults:
   $\mathcal{U}(3.5, 6.0)$.
 - **$[\mathrm{Fe/H}]$** — a spectroscopic prior when available, otherwise a
   population normal $\mathcal{N}(-0.125, 0.234)$.
-- **spectroscopic source chain** — star-specific $T_{\mathrm{eff}}/\log g$ are
+- **spectroscopic source chain** — the Hypatia Catalog (Hinkel et al. 2014) is
+  the first link: when it gives $T_{\mathrm{eff}}$, $\log g$ and
+  $[\mathrm{Fe/H}]$ for the star it is the hit (150 K and 0.3 dex errors on
+  $T_{\mathrm{eff}}$, $\log g$). Otherwise star-specific $T_{\mathrm{eff}}/\log g$ are
   taken from the first survey that resolves the target,
-  PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6 > LAMOST DR11; $[\mathrm{Fe/H}]$
-  defaults to the Hypatia Catalog (Hinkel et al. 2014), falling back to that
-  same survey chain on a Hypatia miss.
+  PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6 > LAMOST DR11, and
+  $[\mathrm{Fe/H}]$ is overridden by the Hypatia value (default
+  `feh_source="hypatia"`), the survey chain's own value standing only on a
+  Hypatia miss.
 - **distance** — the Bailer-Jones geometric distance posterior.
 - **radius / normalisation, $A_V$** — uniform, with $A_V$ capped at the
   line-of-sight galactic maximum.

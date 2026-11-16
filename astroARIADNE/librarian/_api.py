@@ -62,6 +62,16 @@ _TIMEOUTS = {
 # connect timeout so a dead CDS falls through to the local crossmatch quickly.
 Vizier = _cds.MirroredVizier(row_limit=-1, columns=["all"],
                              timeout=_TIMEOUTS['vizier'])
+
+
+def _vizier_columns(columns):
+    """A mirrored VizieR client asking for ``columns`` (non-default columns
+    must be named), limited to 50 rows."""
+    viz = _cds.MirroredVizier(row_limit=50, columns=columns,
+                              timeout=_TIMEOUTS['vizier'])
+    return viz
+
+
 Gaia.TIMEOUT = _TIMEOUTS['gaia']
 XMatch.TIMEOUT = _cds.connect_read(_TIMEOUTS['xmatch'])
 Catalogs.TIMEOUT = _TIMEOUTS['mast']
@@ -224,7 +234,44 @@ def _with_timeout(func, *args, timeout=None, kind=None, **kwargs):
         return None
 
 
-def _tap_query(service, query, timeout=None, kind='gaia', prefer_sync=True):
+def _run_timed(func, timeout, kind):
+    """Like ``_with_timeout`` but tells the caller how it failed.
+
+    Returns ``(result, failure)`` with ``failure`` None on success, "timeout" on
+    a timeout, else the exception raised by ``func``.
+    """
+    from concurrent.futures import TimeoutError as FuturesTimeout
+
+    if timeout is None:
+        timeout = _timeout_for(kind)
+    future = _TIMEOUT_POOL.submit(func)
+    try:
+        return future.result(timeout=timeout), None
+    except FuturesTimeout:
+        logger.warning("Query timed out after %ds (%s)", timeout, kind or 'default')
+        _note_query_failure()
+        return None, "timeout"
+    except Exception as e:
+        logger.warning("Query failed: %s", e)
+        _note_query_failure()
+        return None, e
+
+
+def _unreachable(failure):
+    """True when a failure means the host cannot be reached (timeout, refused,
+    DNS, reset), as opposed to a query the server answered with an error."""
+    import requests
+
+    if failure == "timeout":
+        return True
+    if isinstance(failure, requests.HTTPError):
+        return False
+    return isinstance(failure, (OSError, requests.ConnectionError,
+                                requests.Timeout))
+
+
+def _tap_query(service, query, timeout=None, kind='gaia', prefer_sync=True,
+               host=None):
     """Run a TAP query with a hard timeout. Returns astropy Table or None.
 
     SYNC FIRST. ESA queues async TAP jobs server-side, and that queue congests
@@ -235,7 +282,17 @@ def _tap_query(service, query, timeout=None, kind='gaia', prefer_sync=True):
     synchronous row cap, so the async path buys nothing and cost ~9x. Async is
     still used as the fallback, since it is the one that survives a result set
     above the sync limit.
+
+    ``host`` names the service on ``_cds.breaker``. While it is marked down the
+    call returns None at once; a timeout or connection error trips it and
+    skips the async retry (async exists for a full sync queue, not for an
+    unreachable host); a success resets it.
     """
+    if host is not None and _cds.breaker.is_down(host):
+        logger.info("%s is marked down; skipping the TAP query", host)
+        _note_query_failure()      # a skipped query is a degraded lookup: don't cache it
+        return None
+
     def _sync():
         try:
             return service.launch_job(query).get_results()
@@ -247,14 +304,25 @@ def _tap_query(service, query, timeout=None, kind='gaia', prefer_sync=True):
     def _async():
         return service.launch_job_async(query).get_results()
 
+    def _settle(res, failure):
+        if host is not None:
+            if res is not None:
+                _cds.breaker.reset(host)
+            elif _unreachable(failure):
+                _cds.breaker.trip(host, "timeout" if failure == "timeout"
+                                  else type(failure).__name__)
+        return res
+
     if prefer_sync:
         for wait in _TAP_429_BACKOFF + (None,):
-            res = _with_timeout(_sync, timeout=timeout, kind=kind)
+            res, failure = _run_timed(_sync, timeout, kind)
             if res is not _RATE_LIMITED:
                 break
             if wait is None:
                 # An async launch would hit the same full queue (or, worse,
                 # park another job in it); give up and let the caller fall back.
+                # A full queue is the server answering, not an unreachable
+                # host, so the breaker is left alone.
                 logger.warning("Query failed: TAP still rate-limited (429) after "
                                "%d s of backoff", sum(_TAP_429_BACKOFF))
                 _note_query_failure()
@@ -263,9 +331,12 @@ def _tap_query(service, query, timeout=None, kind='gaia', prefer_sync=True):
                            "retrying in %d s", wait)
             time.sleep(wait)
         if res is not None:
-            return res
+            return _settle(res, None)
+        if host is not None and _unreachable(failure):
+            return _settle(None, failure)
         logger.warning("sync TAP failed; retrying async (row cap or transient)")
-    return _with_timeout(_async, timeout=timeout, kind=kind)
+    res, failure = _run_timed(_async, timeout, kind)
+    return _settle(res, failure)
 
 
 # The ESA archive caps anonymous users at 50 queued jobs and then answers 429 to
@@ -289,6 +360,10 @@ def _is_rate_limit(exc):
 # Gaia DR3 photometric zero-point uncertainties (Riello+21). VizieR's
 # I/355/gaiadr3 e_Gmag/e_BPmag/e_RPmag add these in quadrature to the flux
 # term, so the fallback does the same.
+# The ESA Gaia archive host, tracked on the CDS breaker like the CDS hosts so a
+# dead archive costs one timeout per CDS_DOWN_SECONDS, not one per query.
+_ESA_HOST = "gea.esac.esa.int"
+
 _GAIA_ZP_ERR = {"G": 0.0027553202, "BP": 0.0027901700, "RP": 0.0037793818}
 
 
@@ -296,11 +371,12 @@ def _esa_first_row(adql):
     """First row of an ESA Gaia archive query as a dict.
 
     Returns None when the query failed (``_tap_query`` already tried sync, then
-    async) and {} when it returned no rows. Masked cells become None, as
+    async, unless the archive is marked down on ``_cds.breaker``) and {} when
+    it returned no rows. Masked cells become None, as
     ``_col`` returns for a masked VizieR cell.
     """
     _maybe_login_gaia()
-    res = _tap_query(Gaia, adql)
+    res = _tap_query(Gaia, adql, host=_ESA_HOST)
     if res is None:
         return None
     if len(res) == 0:
@@ -378,6 +454,72 @@ def _esa_bailer_jones(source_id):
         "SELECT r_med_geo, r_lo_geo, r_hi_geo FROM external.gaiaedr3_distance "
         f"WHERE source_id = {int(source_id)}")
     return _vizier_bailer_jones(d) if d else d
+
+
+def _nearest_source_id(tbl, coord):
+    """source_id of the row nearest ``coord``, None for an empty table.
+
+    A VizieR cone is not ordered by separation (11 DR3 sources lie within 15
+    arcsec of TOI-1047 and the target is the only bright one), so the nearest
+    row is picked explicitly: by the ``_r`` column when present, else from the
+    RA_ICRS/DE_ICRS positions.
+    """
+    if tbl is None or len(tbl) == 0:
+        return None
+    if "_r" in tbl.colnames:
+        sep = np.ma.filled(ma.asarray(tbl["_r"], dtype=float), np.inf)
+    else:
+        pos = SkyCoord(np.asarray(tbl["RA_ICRS"], dtype=float) * u.deg,
+                       np.asarray(tbl["DE_ICRS"], dtype=float) * u.deg)
+        sep = coord.separation(pos).deg
+    return int(tbl["Source"][int(np.argmin(sep))])
+
+
+def _resolve_gaia_source(ra, dec, radius):
+    """Nearest Gaia DR3 source_id to (ra, dec) [deg] within ``radius``.
+
+    The single resolver every caller shares. VizieR (``I/355/gaiadr3``, which
+    honours the CDS mirrors and breaker) is asked first, as every other Gaia
+    read does; the ESA archive answers only when VizieR failed or gave an
+    answer that cannot be trusted (an empty one from a mirror while CDS is
+    down). Returns None when the position has no Gaia source. Raises
+    ``GaiaQueryError`` when every service failed, so "service down" is never
+    mistaken for "no source here".
+    """
+    coord = SkyCoord(ra * u.deg, dec * u.deg)
+    cats = _with_timeout(
+        Vizier.query_region, coord, radius=radius, catalog="I/355/gaiadr3",
+    )
+    if cats is not None and not _mirror_empty(cats):
+        if len(cats) and len(cats[0]):
+            sid = _nearest_source_id(cats[0], coord)
+            logger.info("Resolved Gaia DR3 ID: %s (VizieR)", sid)
+            return sid
+        logger.warning("No Gaia DR3 source within search radius")
+        return None
+
+    logger.warning("VizieR Gaia DR3 cone %s; trying the ESA archive",
+                   "failed" if cats is None else "was empty on a mirror")
+    radius_deg = float(radius.to(u.deg).value)
+    row = _esa_first_row(
+        "SELECT TOP 1 source_id, "
+        f"DISTANCE(POINT('ICRS', ra, dec), POINT('ICRS', {ra}, {dec})) "
+        "AS ang_sep FROM gaiadr3.gaia_source "
+        "WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), "
+        f"CIRCLE('ICRS', {ra}, {dec}, {radius_deg})) "
+        "ORDER BY ang_sep ASC")
+    if row is None:
+        raise GaiaQueryError(
+            f"Gaia DR3 source resolution at ({ra:.6f}, {dec:.6f}) failed on "
+            "both VizieR and the ESA archive (service down or throttled), not "
+            "an empty field. Retry later or set CDS_VIZIER_MIRRORS / "
+            "GAIA_CREDS.")
+    if not row:
+        logger.warning("No Gaia DR3 source within search radius")
+        return None
+    sid = int(row["source_id"])
+    logger.info("Resolved Gaia DR3 ID: %d (ESA)", sid)
+    return sid
 
 
 from ._qc import (
@@ -644,6 +786,10 @@ _RUWE_BINARITY_THRESH = 1.4
 # ── Librarian ────────────────────────────────────────────────────
 
 
+# LAMOST DR11 LRS stellar parameters for A, F, G and K stars.
+_LAMOST_TABLE = "V/162/dr11sl"
+
+
 class Librarian:
     """Automated photometry and astrometry retrieval for isochrone fitting.
 
@@ -843,35 +989,16 @@ class Librarian:
     # ── Gaia ID resolution ───────────────────────────────────────
 
     def _resolve_gaia_id(self):
-        """Find Gaia DR3 source_id via a Gaia TAP cone query if not provided.
+        """Find the Gaia DR3 source_id of the nearest source if not provided.
 
-        Uses an ADQL cone search against gaiadr3.gaia_source ordered by angular
-        separation (nearest match). This is more robust than the VizieR cone
-        search and avoids astroquery's ``Gaia.cone_search`` whose ``radius``
-        argument became keyword-only in recent versions.
+        Goes through ``_resolve_gaia_source`` (VizieR first, ESA as the
+        fallback). Raises ``GaiaQueryError`` when both services failed; a
+        position with no Gaia source leaves ``_gaia_id`` as None.
         """
         if self._gaia_id is not None:
             return
-        ra = self._coord.ra.deg
-        dec = self._coord.dec.deg
-        radius_deg = self._search_radius.to(u.deg).value
-        adql = (
-            "SELECT source_id, "
-            f"DISTANCE(POINT('ICRS', ra, dec), POINT('ICRS', {ra}, {dec})) "
-            "AS ang_sep FROM gaiadr3.gaia_source "
-            "WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), "
-            f"CIRCLE('ICRS', {ra}, {dec}, {radius_deg})) "
-            "ORDER BY ang_sep ASC"
-        )
-        try:
-            res = _with_timeout(lambda: Gaia.launch_job(adql).get_results(), kind='gaia')
-            if res is None or len(res) == 0:
-                logger.warning("No Gaia DR3 source within search radius")
-                return
-            self._gaia_id = int(res["source_id"][0])
-            logger.info("Resolved Gaia DR3 ID: %d", self._gaia_id)
-        except Exception as e:
-            logger.warning("Gaia ID resolution failed: %s", e)
+        self._gaia_id = _resolve_gaia_source(
+            self._coord.ra.deg, self._coord.dec.deg, self._search_radius)
 
     # ── Gaia stellar parameters ──────────────────────────────────
 
@@ -1026,7 +1153,11 @@ class Librarian:
             return
 
         self._ids["Gaia"] = self._gaia_id
-        tap_down = False
+        # An archive already marked down goes straight to the XMatch/cone
+        # fallback instead of paying one timeout per catalogue first.
+        tap_down = _cds.breaker.is_down(_ESA_HOST)
+        if tap_down:
+            _note_query_failure()  # best-neighbour tables skipped: don't cache
         xmatch_needed = []
 
         for cat_name, cat_def in _CATALOGS.items():
@@ -1048,7 +1179,7 @@ class Librarian:
                 f"WHERE xmatch.source_id = {int(self._gaia_id)}"
             )
 
-            result = _tap_query(Gaia, query)
+            result = _tap_query(Gaia, query, host=_ESA_HOST)
             if result is None:
                 tap_down = True
                 xmatch_needed.append(cat_name)
@@ -1797,7 +1928,7 @@ class Librarian:
             f"WHERE xmatch.source_id = {int(self._gaia_id)}"
         )
 
-        result = _tap_query(Gaia, query)
+        result = _tap_query(Gaia, query, host=_ESA_HOST)
         if result is None or len(result) == 0:
             return
 
@@ -2471,161 +2602,185 @@ class Librarian:
     def _query_spectroscopic_priors(self):
         """Assemble spectroscopic priors (Teff, logg, [Fe/H]).
 
-        Teff/logg come from the survey priority chain (first match wins):
-        PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6 > LAMOST DR11.
+        With ``feh_source == "hypatia"`` (default) the Hypatia Catalog is the
+        first link: if it gives Teff, logg AND [Fe/H] for the star it is the
+        hit (source "Hypatia", Teff/logg errors 150 K / 0.3 dex, no later
+        link is queried). Otherwise Teff/logg come from the survey priority
+        chain (first match wins): PASTEL > APOGEE DR17 > GALAH DR3 > RAVE DR6
+        > LAMOST DR11, and a Hypatia [Fe/H] still overrides the chain's.
 
-        [Fe/H] depends on ``feh_source``:
-          * "hypatia" (default) — the Hypatia Catalog, a multi-study
-            high-resolution-spectroscopy compilation whose spread gives a
-            realistic σ; falls back to the survey-chain [Fe/H] on a Hypatia
-            miss.
-          * "survey" — use the survey-chain [Fe/H] (legacy behaviour).
+        With ``feh_source == "survey"`` Hypatia is never queried and the
+        chain's own [Fe/H] is used. The Hypatia composition is requested once
+        per star.
         """
-        base = None
-        for query_fn, source_name in [
-            (self._query_pastel, "PASTEL"),
-            (self._query_apogee, "APOGEE_DR17"),
-            (self._query_galah, "GALAH_DR3"),
-            (self._query_rave, "RAVE_DR6"),
-            (self._query_lamost, "LAMOST_DR11"),
-        ]:
-            result = query_fn()
-            if result is not None:
-                result["source"] = source_name
-                base = result
-                logger.info("Spectroscopic params from %s", source_name)
-                break
-
+        hyp = None
         if self._feh_source == "hypatia":
             hyp = self._query_hypatia()
-            if hyp is not None:
-                if base is None:
-                    base = {"teff": None, "teff_err": None,
-                            "logg": None, "logg_err": None,
-                            "source": None}
-                base["feh"] = hyp["feh"]
-                base["feh_err"] = hyp["feh_err"]
-                base["feh_source"] = "Hypatia"
-                base["feh_n_meas"] = hyp["n_meas"]
-                base["feh_solarnorm"] = hyp["solarnorm"]
-                base["feh_statistic"] = hyp["statistic"]
-                base["feh_uncertainty"] = hyp["uncertainty"]
-                logger.info("[Fe/H] from Hypatia: %.3f ± %.3f (n=%d, %s)",
-                            hyp["feh"], hyp["feh_err"], hyp["n_meas"],
-                            hyp["matched_name"])
+
+        base = None
+        if hyp is not None:
+            star = self._query_hypatia_star()
+            if star is not None:
+                base = {"teff": star["teff"], "teff_err": star["teff_err"],
+                        "logg": star["logg"], "logg_err": star["logg_err"],
+                        "source": "Hypatia"}
+                logger.info("Spectroscopic params from Hypatia (%s)",
+                            star["matched_name"])
+
+        if base is None:
+            for query_fn, source_name in [
+                (self._query_pastel, "PASTEL"),
+                (self._query_apogee, "APOGEE_DR17"),
+                (self._query_galah, "GALAH_DR3"),
+                (self._query_rave, "RAVE_DR6"),
+                (self._query_lamost, "LAMOST_DR11"),
+            ]:
+                result = query_fn()
+                if result is not None:
+                    result["source"] = source_name
+                    base = result
+                    logger.info("Spectroscopic params from %s", source_name)
+                    break
+
+        if hyp is not None:
+            if base is None:
+                base = {"teff": None, "teff_err": None,
+                        "logg": None, "logg_err": None,
+                        "source": None}
+            base["feh"] = hyp["feh"]
+            base["feh_err"] = hyp["feh_err"]
+            base["feh_source"] = "Hypatia"
+            base["feh_n_meas"] = hyp["n_meas"]
+            base["feh_solarnorm"] = hyp["solarnorm"]
+            base["feh_statistic"] = hyp["statistic"]
+            base["feh_uncertainty"] = hyp["uncertainty"]
+            logger.info("[Fe/H] from Hypatia: %.3f ± %.3f (n=%d, %s)",
+                        hyp["feh"], hyp["feh_err"], hyp["n_meas"],
+                        hyp["matched_name"])
 
         self._spectroscopic_params = base
+
+    def _hypatia_names(self) -> list:
+        tmass = self._ids.get("2MASS") if self._ids else None
+        return [f"2MASS J{tmass}"] if tmass else []
 
     def _query_hypatia(self) -> dict | None:
         """Query the Hypatia Catalog for [Fe/H] using the configured options."""
         from ._hypatia import query_hypatia_feh
-        names = []
-        tmass = self._ids.get("2MASS") if self._ids else None
-        if tmass:
-            names.append(f"2MASS J{tmass}")
         return query_hypatia_feh(
-            self._gaia_id, names,
+            self._gaia_id, self._hypatia_names(),
             statistic=self._hypatia_statistic,
             uncertainty=self._hypatia_uncertainty,
             solarnorm=self._hypatia_solarnorm,
             floor=self._feh_floor,
         )
 
+    def _query_hypatia_star(self) -> dict | None:
+        """Query the Hypatia star endpoint for Teff and logg."""
+        from ._hypatia import query_hypatia_star
+        return query_hypatia_star(self._gaia_id, self._hypatia_names())
+
     def _query_apogee(self) -> dict | None:
-        """Query APOGEE DR17 via VizieR (III/286).
+        """Query APOGEE DR17 via VizieR (III/286/catalog) on the Gaia DR3 id.
 
-        Crossmatches via 2MASS ID. Rejects entries with ASPCAPFLAG != 0.
-        Uses [M/H] as proxy for [Fe/H] (close enough for priors).
-        """
-        tmass_id = self._ids.get("2MASS")
-        if tmass_id is None:
-            return None
-
-        try:
-            cat = _with_timeout(
-                Vizier.query_constraints,
-                catalog="III/286/allstars", **{"2MASS": str(tmass_id)},
-            )
-            if not cat or len(cat[0]) == 0:
-                return None
-
-            row = cat[0][0]
-
-            # Reject flagged entries
-            flag = _col(row, "ASPCAPFLAG")
-            if flag is not None and int(flag) != 0:
-                return None
-
-            teff = _col(row, "Teff")
-            teff_e = _col(row, "e_Teff")
-            logg = _col(row, "logg")
-            logg_e = _col(row, "e_logg")
-            mh = _col(row, "__M_H_")
-            mh_e = _col(row, "e__M_H_")
-
-            if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, mh)):
-                return None
-
-            return {
-                "teff": float(teff),
-                "teff_err": float(teff_e) if teff_e is not None else 100.0,
-                "logg": float(logg),
-                "logg_err": float(logg_e) if logg_e is not None else 0.2,
-                "feh": float(mh),
-                "feh_err": float(mh_e) if mh_e is not None else 0.1,
-            }
-        except Exception as e:
-            logger.warning("APOGEE DR17 query failed: %s", e)
-            return None
-
-    def _query_galah(self) -> dict | None:
-        """Query GALAH DR3 via VizieR (J/MNRAS/506/150).
-
-        Pre-matched to Gaia DR3 source_id. Rejects entries with quality flags.
+        Crossmatches on the ``GaiaEDR3`` column. ``III/286/allstars`` is not a
+        VizieR table, and a ``2MASS=`` constraint on ``III/286/catalog`` is
+        silently ignored (no such column), returning unfiltered rows. A star
+        can have several ASPCAP entries; the highest SNR wins.
         """
         if self._gaia_id is None:
             return None
 
         try:
+            viz = _vizier_columns(["*", "e_Teff", "e_logg", "[Fe/H]",
+                                   "e_[Fe/H]", "f_[Fe/H]", "SNR"])
             cat = _with_timeout(
-                Vizier.query_constraints,
-                catalog="J/MNRAS/506/150/catalog",
-                Source=str(self._gaia_id),
+                viz.query_constraints,
+                catalog="III/286/catalog", GaiaEDR3=str(self._gaia_id),
             )
             if not cat or len(cat[0]) == 0:
                 return None
+            tbl = cat[0]
+            if "SNR" in tbl.colnames:
+                tbl.sort("SNR")
+                tbl.reverse()
+            return self._parse_apogee(tbl[0])
+        except Exception as e:
+            logger.warning("APOGEE DR17 query failed: %s", e)
+            return None
 
-            row = cat[0][0]
+    @staticmethod
+    def _parse_apogee(row) -> dict | None:
+        """Parse one III/286/catalog row (no network).
 
-            # Quality flags: reject if flagged
-            flag_sp = _col(row, "flag_sp")
-            flag_fe_h = _col(row, "flag_fe_h")
-            if flag_sp is not None and int(flag_sp) != 0:
+        Returns the direct [Fe/H], gated on its own flag ``f_[Fe/H] == 0``.
+        ASPCAPFLAG is not a gate: its info bits fire on otherwise fine stars.
+        """
+        fe_flag = _col(row, "f_[Fe/H]")
+        if fe_flag is not None:
+            try:
+                if int(fe_flag) != 0:
+                    return None
+            except (TypeError, ValueError):
+                pass
+        return Librarian._spectro_row(row)
+
+    @staticmethod
+    def _spectro_row(row) -> dict | None:
+        """Teff, logg and [Fe/H] with errors, from VizieR bracket names."""
+        teff = _col(row, "Teff")
+        teff_e = _col(row, "e_Teff")
+        logg = _col(row, "logg")
+        logg_e = _col(row, "e_logg")
+        feh = _col(row, "[Fe/H]")
+        feh_e = _col(row, "e_[Fe/H]")
+        if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
+            return None
+        return {
+            "teff": float(teff),
+            "teff_err": float(teff_e) if teff_e is not None else 100.0,
+            "logg": float(logg),
+            "logg_err": float(logg_e) if logg_e is not None else 0.2,
+            "feh": float(feh),
+            "feh_err": float(feh_e) if feh_e is not None else 0.1,
+        }
+
+    def _query_galah(self) -> dict | None:
+        """Query GALAH DR3 via VizieR (J/MNRAS/506/150/stars) on the Gaia id.
+
+        The ``.../catalog`` subtable does not exist and ``Source=`` matches no
+        column. Errors and flags are non-default columns and are requested.
+        """
+        if self._gaia_id is None:
+            return None
+
+        try:
+            viz = _vizier_columns(["*", "e_Teff", "e_logg", "e_[Fe/H]",
+                                   "Flagsp", "q_[Fe/H]"])
+            cat = _with_timeout(
+                viz.query_constraints,
+                catalog="J/MNRAS/506/150/stars", GaiaEDR3=str(self._gaia_id),
+            )
+            if not cat or len(cat[0]) == 0:
                 return None
-            if flag_fe_h is not None and int(flag_fe_h) != 0:
-                return None
-
-            teff = _col(row, "Teff")
-            teff_e = _col(row, "e_Teff")
-            logg = _col(row, "logg")
-            logg_e = _col(row, "e_logg")
-            feh = _col(row, "fe_h")
-            feh_e = _col(row, "e_fe_h")
-
-            if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
-                return None
-
-            return {
-                "teff": float(teff),
-                "teff_err": float(teff_e) if teff_e is not None else 100.0,
-                "logg": float(logg),
-                "logg_err": float(logg_e) if logg_e is not None else 0.2,
-                "feh": float(feh),
-                "feh_err": float(feh_e) if feh_e is not None else 0.1,
-            }
+            return self._parse_galah(cat[0][0])
         except Exception as e:
             logger.warning("GALAH DR3 query failed: %s", e)
             return None
+
+    @staticmethod
+    def _parse_galah(row) -> dict | None:
+        """Parse one J/MNRAS/506/150/stars row (no network): reject a flagged
+        solution (``Flagsp != 0``) or [Fe/H] (``q_[Fe/H] != 0``)."""
+        for flag_col in ("Flagsp", "q_[Fe/H]"):
+            flag = _col(row, flag_col)
+            if flag is not None:
+                try:
+                    if int(flag) != 0:
+                        return None
+                except (TypeError, ValueError):
+                    pass
+        return Librarian._spectro_row(row)
 
     def _query_rave(self) -> dict | None:
         """Query RAVE DR6 for spectroscopic Teff, logg, [Fe/H]."""
@@ -2659,23 +2814,27 @@ class Librarian:
             return None
 
     def _query_lamost(self) -> dict | None:
-        """Query LAMOST DR9 stellar parameters via VizieR (V/162).
+        """Query LAMOST DR11 LRS AFGK parameters via VizieR (V/162/dr11sl).
 
         Crossmatches via positional cone search since LAMOST has no
-        pre-matched Gaia source_id. Requires SNR_g > 30.
+        pre-matched Gaia source_id. Requires SNR_g > 30. Asks for the
+        parameter table by name: a cone on all of V/162 answers with the
+        general LRS table (dr11l, no Teff/logg/[Fe/H]) first.
         """
         try:
             cats = _with_timeout(
                 Vizier.query_region,
-                self._coord, radius=self._search_radius, catalog="V/162",
+                self._coord, radius=self._search_radius, catalog=_LAMOST_TABLE,
             )
-            if cats is None:
+            try:
+                cat = cats[_LAMOST_TABLE]
+            except (TypeError, KeyError):
                 return None
-            if not cats or len(cats[0]) == 0:
+            if len(cat) == 0:
                 return None
 
-            cats[0].sort("_r")
-            row = cats[0][0]
+            cat.sort("_r")
+            row = cat[0]
 
             # SNR quality cut
             snrg = _col(row, "snrg")
@@ -2686,8 +2845,8 @@ class Librarian:
             teff_e = _col(row, "e_Teff")
             logg = _col(row, "logg")
             logg_e = _col(row, "e_logg")
-            feh = _col(row, "__Fe_H_")
-            feh_e = _col(row, "e__Fe_H_")
+            feh = _col(row, "[Fe/H]")
+            feh_e = _col(row, "e_[Fe/H]")
 
             if any(v is None for v in (teff, logg, feh)):
                 return None
@@ -2723,14 +2882,14 @@ class Librarian:
 
             teff = _col(row, "Teff")
             logg = _col(row, "logg")
-            feh = _col(row, "__Fe_H_")
+            feh = _col(row, "[Fe/H]")
 
             if any(v is None or not np.isfinite(float(v)) for v in (teff, logg, feh)):
                 return None
 
             teff_e = _col(row, "e_Teff")
             logg_e = _col(row, "e_logg")
-            feh_e = _col(row, "e__Fe_H_")
+            feh_e = _col(row, "e_[Fe/H]")
 
             return {
                 "teff": float(teff),
