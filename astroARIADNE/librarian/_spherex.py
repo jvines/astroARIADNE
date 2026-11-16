@@ -52,6 +52,9 @@ _SSL_CTX = _ssl_context()
 
 OMEGA = (6.2 * 4.84813681e-6) ** 2          # sr per 6.2" SPHEREx pixel
 AP_R, ANN_IN, ANN_OUT = 3.0, 10.0, 16.0
+# Plate scale for on-sky geometry (separations, aperture and annulus radii):
+# DR1 L2 headers give 6.14-6.16"/px at the source (2026-11-16, both detectors).
+PIX_ARCSEC = 6.15
 IGNORE_BITS = (1, 21)
 C_UM = 2.99792458e14
 # Bumped whenever the extraction changes NUMERICALLY, so two solutions can never
@@ -468,7 +471,7 @@ def _psf_flux(img, var, flg, x, y, xa, ya, det, others):
     return f, e
 
 
-def neighbours(ra, dec, source_id, epoch=2025.9, radius=NB_RADIUS):
+def neighbours(ra, dec, source_id, epoch=2025.83, radius=NB_RADIUS):   # DR1 mid-epoch (RELEASES)
     """Catalogued sources around the target, cached per source id.
 
     Gaia DR3 propagated to `epoch` plus 2MASS PSC sources without a Gaia
@@ -477,10 +480,12 @@ def neighbours(ra, dec, source_id, epoch=2025.9, radius=NB_RADIUS):
     within 2" of ra/dec) is excluded, and sources within MERGE_PX of it are
     dropped as unresolvable (they stay in the target's flux, as they would in
     any photometry at SPHEREx resolution) -- the count is kept under
-    'n_merged'. Each entry also carries Gaia G (NaN for 2MASS-only sources).
-    Returns (list, n_merged)."""
+    'n_merged'. Each entry also carries Gaia G (NaN for 2MASS-only sources),
+    its proper motion (pmra, pmde in mas/yr; 0 for 2MASS-only sources) and the
+    `epoch` of its position, so `_neighbours_at` can move it to another
+    release's epoch. Returns (list, n_merged)."""
     import json
-    cdir = os.path.join(os.path.dirname(CACHE_DIR), 'neighbours-v3')
+    cdir = os.path.join(os.path.dirname(CACHE_DIR), 'neighbours-v4')   # v4: + pmra/pmde/epoch
     os.makedirs(cdir, exist_ok=True)
     cache = os.path.join(cdir, f'{source_id}.json')
     if os.path.exists(cache):
@@ -503,7 +508,8 @@ def neighbours(ra, dec, source_id, epoch=2025.9, radius=NB_RADIUS):
             ra0, de = float(r['RA_ICRS']), float(r['DE_ICRS'])
             cosd = np.cos(np.radians(de))
             src.append([ra0 + pmra * dt / 3.6e6 / cosd, de + pmde * dt / 3.6e6, np.nan,
-                        float(r['Gmag']) if np.isfinite(r['Gmag']) else np.nan])
+                        float(r['Gmag']) if np.isfinite(r['Gmag']) else np.nan,
+                        pmra, pmde])
             # 2MASS positions are of epoch ~2000: match there, or a fast mover
             # (VB 10: 1.4"/yr) meets its own 2MASS entry as a phantom neighbour.
             at2mass.append((ra0 + pmra * (TMASS_EPOCH - 2016.0) / 3.6e6 / cosd,
@@ -518,9 +524,9 @@ def neighbours(ra, dec, source_id, epoch=2025.9, radius=NB_RADIUS):
             if sep[i] < 2.0:
                 src[i][2] = tk
             else:
-                src.append([tra, tde, tk, np.nan])
+                src.append([tra, tde, tk, np.nan, 0.0, 0.0])
     elif tm:
-        src = [list(x) + [np.nan] for x in tm]
+        src = [list(x) + [np.nan, 0.0, 0.0] for x in tm]
     out, n_merged = [], 0
     if src:
         seps = SkyCoord([s[0] for s in src] * u.deg, [s[1] for s in src] * u.deg).separation(c).arcsec
@@ -528,12 +534,26 @@ def neighbours(ra, dec, source_id, epoch=2025.9, radius=NB_RADIUS):
         for i, (s, sp) in enumerate(zip(src, seps)):
             if i == it:
                 continue
-            if sp < MERGE_PX * 6.15:
+            if sp < MERGE_PX * PIX_ARCSEC:
                 n_merged += 1
                 continue
-            out.append(dict(ra=s[0], dec=s[1], sep=float(sp), ks=s[2], g=s[3]))
+            out.append(dict(ra=s[0], dec=s[1], sep=float(sp), ks=s[2], g=s[3],
+                            pmra=s[4], pmde=s[5], epoch=float(epoch)))
     json.dump(dict(neighbours=out, n_merged=n_merged), open(cache, 'w'))
     return out, n_merged
+
+
+def _neighbours_at(nbrs, epoch):
+    """`nbrs` with positions propagated from their own epoch to `epoch` (the
+    release actually measured, e.g. the QR3 fallback), so the fixed neighbour
+    positions in the forced fit move with the target's."""
+    out = []
+    for n in nbrs:
+        dt = float(epoch) - float(n['epoch'])
+        cosd = np.cos(np.radians(n['dec']))
+        out.append(dict(n, ra=n['ra'] + n['pmra'] * dt / 3.6e6 / cosd,
+                        dec=n['dec'] + n['pmde'] * dt / 3.6e6, epoch=float(epoch)))
+    return out
 
 
 def fit_neighbours(nbrs, target_ks):
@@ -545,7 +565,7 @@ def fit_neighbours(nbrs, target_ks):
     a 45" cone holds hundreds of catalogued sources; fitting all of them against
     ~50 pixels is underdetermined and the target flux comes out unphysical."""
     from scipy.special import erf
-    r_fit = R_FIT * 6.15
+    r_fit = R_FIT * PIX_ARCSEC
     scored = []
     for n in nbrs:
         k = n['ks'] if np.isfinite(n['ks']) else (n.get('g', np.nan) - 2.5)
@@ -566,7 +586,7 @@ def annulus_flux(nbrs, target_ks):
     the SPHEREx-2MASS offset grows from +0.05 (below 5x) to +0.08 (5-10x),
     +0.12 (10-20x) and +0.15 (>20x), and the forced ePSF fit, which fits its
     background locally with the neighbours modelled, removes it."""
-    lo, hi = (ANN_IN - 2) * 6.15, (ANN_OUT + 2) * 6.15
+    lo, hi = (ANN_IN - 2) * PIX_ARCSEC, (ANN_OUT + 2) * PIX_ARCSEC
     return float(sum(10 ** (-0.4 * (n['ks'] - target_ks)) for n in nbrs
                      if np.isfinite(n['ks']) and lo <= n['sep'] <= hi))
 
@@ -577,7 +597,7 @@ def predicted_contamination(nbrs, target_ks):
     The aperture edge is softened by a Gaussian of NB_SIGMA: calibrated on the
     survey, it tracks the measured SPHEREx-2MASS offsets best (corr 0.84)."""
     from scipy.special import erf
-    ap = AP_R * 6.2
+    ap = AP_R * PIX_ARCSEC
     frac = 0.0
     for n in nbrs:
         if np.isfinite(n['ks']):
@@ -1154,6 +1174,10 @@ def extract_spectrum(ra, dec, source_id, threads=4, ks=None, epoch=EPOCH, meta=N
     urls, release, ra, dec = _query_planes(ra, dec, epoch=epoch, position=position)
     if isinstance(meta, dict):
         meta['release'] = release
+    if nbrs and release is not None and position is not None:
+        rel_epoch = dict(RELEASES)[release]
+        if abs(rel_epoch - epoch) > 0.05:      # same rule as the target (_query_planes)
+            nbrs = _neighbours_at(nbrs, rel_epoch)
     if not urls:
         logger.warning('SPHEREx: no planes in %s for source %s; not cached',
                        '/'.join(c for c, _ in RELEASES), source_id)

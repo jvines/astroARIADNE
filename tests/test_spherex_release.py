@@ -81,3 +81,34 @@ def test_epoch_is_dr1_mid_epoch():
     assert _spherex.EPOCH == ep
     assert max(ep - lo, hi - ep) < 0.53
     assert np.isclose(ep, 0.5 * (lo + hi), atol=0.01)
+
+
+def test_neighbours_at_propagates_by_proper_motion():
+    n = dict(ra=10.0, dec=60.0, sep=30.0, ks=9.0, g=np.nan,
+             pmra=1000.0, pmde=-500.0, epoch=2025.83)
+    m, = _spherex._neighbours_at([n], 2026.83)       # one year later
+    assert np.isclose((m['ra'] - 10.0) * 3.6e6 * np.cos(np.radians(60.0)), 1000.0)
+    assert np.isclose((m['dec'] - 60.0) * 3.6e6, -500.0)
+    assert m['epoch'] == 2026.83 and n['epoch'] == 2025.83     # input untouched
+
+
+def test_qr3_fallback_moves_the_fitted_neighbours_too(monkeypatch, tmp_path):
+    _stub(monkeypatch, {'spherex_dr1': [], 'spherex_qr3': ['q1']}, [])
+    monkeypatch.setattr(_spherex, 'CACHE_DIR', str(tmp_path / 'ap'))
+    monkeypatch.setattr(_spherex, 'PSF_CACHE_DIR', str(tmp_path / 'psf'))
+    monkeypatch.setattr(_spherex, 'USE_RANGED_READS', False)
+    dr1 = dict(_spherex.RELEASES)['spherex_dr1']
+    qr3 = dict(_spherex.RELEASES)['spherex_qr3']
+    nb = dict(ra=10.001, dec=-20.0, sep=4.0, ks=9.0, g=np.nan,
+              pmra=2000.0, pmde=0.0, epoch=dr1)       # bright, inside the aperture
+    monkeypatch.setattr(_spherex, 'neighbours', lambda *a, **k: ([nb], 0))
+    seen = []
+    monkeypatch.setattr(_spherex, '_fetch_one', lambda args: seen.append(args[6]))
+    meta = {}
+    _spherex.extract_spectrum(10.0, -20.0, 7, ks=9.0, epoch=dr1, meta=meta,
+                              position=lambda ep: (10.0, -20.0))
+    assert meta['method'] == 'psf' and meta['release'] == 'spherex_qr3'
+    (moved,), = seen
+    assert moved['epoch'] == qr3
+    assert np.isclose((moved['ra'] - nb['ra']) * 3.6e6 * np.cos(np.radians(-20.0)),
+                      2000.0 * (qr3 - dr1))
