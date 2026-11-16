@@ -805,15 +805,20 @@ class SEDPlotter:
             axis='both', which='minor',
             labelsize=self.tick_labelsize
         )
-        # X-axis built like the model SED plot: log scale in micron, integer
-        # ticks, lower bound set by whether GALEX UV bands are present.
-        ax.set_xticks(np.linspace(1, 10, 10))
-        ax.get_xaxis().set_major_formatter(ticker.ScalarFormatter())
+        # X-axis: log scale in micron, lower bound set by whether GALEX UV
+        # bands are present. Explicit plain-number ticks on both sides of 1 um
+        # and no minor labels: with majors only at 1-10 um, matplotlib labelled
+        # the sub-micron minor ticks as 3x10^-1, 4x10^-1, ... and they collided.
         fnames = self.star.filter_names[self.star.filter_mask]
         if 'GALEX_FUV' in fnames or 'GALEX_NUV' in fnames:
-            ax.set_xlim([0.125, 6])
+            xlim = [0.125, 6]
         else:
-            ax.set_xlim([0.25, 6])
+            xlim = [0.25, 6]
+        ax.set_xticks([t for t in (0.15, 0.3, 0.5, 1, 2, 3, 5)
+                       if xlim[0] <= t <= xlim[1]])
+        ax.get_xaxis().set_major_formatter(ticker.FormatStrFormatter('%g'))
+        ax.get_xaxis().set_minor_formatter(ticker.NullFormatter())
+        ax.set_xlim(xlim)
         ax.set_xlabel(r'$\lambda (\mu m)$',
                       fontsize=self.fontsize,
                       fontname=self.fontname)
