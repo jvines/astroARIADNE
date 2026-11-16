@@ -48,6 +48,39 @@ except ModuleNotFoundError:
     warnings.warn(wrn)
     bma_flag = False
 
+
+def _guard_dynesty_kmeans():
+    """Keep a degenerate live set from segfaulting dynesty's ellipsoid split.
+
+    dynesty.bounding._bounding_ellipsoids divides the live points by their
+    per-dimension spread and passes them to scipy's kmeans2 with
+    check_finite=False. When every live point shares one coordinate (a
+    parameter driven to the edge of its prior: all 500 at u_dist = 1 - 2^-53
+    in two survey fits, with an unfilled BT-Dusty grid), the spread is zero,
+    the input is infinite and scipy's C code segfaults the whole process.
+    Non-finite input now refuses the split instead -- dynesty keeps the parent
+    ellipsoid, exactly as it does for a cluster too small to split.
+    """
+    try:
+        import dynesty.bounding as _db
+    except ImportError:
+        return
+    if getattr(_db.kmeans2, '_ariadne_guard', False):
+        return
+    _kmeans2 = _db.kmeans2
+
+    def kmeans2(data, k, *args, **kwargs):
+        d, c = np.asarray(data), np.asarray(k)
+        if not (np.all(np.isfinite(d)) and np.all(np.isfinite(c))):
+            return c, np.zeros(d.shape[0], dtype=int)
+        return _kmeans2(data, k, *args, **kwargs)
+
+    kmeans2._ariadne_guard = True
+    _db.kmeans2 = kmeans2
+
+
+_guard_dynesty_kmeans()
+
 set_start_method('fork', force=True)
 
 
