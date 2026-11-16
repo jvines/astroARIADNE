@@ -689,6 +689,7 @@ class Librarian:
         # set, which _save_cache stores as None) cannot poison the adapter.
         self._xp_filled = []
         self._spherex_added = []
+        self._spherex_meta = {}
         self._cassis_added = []
         # [Fe/H] prior configuration.
         #   feh_source: "hypatia" → Hypatia for [Fe/H] (survey fallback on miss),
@@ -781,7 +782,7 @@ class Librarian:
         '_teff', '_teff_e', '_radius_flame', '_radius_flame_e',
         '_luminosity', '_luminosity_e', '_mass', '_mass_e', '_age', '_age_e',
         '_distance', '_distance_e', '_spectroscopic_params', '_tic_id',
-        '_kic_id', 'Av', '_xp_filled', '_spherex_added', '_cassis_added',
+        '_kic_id', 'Av', '_xp_filled', '_spherex_added', '_spherex_meta', '_cassis_added',
     )
 
     @staticmethod
@@ -1283,7 +1284,7 @@ class Librarian:
             except Exception as e:
                 logger.warning("BOSS optspec fill skipped: %s", e)
 
-        # SPHEREx QR2 super-band spectro-photometry (independent of XP;
+        # SPHEREx DR1 (QR3 fallback) super-band spectro-photometry (independent of XP;
         # results are cached per source, so only the first Star pays the
         # extraction cost).
         if "SPHEREX" not in self._ignore:
@@ -2414,10 +2415,10 @@ class Librarian:
     # ~9; all-sky 5-sigma depth ~16.5 at 2 um).
     _SPX_KS_BRIGHT = 8.5
     _SPX_KS_FAINT = 16.5
-    _SPX_EPOCH = 2025.9          # mid-QR2; PM offsets within +-0.55 yr << 1 px
+    _SPX_EPOCH = 2025.83         # mid-DR1 (_spherex.RELEASES); PM offsets within +-0.52 yr << 1 px
 
     def _fetch_spherex(self):
-        """SPHEREx QR2 super-band photometry at the PM-propagated position.
+        """SPHEREx DR1 super-band photometry at the PM-propagated position.
 
         Extraction + binning live in ``_spherex``; this guard-rails it: a
         Gaia id and a 2MASS Ks inside the usable brightness window are
@@ -2440,8 +2441,17 @@ class Librarian:
             return
         from . import _spherex
         c = self._propagated_coord(self._SPX_EPOCH)
+        # The target's Ks lets the extraction predict, from catalogued
+        # neighbours, whether its aperture is contaminated; crowded fields are
+        # then measured by forced ePSF photometry. `meta` is the SPHEREx
+        # quality record: method, predicted contamination, neighbours fitted.
+        meta = {}
         lam, f, e = _spherex.extract_spectrum(
-            float(c.ra.deg), float(c.dec.deg), int(self._gaia_id))
+            float(c.ra.deg), float(c.dec.deg), int(self._gaia_id),
+            ks=float(ks[0]), epoch=self._SPX_EPOCH, meta=meta,
+            position=lambda ep: (self._propagated_coord(ep).ra.deg,
+                                 self._propagated_coord(ep).dec.deg))
+        self._spherex_meta = meta
         if not len(lam):
             logger.info('SPHEREx: no clean exposures for this position')
             return
@@ -2452,8 +2462,9 @@ class Librarian:
                 added.append(f'{band}({n})')
         self._spherex_added = added
         if added:
+            rel = (meta.get('release') or 'cached').replace('spherex_', '').upper()
             print(colored(
-                '\t\t*** SPHEREx QR2 spectro-photometry added '
+                f'\t\t*** SPHEREx ({rel}) spectro-photometry added '
                 f'{len(added)} super-band(s): {", ".join(added)} '
                 '(disable with ignore=["SPHEREX"]) ***', 'cyan'))
 
