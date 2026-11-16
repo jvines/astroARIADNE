@@ -403,11 +403,37 @@ class SEDPlotter:
         teff = self.theta[0]
         logg = self.theta[1]
         z = self.theta[2]
+
+        def _covers(g):
+            # Within half a node spacing of the group's Teff range. Outside it
+            # the bracketing below clamps to the edge node, which would draw a
+            # spectrum at the wrong temperature: e.g. a 1700 K BT-Settl fit was
+            # drawn from the 2600 K node (where the btsettl group starts) at
+            # the fitted radius, a curve 2-5x above the model's own synthetic
+            # photometry.
+            tt = np.unique(g['teff'][:])
+            half = 0.5 * (tt[1] - tt[0]) if len(tt) > 1 else 0.0
+            halfr = 0.5 * (tt[-1] - tt[-2]) if len(tt) > 1 else 0.0
+            return tt[0] - half <= teff <= tt[-1] + halfr
+
         try:
             with h5py.File(spectra_cache, 'r') as f:
                 if model_key not in f:
                     return None
                 g = f[model_key]
+                if not _covers(g):
+                    # The cool (BD) group of the same model family reaches
+                    # below the standard group (btsettl_cool: 400-4000 K) on
+                    # the same flux scale (agree to <1% at 2600-3300 K).
+                    cool = _COOL_GROUPS.get(model_key)
+                    if cool and cool != model_key and cool in f \
+                            and _covers(f[cool]):
+                        g = f[cool]
+                    else:
+                        logger.warning(
+                            f'Teff {teff:.0f} K is outside the {model_key} '
+                            f'spectra cache; not drawing its model spectrum.')
+                        return None
                 teffs = g['teff'][:]
                 loggs = g['logg'][:]
                 zs = g['z'][:]
@@ -889,7 +915,14 @@ class SEDPlotter:
             self._plot_bma_gray_spectra(ax)
         except Exception as e:
             logger.warning('gray posterior spectra skipped: %s', e)
-        self.SED(ax)
+        # The cache declines to draw a Teff outside its range rather than clamp
+        # to the edge node; the raw-file fallback may then be unavailable. Lose
+        # the continuous curve, not the whole figure (the synthetic band fluxes
+        # are still drawn).
+        try:
+            self.SED(ax)
+        except Exception as e:
+            logger.warning('model spectrum skipped: %s', e)
 
         # Keep the whole model curve in frame. The y-range is scaled to the
         # data, but if the continuous model peaks above the data (e.g. the SED
