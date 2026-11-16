@@ -305,6 +305,35 @@ def _vega_zero_flux(name, lo_um, hi_um):
     return zp
 
 
+# SL-to-LL stitch. The SL slit is 3.6" wide against LL's 10.5", so a pointing
+# offset loses SL flux while LL keeps it: the optimal-extraction spectrum then
+# steps UP at the SL1|LL2 seam. Across the cached roster spectra the median
+# step is 9% and a quarter exceed 20%; TWA 7's is 3.8x, which put every SL band
+# ~20 sigma below its photosphere. Each side is extrapolated to the seam by a
+# local power law fitted in its own order's exclusive range.
+_SEAM_UM = 14.1
+_SL_SIDE = (12.3, 13.9)
+_LL_SIDE = (14.3, 16.0)
+_MIN_SEAM_SAMPLES = 5
+
+
+def _sl_to_ll_ratio(wave, flux):
+    """LL2/SL1 flux ratio at the order seam, or None if either side lacks data.
+
+    Power laws fitted in log F_nu - log lambda on each side, evaluated at
+    _SEAM_UM, so a genuinely rising (disk) spectrum is not mistaken for a
+    calibration step."""
+    at = []
+    for lo, hi in (_SL_SIDE, _LL_SIDE):
+        m = (wave >= lo) & (wave <= hi) & (flux > 0)
+        if int(m.sum()) < _MIN_SEAM_SAMPLES:
+            return None
+        p = np.polyfit(np.log(wave[m]), np.log(flux[m]), 1)
+        at.append(np.exp(np.polyval(p, np.log(_SEAM_UM))))
+    r = at[1] / at[0]
+    return float(r) if np.isfinite(r) and r > 0 else None
+
+
 def superband_mags(wave, flux, err):
     """Bin an IRS spectrum into IRS_* Vega mags.
 
@@ -313,9 +342,17 @@ def superband_mags(wave, flux, err):
     converted to f_lambda and then to a Vega magnitude via the energy-top-hat
     zero point. ``err`` is accepted for signature parity with _spherex and
     future per-sample weighting; the window scatter currently drives mag_err.
+
+    When the spectrum covers both sides of the SL1|LL2 seam, the SL bands are
+    scaled to LL (see ``_sl_to_ll_ratio``) and carry the size of that
+    correction, |r - 1|, as an extra fractional error: a few-percent step is
+    corrected at no cost, while a gross slit loss -- which also distorts the SL
+    slope, so a single scale cannot repair it -- is corrected in level and then
+    discounted rather than trusted.
     """
     wave = np.asarray(wave, float)
     flux = np.asarray(flux, float)
+    r_seam = _sl_to_ll_ratio(wave, flux)
     out = {}
     for name, (lo, hi) in sorted(IRS_TOPHATS.items()):
         m = (wave >= lo) & (wave <= hi)
@@ -327,6 +364,9 @@ def superband_mags(wave, flux, err):
             continue
         scatter = 1.4826 * float(np.median(np.abs(flux[m] - fmu)))
         fer = max(scatter / np.sqrt(n), ABS_CAL_FLOOR * fmu)
+        if r_seam is not None and hi <= _SEAM_UM:
+            fmu, fer = fmu * r_seam, fer * r_seam
+            fer = float(np.hypot(fer, abs(r_seam - 1.0) * fmu))
         lam_c = 0.5 * (lo + hi)
         flam = fmu * 1e-23 * C_UM / lam_c ** 2          # Jy -> erg/cm2/s/um
         zp = _vega_zero_flux(name, lo, hi)

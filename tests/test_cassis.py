@@ -78,6 +78,34 @@ def test_superband_flat_fnu_recovers_known_mags():
         assert n >= 3
 
 
+def test_sl_slit_loss_is_stitched_to_ll_and_discounted():
+    """A pointing loss in the narrow SL slit (SL flux x0.3, LL intact) must be
+    scaled back to LL at the seam, and the SL bands must carry the size of that
+    correction as error -- TWA 7's 3.6x step put its SL bands ~20 sigma below
+    the photosphere before this."""
+    wave = np.linspace(5.0, 38.0, 6000)
+    rj = 0.5 * (10.0 / wave) ** 2                       # Rayleigh-Jeans F_nu
+    lossy = np.where(wave < _cassis._SEAM_UM, 0.3 * rj, rj)
+    clean = superband_mags(wave, rj, 0.01 * rj)
+    got = superband_mags(wave, lossy, 0.01 * lossy)
+    for name, (lo, hi) in IRS_TOPHATS.items():
+        assert abs(got[name][0] - clean[name][0]) < 1e-3, name
+        if hi <= _cassis._SEAM_UM:
+            assert got[name][1] > 2.5 * (1 / 0.3 - 1) / np.log(10) - 1e-6, name
+        else:
+            assert abs(got[name][1] - clean[name][1]) < 1e-9, name
+
+
+def test_rising_spectrum_is_not_mistaken_for_a_seam_step():
+    """A genuinely rising (disk-like) spectrum with no calibration step must
+    leave the SL bands untouched: each side is extrapolated to the seam by its
+    own power law, so the slope itself is not read as a step."""
+    wave = np.linspace(5.0, 38.0, 6000)
+    rising = 0.05 * (wave / 10.0) ** 1.5
+    r = _cassis._sl_to_ll_ratio(wave, rising)
+    assert abs(r - 1.0) < 1e-6, r
+
+
 def test_superband_skips_thin_windows():
     """Windows with < MIN_SAMPLES spectral points are dropped, not faked."""
     wave = np.array([10.0, 10.5])             # only 2 pts, all in IRS_10000
