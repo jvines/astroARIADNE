@@ -262,15 +262,72 @@ _IRX_RESOLVE_UM = 5.0
 # evidence discount confusion-limited points CONTINUOUSLY -- no distance / SNR /
 # wavelength cut. Distance enters only implicitly (a distant source is fainter,
 # hence nearer the floor); nearby bright disks (eps Eri, eta Crv) sit far above
-# it and are untouched. Refs: SPIRE Nguyen+2010; PACS Berta+2011; MIPS Dole+2004.
+# it and are untouched.
+# Sources (checked against the papers 2026-10-06): SPIRE 5.8/6.3/6.8 mJy,
+# Nguyen+2010 (A&A 518, L5). PACS 100/160 um 0.15/0.68 mJy, Magnelli+2013
+# (A&A 553, A132; deeper than and superseding Berta+2011's 0.27/0.92); PACS 70 um
+# has NO measured confusion noise at any published depth (Berta+2011 Sect. 5.1),
+# so it gets none. MIPS 70/160 um: Dole+2004 (ApJS 154, 93) quote 5-sigma
+# confusion limits of 3.2 and 40 mJy, i.e. 0.64 and 8 mJy at 1 sigma. (Earlier
+# values here put Magnelli's 100 um number in the 70 um slot, used an unsourced
+# 0.9 mJy for MIPS 70, and Dole's 5-sigma 40 mJy as if it were 1 sigma.)
 # NOTE: this is the extragalactic term only. Cirrus (position-dependent, scales
 # with the local far-IR background) is the dominant contaminant for distant
 # in-plane sources and is not yet folded in.
 _IRX_CONF_MJY = {
     'HERSCHEL_SPIRE_PSW': 5.8, 'HERSCHEL_SPIRE_PMW': 6.3, 'HERSCHEL_SPIRE_PLW': 6.8,
-    'HERSCHEL_PACS_BLUE': 0.15, 'HERSCHEL_PACS_GREEN': 0.27, 'HERSCHEL_PACS_RED': 0.92,
-    'SPITZER_MIPS_70': 0.9, 'SPITZER_MIPS_160': 40.0,
+    'HERSCHEL_PACS_GREEN': 0.15, 'HERSCHEL_PACS_RED': 0.68,
+    'SPITZER_MIPS_70': 0.64, 'SPITZER_MIPS_160': 8.0,
 }
+
+# Empirical mid-IR photospheric baseline. The model-averaged photosphere
+# over-predicts the WISE mid-IR flux of M dwarfs by ~10%: for 246 field dwarfs
+# within 50 pc with no detected excess and W3 > 5 mag (clear of saturation), the
+# median (obs - model)/model is -9% to -12% at W3 and -6% to -8% at W2 between
+# 3000 and 4000 K, and -3% at W3 for FGK stars (IRX_experiment/injection_recovery/
+# baseline_nulls, 2026-10-06). It is not a zero point -- the pyphot Vega zero
+# points reproduce Jarrett+2011 to 0.8% (W3) and 1.9% (W4) -- and its size is
+# what a ~330 K too cool photosphere gives once rescaled to the near-IR
+# (cf. Stefanov+2026). Rows: bin-median residual and its bootstrap error at the
+# Teff bin centres below; W2 has no unsaturated FGK star above 6000 K, so its
+# last value is carried flat. Split-sample test (calibrate on one half, test on
+# the other): M-dwarf W3 -10.0% -> -0.1 +/- 0.9%, W2 -6.7% -> +0.2%.
+_IRX_BASELINE_TEFF = np.array([2750.0, 3250.0, 3750.0, 4500.0, 5500.0, 6750.0])
+_IRX_BASELINE = {   # band: (effective wavelength um, residual, error)
+    'WISE_RSR_W2': (4.6, [-0.0420, -0.0655, -0.0842, -0.0465, 0.0024, 0.0024],
+                    [0.0135, 0.0040, 0.0112, 0.0081, 0.0060, 0.0060]),
+    'WISE_RSR_W3': (11.6, [-0.0982, -0.0915, -0.1231, -0.0629, -0.0307, -0.0334],
+                    [0.0424, 0.0043, 0.0069, 0.0060, 0.0055, 0.0109]),
+    'WISE_RSR_W4': (22.1, [-0.1316, -0.0068, -0.0851, -0.0401, 0.0203, 0.0336],
+                    [0.0925, 0.0179, 0.0301, 0.0268, 0.0102, 0.0267]),
+}
+# The calibration's domain, and nothing outside it is corrected: Teff <= 7500 K,
+# the WISE bands themselves (other instruments carry their own, unmeasured,
+# offsets), and magnitudes as faint as the calibration sample's, so that
+# saturated photometry -- biased bright in W2 and faint in W3 -- is never
+# "corrected" with a relation measured on unsaturated stars. (Extending it to
+# saturated stars and to IRS/AKARI bands turned bright M-dwarf nulls into
+# decisive pseudo-disks; 2026-10-06.)
+_IRX_BASELINE_TMAX = 7500.0
+_IRX_BASELINE_MAG_MIN = {'WISE_RSR_W2': 7.0, 'WISE_RSR_W3': 5.0, 'WISE_RSR_W4': 4.5}
+
+
+def _irx_baseline(band, teff, mag):
+    """Empirical fractional correction r (and its error) to the predicted
+    WISE W2/W3/W4 photosphere: F_model -> F_model * (1 + r), r linear in Teff
+    between bin centres and clamped at the ends. Returns (0, 0) for any other
+    band, outside the calibrated Teff range, or for a magnitude brighter than
+    the calibration sample's (saturation)."""
+    band = str(band)
+    if band not in _IRX_BASELINE or teff is None or mag is None:
+        return 0.0, 0.0
+    teff, mag = float(teff), float(mag)
+    if not (np.isfinite(teff) and np.isfinite(mag)) or teff > _IRX_BASELINE_TMAX \
+            or mag < _IRX_BASELINE_MAG_MIN[band]:
+        return 0.0, 0.0
+    _, r, e = _IRX_BASELINE[band]
+    return (float(np.interp(teff, _IRX_BASELINE_TEFF, r)),
+            float(np.interp(teff, _IRX_BASELINE_TEFF, e)))
 
 
 def _irx_confusion_sigma(band, lam_um):
@@ -549,7 +606,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                             fit_errs=None, rad_primary=None, prim_ig=None,
                             logg_primary=None, teff_primary_err=None,
                             rad_primary_err=None, exc_obs=None, fit_obs=None,
-                            wd_host=False):
+                            wd_host=False, exc_corr=None):
     """Bayesian model selection on the IR excess.
 
     Compares three hypotheses for the excess fluxes by their Bayesian evidence:
@@ -565,9 +622,11 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     cancelling. Also returns marginal parameter posteriors (mean +/- std).
 
     Priors: log-uniform ``T`` in [30, 1500] K (silicates sublimate hotter) and
-    ``L_dust/L_*`` in [1e-7, 1e-1]; uniform ``Teff2`` in
-    [2300 K, min(grid, T_primary)] (a companion is cooler than the primary) and
-    log-uniform ``R2`` in [0.03, 1] R_sun. Returns ``None`` if <2 finite bands
+    ``L_dust/L_*`` in [1e-7, 1e-1]; uniform ``Teff2`` from each cool grid's
+    lower limit to min(grid, T_primary) (a companion is cooler than the
+    primary) and log-uniform ``R2`` in [0.03 R_sun, R2_max], with R2_max =
+    max(R1, 0.12) for a main-sequence primary and _IRX_WD_R2_MAX for a compact
+    one. Returns ``None`` if <2 finite bands
     or distance/luminosity are unknown. ``wd_host`` lifts the main-sequence
     hot-dust ceiling on the disk hypothesis (see ``_disk_lmax``).
     """
@@ -784,6 +843,12 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                 vf = np.asarray(model_grid(th, fn_b[pcol_f], fw[pcol_f],
                                            prim_ig, use_norm, av_law)).ravel()
                 Pf[k, pcol_f] = np.where(np.isfinite(vf), vf, 0.0)
+        # The empirical mid-IR baseline (_IRX_BASELINE) applies to the re-fitted
+        # primary exactly as to the model-averaged photosphere: without it the
+        # joint branch -- every host below COOL_HOST_GATE_K, i.e. every M dwarf --
+        # would compare hypotheses against the uncorrected photosphere.
+        if exc_corr is not None:
+            Pe = Pe * np.asarray(exc_corr, float)[sel][None, :]
         # rad1^2 (A1) clamp from the primary radius posterior.
         if rad_primary is not None and np.isfinite(rad_primary) \
                 and rad_primary > 0:
@@ -824,6 +889,84 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             cf_k = float(np.sum((obs_f - a1n[k] * Pf[k]) ** 2 * finv2))
             ce_k = float(np.sum((obs_e - a1n[k] * Pe[k]) ** 2 * inv2))
             chi2_null_re[k] = (cf_k - c_fit) + ce_k
+
+    # Dust hypotheses on the same footing in the joint branch. The null and the
+    # companion are scored against a primary re-fitted to all bands; scoring
+    # dust against the frozen model-averaged residual instead (with the primary
+    # volume V_prim as a common factor) made the comparison incommensurate:
+    # whenever the re-fitted single-grid primary described the mid-IR worse than
+    # the model average, the null lost and dust "won" without adding flux (Gl 1:
+    # every mid-IR band 20-28% BELOW the model, yet p_null ~ 1e-150 when BT-Settl
+    # carried the top weight and 0.75 when NewEra did). Here each dust model is
+    # A1 P(T1) + dust in the excess bands, A1 profiled at each node over all
+    # bands as for the null and companion. In the FIT bands dust only ever pays
+    # the frozen-branch penalty (its flux there squared over the error): letting
+    # it add flux to them while A1 is re-fitted turned hot dust into a fudge for
+    # a photosphere whose optical/near-IR colours the single grid gets wrong
+    # (Gl 1 again, and a detected companion, WISE J1002+0741, called dust). The
+    # T1 axis is averaged into an effective chi^2 per (T, L) node so that
+    # everything downstream is unchanged.
+    disk_joint = False
+    if joint:
+        disk_joint = True
+        n1 = Tg1.size
+        ok1 = np.isfinite(den) & (den > 0)
+        lse_m = np.full((Tg.size, Lg.size), -np.inf)     # running log-mean-exp
+        lse_s = np.zeros((Tg.size, Lg.size))
+        for i, T in enumerate(Tg):
+            Be = _bmod(lam, T, mod_irx)
+            Bfit = _bmod(flam_fit, T, mod_fit)
+            Om = omega_grid[i]
+            valid = np.isfinite(chi2_disk[i])
+            for k in range(n1):
+                if not ok1[k]:
+                    continue
+                cbp = float(np.sum(Be * Pe[k] * inv2))
+                a1 = np.clip((num0[k] - Om * cbp) / den[k], a1_lo, a1_hi)
+                me = a1[:, None] * Pe[k][None, :] + Om[:, None] * Be[None, :]
+                mf = a1[:, None] * Pf[k][None, :]
+                c = ((np.sum((obs_f[None, :] - mf) ** 2 * finv2[None, :], axis=1) - c_fit)
+                     + np.sum((obs_e[None, :] - me) ** 2 * inv2[None, :], axis=1)
+                     + Om ** 2 * float(np.sum(Bfit ** 2 * finv2)))
+                x = np.where(valid, -c / 2, -np.inf)
+                mnew = np.maximum(lse_m[i], x)
+                with np.errstate(invalid='ignore'):
+                    lse_s[i] = (np.where(np.isfinite(lse_m[i]), lse_s[i] * np.exp(lse_m[i] - mnew), 0.0)
+                                + np.where(np.isfinite(x), np.exp(x - mnew), 0.0))
+                lse_m[i] = mnew
+        with np.errstate(divide='ignore', invalid='ignore'):
+            chi2_disk = np.where(np.isfinite(lse_m) & (lse_s > 0),
+                                 -2 * (lse_m + np.log(lse_s / n1)), np.inf)
+        if chi2_disk2 is not None:
+            cB_all = [Mc @ (Pe[k] * inv2) for k in range(n1)]
+            m2 = np.full((ncomb, ncomb), -np.inf)
+            s2 = np.zeros((ncomb, ncomb))
+            for i in range(ncomb):
+                if not valid2[i]:
+                    continue
+                ordered = (Tflat[i] > Tflat) & valid2
+                if not ordered.any():
+                    continue
+                idx = np.where(ordered)[0]
+                for k in range(n1):
+                    if not ok1[k]:
+                        continue
+                    a1 = np.clip((num0[k] - cB_all[k][i] - cB_all[k][idx]) / den[k],
+                                 a1_lo, a1_hi)
+                    me = a1[:, None] * Pe[k][None, :] + Mc[i][None, :] + Mc[idx]
+                    mf = a1[:, None] * Pf[k][None, :]
+                    pen = np.sum((Pf2[i][None, :] + Pf2[idx]) ** 2 * finv2[None, :], axis=1)
+                    x = -((np.sum((obs_f[None, :] - mf) ** 2 * finv2[None, :], axis=1) - c_fit)
+                          + np.sum((obs_e[None, :] - me) ** 2 * inv2[None, :], axis=1)
+                          + pen) / 2
+                    mold = m2[i, idx]
+                    mnew = np.maximum(mold, x)
+                    s2[i, idx] = (np.where(np.isfinite(mold), s2[i, idx] * np.exp(mold - mnew), 0.0)
+                                  + np.exp(x - mnew))
+                    m2[i, idx] = mnew
+            with np.errstate(divide='ignore', invalid='ignore'):
+                chi2_disk2 = np.where(np.isfinite(m2) & (s2 > 0),
+                                      -2 * (m2 + np.log(s2 / n1)), np.inf)
 
     comp_per_grid = []   # (gname, T2g, Tg1, chi2[nT1, 64, 64])
     for gname_g, ig in cool_interps:
@@ -947,17 +1090,25 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
         wd = np.where(np.isfinite(chi2_disk),
                       np.exp(-(chi2_disk - m0) / 2), 0.0)
     # Mean over the prior SUPPORT (the L<=L_max(T) region), not the full grid.
-    z_disk = float(wd.sum() / max(np.isfinite(chi2_disk).sum(), 1)) * V_prim
+    # In joint mode the dust chi^2 already carries the primary's T1 axis.
+    v_dust = 1.0 if disk_joint else V_prim
+    z_disk = float(wd.sum() / max(np.isfinite(chi2_disk).sum(), 1)) * v_dust
     z_disk2 = 0.0
     wd2 = None
     if chi2_disk2 is not None and np.isfinite(chi2_disk2).any():
         ordered = np.isfinite(chi2_disk2)
         wd2 = np.where(ordered, np.exp(-(chi2_disk2 - m0) / 2), 0.0)
-        z_disk2 = float(wd2.sum() / ordered.sum()) * V_prim   # prior half mean
+        z_disk2 = float(wd2.sum() / ordered.sum()) * v_dust   # prior half mean
     # Per-grid companion evidence; the hypothesis evidence is their mean. The
     # companion chi^2 is [teff1, Teff2, R2]; the mean over all three axes is the
     # primary-marginalised companion evidence (Occam-commensurable with V_prim).
-    z_comp_g = [float(np.mean(np.exp(-(c - m0) / 2)))
+    # The mean is over each grid's prior SUPPORT (its finite nodes), as for the
+    # disk: nodes excluded by a physical bound (a companion brighter than its
+    # primary) or missing from the grid lie outside the prior, not in a
+    # zero-likelihood part of it. Averaging over them as well would charge the
+    # companion for prior volume it never had.
+    z_comp_g = [float(np.sum(np.where(np.isfinite(c), np.exp(-(c - m0) / 2), 0.0))
+                      / max(int(np.isfinite(c).sum()), 1))
                 for _, _, _, c in comp_per_grid]
     z_comp = float(np.mean(z_comp_g)) if comp_ok else 0.0
     tot = z_null + z_disk + z_disk2 + z_comp
@@ -3209,6 +3360,10 @@ class Fitter:
         irx_wave = np.asarray(star.wave)[mask]
         irx_obs = np.asarray(star.flux)[mask]
         irx_obs_e = np.asarray(star.flux_er)[mask]
+        # magnitudes decide whether the empirical baseline applies (saturation);
+        # without them no correction is made
+        irx_mag = np.asarray(getattr(star, 'mags', np.full(len(names), np.nan)),
+                             float)[mask]
 
         interps = {g: load_grid(g) for g in grids}
         wd = getattr(self, '_wd_host', False)
@@ -3254,7 +3409,7 @@ class Fitter:
                            p=[w for _, w, _ in members])
 
         result = {}
-        for f, wv, fo, fe in zip(irx_filt, irx_wave, irx_obs, irx_obs_e):
+        for f, wv, fo, fe, fmag in zip(irx_filt, irx_wave, irx_obs, irx_obs_e, irx_mag):
             f = str(f)
             if f not in common:
                 result[f] = dict(wave=float(wv), obs=float(fo),
@@ -3299,6 +3454,14 @@ class Fitter:
                 draws[d] = val
             model = float(np.nanmean(draws))
             model_err = float(np.nanstd(draws))
+            # Empirical mid-IR baseline (see _IRX_BASELINE); main-sequence
+            # hosts only -- the WD photosphere is a Rayleigh-Jeans extrapolation.
+            r_base, e_base = (0.0, 0.0) if wd else _irx_baseline(
+                f, (out.get('best_fit_averaged') or {}).get('teff'), fmag)
+            if r_base or e_base:
+                model_err = float(np.hypot(model_err * (1.0 + r_base),
+                                           e_base * model))
+                model = model * (1.0 + r_base)
             excess = float(fo) - model
             # Floor the observed error at the absolute-calibration level before
             # forming the significance (see _IRX_ABS_CAL_FLOOR): the raw
@@ -3315,7 +3478,8 @@ class Fitter:
             result[f] = dict(wave=float(wv), obs=float(fo), obs_err=float(fe),
                              obs_err_eff=obs_e_eff, model=model,
                              model_err=model_err, excess=excess,
-                             sigma=sigma, quantified=True)
+                             sigma=sigma, quantified=True,
+                             baseline_corr=r_base)
         q = {k: v for k, v in result.items() if v['quantified']}
         sig = sorted(k for k, v in q.items()
                      if np.isfinite(v['sigma']) and v['sigma'] >= _IRX_SIG_THRESH)
@@ -3383,7 +3547,9 @@ class Fitter:
                 bf.get('teff'), rad_primary=bf.get('rad'),
                 prim_ig=interps.get(gname), logg_primary=bf.get('logg'),
                 teff_primary_err=unc.get('teff'), rad_primary_err=unc.get('rad'),
-                exc_obs=[v['obs'] for v in q.values()], wd_host=wd, **fkw) or {}
+                exc_obs=[v['obs'] for v in q.values()], wd_host=wd,
+                exc_corr=[1.0 + v.get('baseline_corr', 0.0) for v in q.values()],
+                **fkw) or {}
             # Compact-primary composite demotion: a companion whose radius RAILS
             # at the substellar cap (_IRX_WD_R2_MAX) is too luminous to be a
             # brown dwarf -- it is a luminous (dM) companion (the joint-binary

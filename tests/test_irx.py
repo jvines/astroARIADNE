@@ -366,3 +366,23 @@ if __name__ == '__main__':
             _f()
             print('ok', _n)
     print('ALL PASS')
+
+
+def test_baseline_correction_table():
+    """The empirical mid-IR baseline applies only inside its calibrated domain:
+    WISE W2/W3/W4, Teff <= 7500 K, magnitudes as faint as the calibration sample.
+    It returns the table at the bin centres, interpolates linearly in Teff and
+    clamps at the ends."""
+    T = fmod._IRX_BASELINE_TEFF
+    _, r3, e3 = fmod._IRX_BASELINE['WISE_RSR_W3']
+    for t, r, e in zip(T, r3, e3):
+        assert np.allclose(fmod._irx_baseline('WISE_RSR_W3', t, 8.0), (r, e))
+    mid = 0.5 * (T[1] + T[2])
+    assert np.isclose(fmod._irx_baseline('WISE_RSR_W3', mid, 8.0)[0], 0.5 * (r3[1] + r3[2]))
+    assert np.isclose(fmod._irx_baseline('WISE_RSR_W3', 2000.0, 8.0)[0], r3[0])
+    assert fmod._irx_baseline('WISE_RSR_W3', 9000.0, 8.0) == (0.0, 0.0)        # too hot
+    assert fmod._irx_baseline('WISE_RSR_W3', 3300.0, 4.0) == (0.0, 0.0)        # saturated
+    assert fmod._irx_baseline('WISE_RSR_W2', 3300.0, 6.5) == (0.0, 0.0)        # saturated
+    assert fmod._irx_baseline('SPITZER_IRAC_80', 3300.0, 8.0) == (0.0, 0.0)    # not WISE
+    assert fmod._irx_baseline('IRS_12000', 3300.0, 8.0) == (0.0, 0.0)
+    assert fmod._irx_baseline('WISE_RSR_W3', float('nan'), 8.0) == (0.0, 0.0)
