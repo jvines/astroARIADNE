@@ -11,6 +11,8 @@ __all__ = ["Librarian"]
 
 import logging
 import os
+import threading
+import time
 import warnings
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -124,6 +126,19 @@ def _maybe_login_gaia():
 # Shared executor used by _with_timeout — avoids per-call pool spawn/teardown.
 _TIMEOUT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="librarian")
 
+# Queries that timed out or raised, process-wide. A lookup that saw any of
+# them is not written to the per-source cache: a degraded answer (ESA 429, a
+# mirror outage) cached under the current package hash would replay on every
+# rerun as if it were the archive's real answer.
+_QUERY_FAILURES = 0
+_QUERY_FAILURES_LOCK = threading.Lock()
+
+
+def _note_query_failure():
+    global _QUERY_FAILURES
+    with _QUERY_FAILURES_LOCK:
+        _QUERY_FAILURES += 1
+
 # Module-level dustmap caches. Constructing SFDQuery loads ~600 MB of FITS;
 # repeating per-Star creation makes catalogue-scale runs unusable.
 _DUSTMAP_CACHE: dict = {}
@@ -201,9 +216,11 @@ def _with_timeout(func, *args, timeout=None, kind=None, **kwargs):
         return future.result(timeout=timeout)
     except FuturesTimeout:
         logger.warning("Query timed out after %ds (%s)", timeout, kind or 'default')
+        _note_query_failure()
         return None
     except Exception as e:
         logger.warning("Query failed: %s", e)
+        _note_query_failure()
         return None
 
 
@@ -220,17 +237,48 @@ def _tap_query(service, query, timeout=None, kind='gaia', prefer_sync=True):
     above the sync limit.
     """
     def _sync():
-        return service.launch_job(query).get_results()
+        try:
+            return service.launch_job(query).get_results()
+        except Exception as exc:
+            if _is_rate_limit(exc):
+                return _RATE_LIMITED
+            raise
 
     def _async():
         return service.launch_job_async(query).get_results()
 
     if prefer_sync:
-        res = _with_timeout(_sync, timeout=timeout, kind=kind)
+        for wait in _TAP_429_BACKOFF + (None,):
+            res = _with_timeout(_sync, timeout=timeout, kind=kind)
+            if res is not _RATE_LIMITED:
+                break
+            if wait is None:
+                # An async launch would hit the same full queue (or, worse,
+                # park another job in it); give up and let the caller fall back.
+                logger.warning("Query failed: TAP still rate-limited (429) after "
+                               "%d s of backoff", sum(_TAP_429_BACKOFF))
+                _note_query_failure()
+                return None
+            logger.warning("TAP rate limit (429: anonymous job queue full); "
+                           "retrying in %d s", wait)
+            time.sleep(wait)
         if res is not None:
             return res
         logger.warning("sync TAP failed; retrying async (row cap or transient)")
     return _with_timeout(_async, timeout=timeout, kind=kind)
+
+
+# The ESA archive caps anonymous users at 50 queued jobs and then answers 429 to
+# sync and async alike (2026-11-13: for minutes at a time, flapping). Falling
+# back at once costs the Gaia best-neighbour cross-matches (PS1, SDSS, APASS,
+# SkyMapper); the queue drains within a minute or two, so wait for it.
+_TAP_429_BACKOFF = (15, 30, 60, 90, 120)
+_RATE_LIMITED = object()
+
+
+def _is_rate_limit(exc):
+    text = str(exc)
+    return "429" in text or "maximum number of jobs" in text
 
 
 # ── ESA Gaia archive fallback ───────────────────────────────────
@@ -701,6 +749,7 @@ class Librarian:
                 logger.warning('librarian cache restore failed (%s); '
                                'refetching', e)
 
+        failures_before = _QUERY_FAILURES
         self._resolve_gaia_id()
         self._query_gaia_params()
         self._query_crossmatches()
@@ -709,7 +758,12 @@ class Librarian:
         self._impute_zero_errors()
         self._query_spectroscopic_priors()
         self._query_extinction()
-        if self._cache_path:
+        failed = _QUERY_FAILURES - failures_before
+        if self._cache_path and failed:
+            logger.warning('librarian: %d catalog quer%s failed; result NOT '
+                           'cached, so a rerun queries the archives again',
+                           failed, 'y' if failed == 1 else 'ies')
+        elif self._cache_path:
             try:
                 self._save_cache()
             except Exception as e:
