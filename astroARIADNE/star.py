@@ -822,7 +822,11 @@ class Star:
         gaia_mask = np.array([any(f.startswith(p) for p in _GAIA_PREFIXES)
                                for f in filt_names])
 
-        if np.any(gaia_mask):
+        # A blackbody with a free offset needs two anchors. A lone Gaia band
+        # (G without BP/RP, common for faint red sources) cannot seed the
+        # trusted set: the fit never ran, every other band was flagged and no
+        # temperature was recorded. Use the anchor-free path instead.
+        if gaia_mask.sum() >= 2:
             trusted = gaia_mask.copy()
             while True:
                 untrusted_idx = np.where(~trusted)[0]
