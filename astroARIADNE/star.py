@@ -29,6 +29,7 @@ from .librarian import Librarian
 from .librarian._adapter import adapt_librarian
 from .error import StarWarning, InputError
 from .phot_utils import *
+from .phot_utils import _STROMGREN_VEGA
 from .utils import (display_star_fin, display_star_init)
 
 _GAIA_PREFIXES = ('GaiaDR2', 'GaiaDR3', 'GAIA')
@@ -792,7 +793,8 @@ class Star:
                 leff = get_effective_wavelength(band)
                 f0_arr[i] = convert_f_nu_to_f_lambda(3.631e-20, leff)
             else:
-                f0_arr[i] = get_zero_flux(band)
+                # standard-system Stromgren mags: Vega is not at zero there
+                f0_arr[i] = get_zero_flux(band) * 10 ** (-0.4 * _STROMGREN_VEGA.get(band, 0.0))
 
         def _synth_mags(T):
             x = _h * _c / (lam_m * _k * np.maximum(T, 1.0))

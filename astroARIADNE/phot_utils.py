@@ -96,6 +96,19 @@ def convert_f_nu_to_f_lambda(f, l):
     return f * const.c.to(u.micrometer / u.s).value / l ** 2
 
 
+# Stromgren magnitudes are on the standard uvby system (catalogues give V, b-y,
+# m1, c1 and the librarian builds u, v, b, y from them), in which Vega is NOT at
+# zero. pyphot's Vega zero points put Vega at 0 in every band, so standard-system
+# magnitudes must be shifted by Vega's own colours first; y is treated like
+# Johnson V (Vega = 0), as for every other Vega-system band. Vega (HD 172167),
+# Hauck & Mermilliod 1998 (II/215): b-y = 0.003, m1 = 0.157, c1 = 1.088, giving
+# u-y = 1.411, v-y = 0.163, b-y = 0.003. Without this, every Stromgren u flux was
+# 3.7x too faint (the robust photometry QC measured +1.32 mag in 28 roster
+# stars; v +0.11, b -0.02, y +0.01).
+_STROMGREN_VEGA = {'STROMGREN_u': 1.411, 'STROMGREN_v': 0.163,
+                   'STROMGREN_b': 0.003, 'STROMGREN_y': 0.0}
+
+
 def mag_to_flux(mag, mag_err, band):
     """Convert from magnitude to flux.
 
@@ -123,7 +136,7 @@ def mag_to_flux(mag, mag_err, band):
     else:
         # Get flux in erg / cm2 / s / um
         f0 = get_zero_flux(band)
-        flux = 10 ** (-.4 * mag) * f0
+        flux = 10 ** (-.4 * (mag - _STROMGREN_VEGA.get(band, 0.0))) * f0
         flux_err = abs(-.4 * flux * np.log(10) * mag_err)
     return flux, flux_err
 
@@ -139,7 +152,7 @@ def flux_to_mag(flux, flux_err, band):
         f0 = convert_f_nu_to_f_lambda(3.631e-20, leff)
     else:
         f0 = get_zero_flux(band)
-    mag = -2.5 * np.log10(flux / f0)
+    mag = -2.5 * np.log10(flux / f0) + _STROMGREN_VEGA.get(band, 0.0)
     mag_err = 2.5 * flux_err / (np.log(10) * flux)
     return mag, mag_err
 
