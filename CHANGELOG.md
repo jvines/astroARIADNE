@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which covers a 1 R_sun star out to ~2 pc.
 - **`show_priors` prints very small or large bounds in scientific
   notation;** `U(0, 1e-20)` used to print as `U(0.00, 0.00)`.
+- **A user-supplied extinction no longer crashes `initialize()`.**
+  `Star(Av=..., Av_e=...)` dropped `Av_e`, so `_default_priors` raised
+  `AttributeError` for any star beyond the 70 pc Av auto-pin (#89). `Av_e`
+  is now stored, and with it the Av prior is the truncated normal
+  N(Av, Av_e) on [0, 100] instead of U(0, Av).
 
 ## [2.0.0] - 2026-05-31
 
