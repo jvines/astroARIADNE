@@ -58,7 +58,7 @@ from __future__ import annotations
 
 __all__ = ["AdaptedStar", "adapt_librarian"]
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -104,6 +104,9 @@ class AdaptedStar:
     xp_filled: tuple = ()
     # Gaia DR3 RUWE (astrometric-fit quality); None when offline/unavailable.
     ruwe: float | None = None
+    # Gaia-based blend QC (issue #55); empty when the check is off or failed.
+    contamination: dict = field(default_factory=dict)
+    xmatch_flags: dict = field(default_factory=dict)
 
 
 def _scalar(pair, missing):
@@ -178,4 +181,6 @@ def adapt_librarian(lib) -> AdaptedStar:
         xp_filled=tuple(b for b in (getattr(lib, '_xp_filled', ()) or ())
                         if b in ariadne_mags),
         ruwe=getattr(lib, 'ruwe', None),
+        contamination=dict(getattr(lib, "contamination", None) or {}),
+        xmatch_flags=dict(getattr(lib, "xmatch_flags", None) or {}),
     )
