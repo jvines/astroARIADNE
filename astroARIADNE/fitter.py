@@ -3733,7 +3733,9 @@ class Fitter:
                                 bf.get('shared_noise'))
                     try:
                         infl[_i] = float(mag_to_flux(
-                            float(star.mags[fmask][_i]), float(nz), _b)[1])
+                            float(star.mags[fmask][_i]), float(nz), _b,
+                            (getattr(star, 'mag_system', None) or {}).get(
+                                _b))[1])
                     except (TypeError, ValueError):
                         infl[_i] = 0.0
                 fkw = dict(fit_names=fn_fit, fit_waves=star.wave[fmask],
