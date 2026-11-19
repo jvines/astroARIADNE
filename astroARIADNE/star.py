@@ -95,6 +95,14 @@ class Star:
         Set to False to suppress printed outputs.
     ignore: list, optional
         A list with the catalogs to ignore for whatever reason.
+    contamination_qc: bool, optional
+        Gaia blend QC (default True): drop 2MASS/AllWISE bands whose Gaia
+        match is shared with other Gaia sources, and flag or exclude bands
+        whose flux is contaminated by unresolved Gaia neighbours. Results
+        are in `contamination` and `xmatch_flags`.
+    contamination_flag, contamination_exclude: float, optional
+        Fractional contaminating flux above which a band is flagged /
+        excluded (defaults 0.01 / 0.05).
 
     Attributes
     ----------
@@ -137,7 +145,9 @@ class Star:
                  temp=None, temp_e=None, lum=None, lum_e=None,
                  dist=None, dist_e=None, Av=None, Av_e=None,
                  offline=False, mag_dict=None, verbose=True, ignore=None,
-                 dustmap='SFD'):
+                 dustmap='SFD',
+                 contamination_qc=True, contamination_flag=None,
+                 contamination_exclude=None):
         """See class docstring."""
         # MISC
         self.verbose = verbose
@@ -172,6 +182,8 @@ class Star:
         self.get_logg = False  # This is set to True after self.estimate_logg
 
         self.g_id = g_id
+        self.contamination = {}
+        self.xmatch_flags = {}
 
         # Lookup archival magnitudes, radius, temperature, luminosity
         # and parallax
@@ -186,8 +198,14 @@ class Star:
                                 c)
                     )
                 ignore_arg = ignore if ignore is not None else ()
+                contam_kw = {"contamination_qc": contamination_qc}
+                if contamination_flag is not None:
+                    contam_kw["contamination_flag"] = contamination_flag
+                if contamination_exclude is not None:
+                    contam_kw["contamination_exclude"] = contamination_exclude
                 lib = Librarian(self.ra, self.dec, gaia_id=self.g_id,
-                                ignore=ignore_arg, verbose=self.verbose)
+                                ignore=ignore_arg, verbose=self.verbose,
+                                **contam_kw)
                 adapted = adapt_librarian(lib)
                 self.g_id = adapted.g_id
                 self.tic = adapted.tic
@@ -195,6 +213,8 @@ class Star:
                 # Store spectroscopic parameters for use in priors
                 self.rave_params = adapted.rave_params
                 self.spectroscopic_params = adapted.spectroscopic_params
+                self.contamination = adapted.contamination
+                self.xmatch_flags = adapted.xmatch_flags
             else:
                 print(
                     colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Gaia blend QC: unresolved neighbours no longer pass silently (#55).**
+  Two checks, after Contardo & Hogg 2024 (arXiv:2403.18941, Sec. 2 and 3.1),
+  switched off together with `Star(contamination_qc=False)`:
+  - *Cross-match uniqueness.* The Gaia best-neighbour queries now also read
+    `number_of_mates` and `number_of_neighbours`. A 2MASS or AllWISE
+    counterpart with `number_of_mates > 0` is shared with other Gaia sources
+    (an unresolved blend), and its bands are dropped; `number_of_neighbours
+    > 1` keeps the bands and warns. Results are in `star.xmatch_flags`. When
+    the ESA archive is unreachable the check is skipped with a warning.
+  - *Neighbour flux contamination.* One Gaia DR3 cone (20") gives, per band,
+    the fractional contaminating flux
+    `c = sum 10^(-0.4 (G_nb - G_target)) exp(-sep^2 / 2 sigma^2)`, with sigma
+    from a per-catalogue PSF FWHM table (`PSF_FWHM_ARCSEC` in
+    `librarian/_contamination.py`; Gaia, TESS, Tycho-2 and Stromgren bands
+    are not checked). Bands with `c > 0.01` are flagged and those with
+    `c > 0.05` (about 0.05 mag) are removed from the fit, each with a warning
+    naming the neighbours. The values are in `star.contamination`; thresholds
+    are `Star(contamination_flag=..., contamination_exclude=...)`. Gaia G is
+    the flux proxy, with no colour term.
+
 ### Fixed
 - **The default `norm` prior no longer excludes nearby stars.** The fixed
   U(0, 1e-20) ceiling on (R/D)^2 capped R/D at 1e-10, railing any star

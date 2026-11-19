@@ -58,7 +58,7 @@ from __future__ import annotations
 
 __all__ = ["AdaptedStar", "adapt_librarian"]
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -98,6 +98,9 @@ class AdaptedStar:
     kic: int | None
     rave_params: dict | None
     spectroscopic_params: dict | None
+    # Gaia-based blend QC (issue #55); empty when the check is off or failed
+    contamination: dict = field(default_factory=dict)
+    xmatch_flags: dict = field(default_factory=dict)
 
 
 def _scalar(pair, missing):
@@ -169,4 +172,6 @@ def adapt_librarian(lib) -> AdaptedStar:
         kic=lib._kic_id,
         rave_params=lib.rave_params,
         spectroscopic_params=lib.spectroscopic_params,
+        contamination=dict(getattr(lib, "contamination", None) or {}),
+        xmatch_flags=dict(getattr(lib, "xmatch_flags", None) or {}),
     )
