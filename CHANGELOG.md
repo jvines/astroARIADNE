@@ -49,6 +49,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     NetCDF file.
 
 ### Fixed
+- **SPHEREx super-bands are now checked for Gaia neighbours inside the
+  extraction aperture (#55).** The blend QC skipped SPHEREx, yet the bands
+  are our own 3-px (18.45") aperture photometry and nothing in the aperture
+  path subtracts a neighbour: on Gaia DR3 5377927940883353216 a neighbour
+  19.95" away with 24% of the target's G flux sat at 3.2 px, and all 11
+  super-bands came out 13-23% too bright while 2MASS, WISE and Gaia agreed
+  to 2%. After the SPHEREx extraction, a 40" Gaia DR3 cone now gives per
+  super-band `c = sum (F_nb / F_target) f_ap(sep) / f_ap(0)`, where `f_ap`
+  is the fraction of a point source's flux inside the extraction aperture
+  at that separation, tabulated per super-band from the mission's R7 ePSF
+  (`SPHEREX_APERTURE_FRACTION` in `librarian/_contamination.py`; 0.99 at
+  the centre, 0.30 at 3.25 px, 0 beyond 6.5 px). The flux ratio uses Gaia
+  RP where both stars have it, else G. The thresholds are those of the
+  other bands (flag at 0.01, remove at 0.05), and the values join
+  `star.contamination` with the aperture radius in place of a PSF FWHM.
+  Measured through the aperture, that star would lose all 11 super-bands at
+  c = 0.096-0.099. Bands measured by the crowded-field forced ePSF fit,
+  which already models the catalogued neighbours, are recorded as
+  `deblended` and kept (that star is one: its 2MASS neighbours predict
+  0.19 of its flux in the aperture, over the 0.02 trigger).
 - **Multi-threaded fits no longer die with `NameError: name 'flux' is not
   defined`** on machines where the worker processes are spawned (macOS
   default) (#58). The fitter's and the isochrone's pools now always fork,
