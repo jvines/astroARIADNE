@@ -5,6 +5,15 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **The default `norm` prior no longer excludes nearby stars.** The fixed
+  U(0, 1e-20) ceiling on (R/D)^2 capped R/D at 1e-10, railing any star
+  nearer than ~225 pc x (R / R_sun) against the bound and returning a wrong
+  Teff and radius with no warning (#90). With a distance, the ceiling is
+  now (100.05 R_sun / D_min)^2, D_min = D - 5 sigma floored at 1 pc.
+
 ## [2.0.0] - 2026-05-31
 
 ### Added
