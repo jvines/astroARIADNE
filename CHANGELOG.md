@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Predict the best-fit SED in any filter.** `Fitter.synthetic_filters`
+  takes pyphot library filter names, `pyphot.Filter` objects or
+  `(name, wavelength_um, transmission[, 'energy'])` tuples. Filters that are
+  not ARIADNE grid bands are convolved once against the BT-Settl spectra of the
+  spectra cache and pushed through the same posterior draws as the grid bands,
+  giving fluxes, Vega and AB magnitudes with 1-sigma errors in the new
+  `synthetic_user_filters.dat` (also appended to `synthetic_magnitudes.dat` /
+  `synthetic_fluxes.dat` with `observed=0`, and stored in the pickle as
+  `synthetic_user_filters`). Without the cache those filters are skipped with
+  one warning naming the fetch command (#88).
 - **`fit_bma` reuses existing per-grid fits.** A `<grid>_out.pkl` already in
   `out_folder` is loaded instead of re-running dynesty, so the BMA can be
   recomputed for a new `models` list (e.g. to re-plot without a bad grid)

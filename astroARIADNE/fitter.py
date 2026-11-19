@@ -1381,6 +1381,16 @@ class Fitter:
         Manual prior specification consumed by ``create_priors_from_setup``.
     experimental : bool
         Enable experimental code paths. Default ``False``.
+    synthetic_filters : list or None
+        Extra filters to predict at the best-fit SED, written to
+        ``synthetic_user_filters.dat`` (and appended to
+        ``synthetic_magnitudes.dat`` / ``synthetic_fluxes.dat`` with
+        ``observed=0``). Entries may be a pyphot library filter name, a
+        ``pyphot.Filter`` or a ``(name, wavelength_um, transmission)`` tuple
+        (photon-counting detector unless a 4th element ``'energy'`` is given).
+        ARIADNE grid bands are read from the band grid; any other filter is
+        synthesized from the spectra cache (``fetch_spectra_cache()``) and is
+        NaN where the cached BT-Settl spectra do not span it. Default ``None``.
 
     """
 
@@ -1457,6 +1467,9 @@ class Fitter:
         # (the dominant cost of a BMA run). Lower is more precise but slower;
         # the isochrone fit itself is parallelised across ``threads``.
         self.isochrone_dlogz = 0.01
+        # Extra filters to predict at the best-fit SED (issue #88); see the
+        # class docstring.
+        self.synthetic_filters = None
         # Activate the typo guard now that all default attributes exist. After
         # this, assigning a *new* public attribute (e.g. ``f.bmaa = True`` for
         # ``f.bma``) raises instead of silently creating a dead attribute and
@@ -3500,17 +3513,7 @@ class Fitter:
         # for the full band set -> read off a magnitude the star lacks. BMA does
         # this in save_bma; the per-model saves during a BMA run skip it.
         if not self.bma:
-            try:
-                synphot = self._synthetic_photometry(out['posterior_samples'])
-            except Exception as e:
-                logger.warning('synthetic photometry skipped: %s', e)
-                synphot = {}
-            out['synthetic_photometry'] = synphot
-            synthdat, magdat = self._synth_phot_tables(synphot)
-            with open(f'{self.out_folder}/synthetic_fluxes.dat', 'w') as fh:
-                fh.write(synthdat)
-            with open(f'{self.out_folder}/synthetic_magnitudes.dat', 'w') as fh:
-                fh.write(magdat)
+            self._write_synthetic(out, out['posterior_samples'])
         pickle.dump(out, open(out_file, 'wb'))
         pass
 
@@ -3821,6 +3824,28 @@ class Fitter:
                              if q else float('nan')))
         return result
 
+    def _synth_thetas(self, samples, n_draws=3000):
+        """Posterior draws (subsampled to ``n_draws``) packed as the theta
+        rows ``model_grid`` expects: (ndraws, 5|6). Deterministic."""
+        use_norm = self.norm
+
+        def _col(key):
+            return np.atleast_1d(np.asarray(samples[key], dtype=float))
+        cols = ['teff', 'logg', 'z', 'Av'] + (['norm'] if use_norm
+                                              else ['dist', 'rad'])
+        arrs = {k: _col(k) for k in cols}
+        n = max(a.size for a in arrs.values())
+        arrs = {k: np.broadcast_to(a, (n,)) for k, a in arrs.items()}
+        if n > n_draws:
+            sel = np.random.default_rng(0).choice(n, n_draws, replace=False)
+        else:
+            sel = np.arange(n)
+        if use_norm:
+            return np.column_stack([arrs['teff'], arrs['logg'], arrs['z'],
+                                    arrs['norm'], arrs['Av']])[sel]
+        return np.column_stack([arrs['teff'], arrs['logg'], arrs['z'],
+                                arrs['dist'], arrs['rad'], arrs['Av']])[sel]
+
     def _synthetic_photometry(self, samples, n_draws=3000):
         """Predicted observed photometry for the FULL filter set at the fitted SED.
 
@@ -3843,24 +3868,7 @@ class Fitter:
         intp = self.load_interpolator('btsettl')
         names = [str(f) for f in filter_names]
         wave = np.array([get_effective_wavelength(f) for f in names])
-
-        def _col(key):
-            return np.atleast_1d(np.asarray(samples[key], dtype=float))
-        cols = ['teff', 'logg', 'z', 'Av'] + (['norm'] if use_norm
-                                              else ['dist', 'rad'])
-        arrs = {k: _col(k) for k in cols}
-        n = max(a.size for a in arrs.values())
-        arrs = {k: np.broadcast_to(a, (n,)) for k, a in arrs.items()}
-        if n > n_draws:
-            sel = np.random.default_rng(0).choice(n, n_draws, replace=False)
-        else:
-            sel = np.arange(n)
-        if use_norm:
-            thetas = np.column_stack([arrs['teff'], arrs['logg'], arrs['z'],
-                                      arrs['norm'], arrs['Av']])[sel]
-        else:
-            thetas = np.column_stack([arrs['teff'], arrs['logg'], arrs['z'],
-                                      arrs['dist'], arrs['rad'], arrs['Av']])[sel]
+        thetas = self._synth_thetas(samples, n_draws)
         fl = np.array([model_grid(th, filter_names, wave, intp, use_norm, av_law)
                        for th in thetas])                 # (ndraws, nbands)
         observed = {str(b) for b in
@@ -3880,15 +3888,125 @@ class Fitter:
                          f in observed)
         return photom
 
+    def _synthetic_user_filters(self, samples, grid_photom=None, n_draws=3000):
+        """Predicted photometry in ``self.synthetic_filters`` (issue #88).
+
+        Names that are ARIADNE grid bands are read from the band-grid result
+        (``grid_photom``, source ``grid``); every other filter is synthesized
+        from the spectra cache's BT-Settl spectra (source ``spectra_cache``)
+        and the SAME posterior draws are pushed through the same forward model.
+        Returns ``({name: record}, header_note)``; records are NaN where the
+        filter is not covered by the cached spectra. Never raises for a missing
+        cache: it warns once with the fetch command and skips those filters.
+        """
+        from . import synth_phot as sp
+        from . import config
+        from .sed_library import model_grid
+        specs = getattr(self, 'synthetic_filters', None)
+        if specs is None or (hasattr(specs, '__len__') and len(specs) == 0):
+            return {}, ''
+        filts = sp.resolve_filters(specs)
+        gridnames = {str(f) for f in filter_names}
+        todo = [sf for sf in filts if sf.name not in gridnames]
+        out = {}
+        gp = grid_photom if grid_photom is not None else {}
+        for sf in filts:
+            if sf.name in gridnames:
+                if sf.name in gp:
+                    _, fx, fxe, _, _, _ = gp[sf.name]
+                    out[sf.name] = sp.user_record(sf, fx, fxe, 'grid')
+                else:
+                    out[sf.name] = sp.user_record(sf, np.nan, np.nan, 'grid')
+        note = 'grid bands: BT-Settl band grid'
+        if todo:
+            path = getattr(config, 'spectra_cache', None)
+            if not path or not os.path.isfile(path):
+                logger.warning(
+                    'synthetic_filters: %s are not ARIADNE grid bands and need '
+                    'the spectra cache, which is missing. Fetch it with: %s '
+                    '(or set $ARIADNE_SPECTRA_CACHE). Those filters are '
+                    'skipped.', [s.name for s in todo], sp.FETCH_CMD)
+            else:
+                key = (path, tuple(s.key for s in todo))
+                store = self.__dict__.setdefault('_synth_cube_cache', {})
+                if key not in store:
+                    store[key] = sp.build_cube(path, todo)
+                cube = store[key]
+                names = [s.name for s in todo]
+                wave = np.array([s.wave_um for s in todo])
+                thetas = self._synth_thetas(samples, n_draws)
+                fl = np.array([model_grid(th, names, wave, cube, self.norm,
+                                          self._av_law) for th in thetas])
+                for j, sf in enumerate(todo):
+                    c = fl[:, j]
+                    c = c[np.isfinite(c) & (c > 0)]
+                    if c.size < 10:
+                        out[sf.name] = sp.user_record(sf, np.nan, np.nan,
+                                                      'spectra_cache')
+                        continue
+                    fmed = float(np.median(c))
+                    ferr = float(0.5 * (np.percentile(c, 84)
+                                        - np.percentile(c, 16)))
+                    out[sf.name] = sp.user_record(sf, fmed, ferr,
+                                                  'spectra_cache')
+                note += (f'; other filters: BT-Settl spectra cache '
+                         f'({os.path.basename(path)}, groups '
+                         f'{"+".join(sp.CACHE_GROUPS)})')
+        # keep the user's order
+        order = [s.name for s in filts]
+        return {n: out[n] for n in order if n in out}, note
+
+    def _write_synthetic(self, out, samples):
+        """Compute and write the synthetic photometry files; never raises."""
+        try:
+            synphot = self._synthetic_photometry(samples)
+        except Exception as e:
+            logger.warning('synthetic photometry skipped: %s', e)
+            synphot = {}
+        user, note = {}, ''
+        try:
+            user, note = self._synthetic_user_filters(samples, synphot)
+        except Exception as e:
+            logger.warning('user-filter synthetic photometry skipped: %s', e)
+        extra = {n: r for n, r in user.items()
+                 if r['source'] == 'spectra_cache' and np.isfinite(r['mag_vega'])}
+        photom = dict(synphot)
+        for n, r in extra.items():
+            photom[n] = (r['wavelength_um'], r['flux'], r['flux_err'],
+                         r['mag_vega'], r['mag_vega_err'], False)
+        out['synthetic_photometry'] = photom
+        out['synthetic_user_filters'] = user
+        try:
+            synthdat, magdat = self._synth_phot_tables(photom, user_names=extra)
+            with open(f'{self.out_folder}/synthetic_fluxes.dat', 'w') as fh:
+                fh.write(synthdat)
+            with open(f'{self.out_folder}/synthetic_magnitudes.dat', 'w') as fh:
+                fh.write(magdat)
+            if user:
+                from . import synth_phot as sp
+                with open(f'{self.out_folder}/synthetic_user_filters.dat',
+                          'w') as fh:
+                    fh.write(sp.user_table(user, note))
+        except Exception as e:
+            logger.warning('writing synthetic photometry files failed: %s', e)
+
     @staticmethod
-    def _synth_phot_tables(photom):
-        """(flux_table, mag_table) strings for the synthetic-photometry files."""
+    def _synth_phot_tables(photom, user_names=()):
+        """(flux_table, mag_table) strings for the synthetic-photometry files.
+
+        ``user_names``: names of user-specified (spectra-cache) filters in
+        ``photom``; their magnitudes are Vega-system (noted in the header).
+        """
         flux = 'Filter\tFlux\n'
         mag = ('# Predicted observed photometry from the best-fit SED (BT-Settl '
                'grid).\n# observed=1: band used in the fit; observed=0: '
-               'prediction. Mag in the band native (Vega/AB) system.\n'
-               '# Filter\twavelength_um\tmag\tmag_err\tflux_erg_cm2_s_um\t'
-               'flux_err\tobserved\n')
+               'prediction. Mag in the band native (Vega/AB) system.\n')
+        if len(user_names):
+            mag += ('# User-specified filters (Fitter.synthetic_filters) from '
+                    'the spectra cache: Vega mags, see '
+                    'synthetic_user_filters.dat for AB.\n')
+        mag += ('# Filter\twavelength_um\tmag\tmag_err\tflux_erg_cm2_s_um\t'
+                'flux_err\tobserved\n')
         for f, (w, fx, fxe, mg, mge, ob) in photom.items():
             flux += f'{f}\t{fx:.6e}\n'
             mag += (f'{f}\t{w:.4f}\t{mg:.4f}\t{mge:.4f}\t{fx:.6e}\t{fxe:.6e}\t'
@@ -3924,8 +4042,6 @@ class Fitter:
         log_out_samples = f'{self.out_folder}/best_fit_sample.dat'
         log_out_average = f'{self.out_folder}/best_fit_average.dat'
         prob_out = f'{self.out_folder}/model_probabilities.dat'
-        synth_out = f'{self.out_folder}/synthetic_fluxes.dat'
-        mag_out = f'{self.out_folder}/synthetic_magnitudes.dat'
 
         # Save global evidence of each model.
         out['lnZ'] = avgd['evidences']
@@ -4176,13 +4292,7 @@ class Fitter:
         # extinction-scaled) on the BT-Settl grid. synthetic_fluxes.dat now holds
         # these OBSERVED fluxes (previously surface fluxes); synthetic_magnitudes
         # .dat adds the mags. Never break the save if it fails.
-        try:
-            synphot = self._synthetic_photometry(avgd['originals'][max_prob_mod])
-        except Exception as e:
-            logger.warning('synthetic photometry skipped: %s', e)
-            synphot = {}
-        out['synthetic_photometry'] = synphot
-        synthdat, magdat = self._synth_phot_tables(synphot)
+        self._write_synthetic(out, avgd['originals'][max_prob_mod])
 
         for i, param in enumerate(order):
             if not self.coordinator[i]:
@@ -4224,10 +4334,6 @@ class Fitter:
             logfile.write(logdat_average)
         with open(prob_out, 'w') as logfile:
             logfile.write(probdat)
-        with open(synth_out, 'w') as logfile:
-            logfile.write(synthdat)
-        with open(mag_out, 'w') as logfile:
-            logfile.write(magdat)
         try:
             out['irx'] = (self._compute_irx(out, list(self._grids), av_law)
                           if getattr(self, '_do_irx', False) else {})
