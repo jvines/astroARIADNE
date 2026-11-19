@@ -55,6 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the flux proxy, with no colour term.
 
 ### Fixed
+- **Multi-threaded fits no longer die with `NameError: name 'flux' is not
+  defined`** on machines where the worker processes are spawned (macOS
+  default) (#58). The fitter's and the isochrone's pools now always fork,
+  through their own fork context, instead of relying on a process-wide
+  `set_start_method('fork', force=True)` at import that any later import or
+  user code could undo. Importing astroARIADNE no longer changes the global
+  start method. Diagnosed by @alexishtz and @JenniferBurt (PR #81).
 - **The default `norm` prior no longer excludes nearby stars.** The fixed
   U(0, 1e-20) ceiling on (R/D)^2 capped R/D at 1e-10, railing any star
   nearer than ~225 pc x (R / R_sun) against the bound and returning a wrong

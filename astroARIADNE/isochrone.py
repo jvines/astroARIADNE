@@ -2,7 +2,7 @@
 
 import warnings
 import pickle
-from multiprocessing import Pool
+import multiprocessing as _mp
 
 import pandas as pd
 import numpy as np
@@ -21,6 +21,9 @@ from .utils import credibility_interval
 # multiprocessing pool we pass it via module globals (inherited by the forked
 # workers) instead of dynesty's logl_args/ptform_args. Each worker mutates its
 # own forked copy of the model, so there is no cross-process shared state.
+# Fork context explicitly: independent of the process-wide start method.
+Pool = _mp.get_context('fork').Pool
+
 _ISO_MODEL = None
 _ISO_PARAMS = None
 _ISO_JITTER_VARS = None
