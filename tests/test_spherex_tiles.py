@@ -92,3 +92,38 @@ def test_non_row_tiles_are_refused_loudly():
     rd = _BytesReader(_mef(flags, tile=(4, flags.shape[1])))
     with pytest.raises(_spherex.UnsupportedLayout):
         _spherex._hdu_offsets(rd, 'dr1/level2/w/v/4/x.fits')
+
+
+def test_cached_layout_follows_each_files_own_heap():
+    """The compressed FLAGS heap is a per-FILE size, so VARIANCE moves from file
+    to file within one layout variant (DR1: 28376640 / 28221120 / 28108800 B
+    for three D3 files of one l2b-v27 variant). A layout cached from the first
+    file must not place the second file's VARIANCE."""
+    key = "dr1/level2/w/v/5/{}.fits"
+    a = _mef(_flags())
+    busy = _flags()
+    busy[:] = np.random.default_rng(3).integers(0, 1 << 30, busy.shape)   # incompressible
+    b = _mef(busy)
+    assert len(a) != len(b)
+    _spherex._hdu_offsets(_BytesReader(a), key.format("a"))           # walks, caches
+    calls = []
+
+    class _Counting(_BytesReader):
+        def get(self, k, ranges):
+            calls.append(len(ranges))
+            return super().get(k, ranges)
+    _, offs = _spherex._hdu_offsets(_Counting(b), key.format("b"))
+    assert calls == [2]                       # IMAGE + FLAGS headers, one request
+    with fits.open(io.BytesIO(b)) as h:
+        var = np.asarray(h["VARIANCE"].data)
+    off, bitpix, _ = offs["VARIANCE"]
+    nx = busy.shape[1]
+    got = np.frombuffer(b[off:off + nx * 4 * 3], dtype=_spherex._FITS_DTYPE[bitpix])
+    np.testing.assert_array_equal(got.reshape(3, nx), var[:3])
+    # and the first file still reads right from the same cache
+    _, offs_a = _spherex._hdu_offsets(_BytesReader(a), key.format("a"))
+    with fits.open(io.BytesIO(a)) as h:
+        var_a = np.asarray(h["VARIANCE"].data)
+    off, bitpix, _ = offs_a["VARIANCE"]
+    got = np.frombuffer(a[off:off + nx * 4 * 3], dtype=_spherex._FITS_DTYPE[bitpix])
+    np.testing.assert_array_equal(got.reshape(3, nx), var_a[:3])
