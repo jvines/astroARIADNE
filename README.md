@@ -726,6 +726,44 @@ Examples of those figures:
 ![Corner plot](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/CORNER.png)
 ![Histogram example](https://raw.githubusercontent.com/jvines/astroARIADNE/master/img/rad.png)
 
+### Predicted photometry (`synthetic_*.dat`)
+
+Every fit writes the best-fit SED's predicted photometry in all of ARIADNE's
+bands, so you can read off a magnitude your star lacks (a missing G, K, W1...):
+
+- `synthetic_magnitudes.dat`: `Filter  wavelength_um  mag  mag_err  flux_erg_cm2_s_um  flux_err  observed`
+  (magnitudes in each band's native Vega/AB system; `observed=1` marks bands
+  used in the fit, `observed=0` are predictions).
+- `synthetic_fluxes.dat`: the same observed-frame fluxes (erg s⁻¹ cm⁻² µm⁻¹).
+
+The values and 1σ errors come from pushing up to 3000 posterior draws through
+the forward model (distance/radius/extinction-scaled) on the BT-Settl grid, and
+are also stored in the output pickle as `out['synthetic_photometry']`. For white
+dwarfs and hot subdwarfs the BT-Settl photosphere is only a rough proxy.
+
+To predict other filters set `Fitter.synthetic_filters`:
+
+```python
+import numpy as np
+fitter.synthetic_filters = [
+    'GROUND_JOHNSON_V',                               # any pyphot library filter
+    ('my_band', wavelength_um, transmission),         # photon-counting detector
+    ('my_bolometer', wavelength_um, transmission, 'energy'),
+]
+```
+
+Entries may also be `pyphot.Filter` objects. ARIADNE grid bands are read from
+the band grid; every other filter is convolved once against all BT-Settl node
+spectra of the spectra cache (`fetch_spectra_cache()`; if it is missing those
+filters are skipped with a single warning) and propagated through the same
+posterior draws, so the errors are consistent. A filter whose central 98 %
+transmission the cached spectra do not span comes out as NaN. Results are
+appended to the two files above (`observed=0`, Vega magnitudes) and written to
+`synthetic_user_filters.dat` with columns `filter, wavelength_um, flux,
+flux_err, mag_vega, mag_vega_err, mag_ab, mag_ab_err, source`, where `source`
+is `grid` or `spectra_cache`; `out['synthetic_user_filters']` holds the same
+numbers in the pickle.
+
 ### Photometry quality control
 
 The raw SED plot doubles as a quality-control diagnostic. ARIADNE fits a
