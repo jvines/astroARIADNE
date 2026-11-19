@@ -66,7 +66,7 @@ C_UM = 2.99792458e14
 # CAL_WCS_VERSION changes, it sets the wavelengths. v4 moved from QR2 to DR1/QR3
 # data and the cal-swcs-v5 CWAVE (+0.006 um against v4 at 4.7 um). Old versions
 # are left in place -- ignored, not deleted -- so their results stay reproducible.
-CACHE_VERSION = 'v4'
+CACHE_VERSION = 'v5'   # v5: VARIANCE placed per file when FLAGS is compressed
 CACHE_DIR = os.path.join(os.path.expanduser('~'), '.astroARIADNE', 'spherex',
                          CACHE_VERSION)
 # Withheld until the raw grid reconvolution covers them at warm nodes (the
@@ -355,7 +355,7 @@ NB_MAX = 20               # at most this many fitted neighbours (brightest contr
 CORE_PX = 2.0             # each fitted neighbour's core (px) joins the fit pixels
 NB_SIGMA = 3.0            # arcsec: Gaussian edge of the aperture in the contamination prediction
 PSF_CACHE_DIR = os.path.join(os.path.expanduser('~'), '.astroARIADNE', 'spherex',
-                             'psf-v2')   # v2: DR1/QR3 data, cal-swcs-v5 (see CACHE_VERSION)
+                             'psf-v3')   # v2: DR1/QR3 data, cal-swcs-v5; v3: VARIANCE offset fix (see CACHE_VERSION)
 
 
 def _epsf_version(det):
@@ -865,6 +865,25 @@ def _decode_tile_rows(reader, key, z, desc_buf):
     return out
 
 
+def _headers_at(reader, key, offsets, nblk=12):
+    """Several FITS headers in ONE request (multi-range where the host does it):
+    ``[(Header, data_offset), ...]``, or None if any lacks an END card within
+    ``nblk`` blocks (the caller then walks with :func:`_header_at`)."""
+    from astropy.io import fits
+    want = nblk * _BLOCK
+    bufs = reader.get(key, [(o, o + want - 1) for o in offsets])
+    out = []
+    for off, raw in zip(offsets, bufs):
+        for i in range(0, len(raw), 80):
+            if raw[i:i + 8] == b"END     ":
+                n = ((i + 80 + _BLOCK - 1) // _BLOCK) * _BLOCK
+                out.append((fits.Header.fromstring(raw[:n].decode("ascii")), off + n))
+                break
+        else:
+            return None
+    return out
+
+
 def _hdu_offsets(reader, key):
     """`{EXTNAME: data_offset}` for IMAGE / FLAGS / VARIANCE, plus the IMAGE
     header. One round trip when the variant's layout is already known."""
@@ -876,9 +895,30 @@ def _hdu_offsets(reader, key):
     with _LAYOUT_LOCK:
         known = _LAYOUTS.get(v)
     if known is not None:
-        ih, iend = _header_at(reader, key, known["image_hdr"])
-        if iend == known["IMAGE"][0]:             # layout still valid
-            return ih, known
+        if known["FLAGS"][2] is None:
+            ih, iend = _header_at(reader, key, known["image_hdr"])
+            if iend == known["IMAGE"][0]:         # layout still valid
+                return ih, known
+        else:
+            # A compressed FLAGS plane's heap (PCOUNT) is a per-FILE size, so
+            # everything after it -- the VARIANCE plane -- moves from file to
+            # file within one variant: measured on DR1, three D3 files of one
+            # l2b-v27 variant put VARIANCE at 28376640 / 28221120 / 28108800.
+            # Reusing the first file's offset reads every later file's
+            # variance from the wrong bytes (invisible to the aperture flux,
+            # which never reads it; fatal to the inverse-variance ePSF fit).
+            # The FLAGS header sits at a fixed offset, so it rides in the same
+            # request as the IMAGE header: still one round trip on IRSA.
+            got = _headers_at(reader, key, [known["image_hdr"], known["flags_hdr"]])
+            if got is not None:
+                (ih, iend), (fh, fend) = got
+                if iend == known["IMAGE"][0] and fend == known["FLAGS"][0]:
+                    offs = dict(known)
+                    offs["FLAGS"] = (fend, fh["BITPIX"], _tile_layout(fh, fend))
+                    vstart = fend + _data_span(fh)
+                    offs["VARIANCE"] = (vstart + known["var_hdr_len"],
+                                        known["VARIANCE"][1], known["VARIANCE"][2])
+                    return ih, offs
     prim, doff = _header_at(reader, key, 0)
     image_hdr = doff + _data_span(prim)
     ih, ioff = _header_at(reader, key, image_hdr)
@@ -892,7 +932,12 @@ def _hdu_offsets(reader, key):
     o = ioff + _data_span(ih)
     for _ in range(4):
         hh, dd = _header_at(reader, key, o)
-        offs[hh.get("EXTNAME", "?")] = (dd, hh["BITPIX"], _tile_layout(hh, dd))
+        name = hh.get("EXTNAME", "?")
+        offs[name] = (dd, hh["BITPIX"], _tile_layout(hh, dd))
+        if name == "FLAGS":
+            offs["flags_hdr"] = o
+        elif name == "VARIANCE":
+            offs["var_hdr_len"] = dd - o          # header bytes, fixed per variant
         o = dd + _data_span(hh)
         if {"FLAGS", "VARIANCE"} <= set(offs):
             break

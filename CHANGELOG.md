@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     NetCDF file.
 
 ### Fixed
+- **SPHEREx VARIANCE plane read from the wrong bytes in all but the first
+  exposure of a layout variant.** The tile-compressed FLAGS heap varies in
+  size per file (three D3 files of one l2b-v27 variant put VARIANCE at
+  28376640 / 28221120 / 28108800 B), but the cached layout only re-checked the
+  IMAGE offset. Aperture fluxes never read VARIANCE and are unaffected;
+  aperture errors and the variance-weighted ePSF fit were wrong (up to 8.5%
+  per exposure on TIC-275647095) and depended on run order. A cached layout
+  with compressed FLAGS now re-reads the FLAGS header in the same request as
+  the IMAGE header (still one round trip) and places VARIANCE after that
+  file's own heap. The SPHEREx cache moves to `v5` and the PSF cache to
+  `psf-v3`, so previously cached stars re-extract.
 - **SPHEREx super-bands are now checked for Gaia neighbours inside the
   extraction aperture (#55).** The blend QC skipped SPHEREx, yet the bands
   are our own 3-px (18.45") aperture photometry and nothing in the aperture
