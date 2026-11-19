@@ -305,6 +305,7 @@ class Star:
         # Get max Av
         if Av is None:
             self.Av_e = None
+            self.Av_source = 'dustmap'
             # A 2-parameter Gaia source has no distance (self.dist == -1). A
             # negative distance breaks the SkyCoord, and a 3D map (Bayestar)
             # cannot be sampled without one, so fall back to the 2D SFD map --
@@ -334,8 +335,13 @@ class Star:
                     ebv = dmap(coords)
                     self.Av = ebv * 3.1
         else:
+            # Av_e = 0 means Av is known exactly: the fitter pins it.
+            if Av_e is not None and not Av_e >= 0:
+                InputError(f'Av_e must be >= 0 (got {Av_e}). Use Av_e=0 '
+                           'to fix Av at the given value.').__raise__()
             self.Av = Av
             self.Av_e = Av_e
+            self.Av_source = 'user'
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags, self.mag_errs, self.filter_names)
@@ -573,6 +579,7 @@ class Star:
             getattr(self, 'spectroscopic_params', None), default=str)
         f.rave_params = json.dumps(getattr(self, 'rave_params', None),
                                    default=str)
+        f.Av_source = str(getattr(self, 'Av_source', 'dustmap'))
         f.n_xp_filled = int(len(xp))
         f.createDimension('filter', len(names))
         f.createDimension('nchar', char.shape[1])
@@ -620,6 +627,8 @@ class Star:
                 ('ra', 'dec', 'plx', 'plx_e', 'dist', 'dist_e', 'rad', 'rad_e',
                  'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e', 'ruwe')}
         starname = _attr('starname')
+        # Files written before Av_source existed: the old label, 'dustmap'.
+        av_source = _attr('Av_source', 'dustmap')
         ids = json.loads(_attr('ids', '{}'))
         spec = json.loads(_attr('spectroscopic_params', 'null'))
         rave = json.loads(_attr('rave_params', 'null'))
@@ -644,6 +653,7 @@ class Star:
         star.dist, star.dist_e = meta['dist'], meta['dist_e']
         star.ruwe = meta['ruwe']
         star.Av_e = meta['Av_e']
+        star.Av_source = av_source
         star.tic = ids.get('tic')
         star.kic = ids.get('kic')
         star.spectroscopic_params = spec
