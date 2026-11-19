@@ -25,6 +25,12 @@ from astroquery.xmatch import XMatch
 from regions import CircleSkyRegion
 
 from . import _cds
+from ._contamination import (
+    CONTAMINATION_EXCLUDE,
+    CONTAMINATION_FLAG,
+    ContaminationMixin,
+    xmatch_select,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -500,7 +506,7 @@ _PLX_SYS_ERR = 0.02  # systematic floor (mas), added in quadrature
 # ── Librarian ────────────────────────────────────────────────────
 
 
-class Librarian:
+class Librarian(ContaminationMixin):
     """Automated photometry and astrometry retrieval for isochrone fitting.
 
     Uses Gaia DR3 best_neighbour tables for catalog crossmatching,
@@ -518,6 +524,15 @@ class Librarian:
         Catalog names to skip (e.g. ["SDSS", "APASS"]).
     verbose : bool
         Print retrieval summary.
+    contamination_qc : bool
+        Gaia-based blend QC (issue #55): drop the 2MASS/AllWISE bands when
+        their Gaia best-neighbour match is shared with other Gaia sources
+        (``number_of_mates > 0``), and estimate per band the flux leaked by
+        unresolved Gaia neighbours inside the catalogue PSF. ``False``
+        switches both checks off.
+    contamination_flag, contamination_exclude : float
+        Fractional contaminating flux c above which a band is flagged /
+        removed from the fit (defaults 0.01 / 0.05; see ``_contamination``).
     """
 
     def __init__(
@@ -534,6 +549,9 @@ class Librarian:
         hypatia_uncertainty: str = "std",
         hypatia_solarnorm: str = "asplund09",
         feh_floor: float = 0.10,
+        contamination_qc: bool = True,
+        contamination_flag: float = CONTAMINATION_FLAG,
+        contamination_exclude: float = CONTAMINATION_EXCLUDE,
     ):
         self.ra = ra
         self.dec = dec
@@ -548,6 +566,10 @@ class Librarian:
         self._hypatia_uncertainty = hypatia_uncertainty
         self._hypatia_solarnorm = hypatia_solarnorm
         self._feh_floor = feh_floor
+        self._init_contamination(contamination_qc, contamination_flag,
+                                 contamination_exclude)
+        self._gaia_ra: float | None = None
+        self._gaia_dec: float | None = None
 
         self._magnitudes: dict[str, tuple[float, float]] = {}
         self._gaia_id: int | None = gaia_id
@@ -633,6 +655,11 @@ class Librarian:
             ap = _esa_gaia_flame(self._gaia_id) or None
         else:
             ap = ap_cats[0][0] if len(ap_cats) and len(ap_cats[0]) else None
+
+        # Gaia-epoch position: centres the neighbour cone of the contamination QC
+        ra_g, dec_g = _col(main, "RA_ICRS"), _col(main, "DE_ICRS")
+        if ra_g is not None and dec_g is not None:
+            self._gaia_ra, self._gaia_dec = float(ra_g), float(dec_g)
 
         # Parallax (Lindegren+21 correction)
         plx = _col(main, "Plx")
@@ -733,8 +760,10 @@ class Librarian:
                 xmatch_needed.append(cat_name)
                 continue
 
+            # number_of_mates / number_of_neighbours ride on the same query
+            # (cross-match uniqueness, issue #55).
             query = (
-                f"SELECT xmatch.original_ext_source_id "
+                f"SELECT {xmatch_select(cat_name)} "
                 f"FROM gaiadr3.{cat_def.xmatch_table}_best_neighbour AS xmatch "
                 f"WHERE xmatch.source_id = {int(self._gaia_id)}"
             )
@@ -746,6 +775,7 @@ class Librarian:
                 self._ids[cat_name] = None
             elif len(result) > 0:
                 self._ids[cat_name] = result[0][0]
+                self._note_crossmatch(cat_name, result)
             else:
                 self._ids[cat_name] = None
                 logger.info("No %s crossmatch for Gaia %d", cat_name, self._gaia_id)
@@ -754,6 +784,11 @@ class Librarian:
             logger.warning(
                 "Gaia TAP down, falling back to VizieR XMatch for: %s", xmatch_needed
             )
+            if self._contamination_qc:
+                logger.warning(
+                    "Cross-match uniqueness (number_of_mates) NOT checked for "
+                    "%s: the ESA best-neighbour tables are unreachable.",
+                    xmatch_needed)
             self._xmatch_fallback(xmatch_needed)
 
     def _xmatch_fallback(self, catalogs_needed):
@@ -817,7 +852,7 @@ class Librarian:
                         err_v = _col(row, band.err_col)
                         if _qc_mag(mag_v, err_v):
                             err_f = float(err_v) if err_v is not None else 0.02
-                            self._add_mag(band.pyphot, float(mag_v), err_f)
+                            self._add_mag(band.pyphot, float(mag_v), err_f, src="APASS")
                     continue
 
                 # Tycho-2: composite TYC1-TYC2-TYC3 ID
@@ -900,6 +935,8 @@ class Librarian:
             ext_id = self._ids.get(cat_name)
             if ext_id is None:
                 continue
+            if cat_name in self._mates_dropped:
+                continue
             self._fetch_standard(cat_name, _CATALOGS[cat_name], cats, ext_id)
 
         if "TESS" not in self._ignore:
@@ -914,6 +951,13 @@ class Librarian:
             self._fetch_mermilliod()
         if "STROMGREN" not in self._ignore:
             self._fetch_stromgren()
+
+        # Unresolved-neighbour flux contamination (issue #55), per band.
+        self._apply_contamination_qc()
+
+    def _run_adql(self, adql):
+        """ESA archive query for the contamination cone (None on failure)."""
+        return _esa_table(adql)
 
     def _fetch_standard(self, cat_name, cat_def, cats, ext_id):
         """Fetch photometry from VizieR results, filtered by crossmatched ID."""
@@ -1067,7 +1111,7 @@ class Librarian:
             err_v = _col(row, band.err_col)
             if _qc_mag(mag_v, err_v):
                 err_f = float(err_v) if err_v is not None else 0.02
-                self._add_mag(band.pyphot, float(mag_v), err_f)
+                self._add_mag(band.pyphot, float(mag_v), err_f, src="APASS")
 
     def _fetch_skymapper(self):
         """Query SkyMapper DR2 via SkyMapper TAP service."""
@@ -1590,10 +1634,15 @@ class Librarian:
             if err <= 0:
                 self._magnitudes[band] = (mag, imputed)
 
-    def _add_mag(self, pyphot_name, mag, err):
+    def _add_mag(self, pyphot_name, mag, err, src=None):
         """Add magnitude. First-write-wins (catalog priority by query order)."""
+        # ``src`` names the catalogue where it matters for the contamination
+        # PSF lookup (SDSS_g/r/i are also APASS bands); recorded only for the
+        # write that wins.
         if pyphot_name not in self._magnitudes:
             self._magnitudes[pyphot_name] = (mag, err)
+            if src:
+                self._band_src = {**self._band_src, pyphot_name: src}
 
     def _print_summary(self):
         import random
@@ -1620,6 +1669,8 @@ class Librarian:
         for band in bands:
             mag, err = self._magnitudes[band]
             print(colored(f"{t2}{band:^20s}\t{mag: ^9.4f}\t{err: ^11.4f}", c))
+        for line in self._contamination_summary_lines():
+            print(colored(f"{t2}{line}", "red"))
 
         # Stellar params — new color (matching ARIADNE's display_star_fin)
         c = random.choice(['red', 'green', 'blue', 'yellow', 'grey', 'magenta', 'cyan', 'white'])
@@ -1705,6 +1756,17 @@ class Librarian:
     def magnitudes(self) -> dict[str, tuple[float, float]]:
         """{'pyphot_filter_name': (mag, error)}."""
         return dict(self._magnitudes)
+
+    @property
+    def contamination(self) -> dict:
+        """{band: {c, status, fwhm, neighbours}} from the Gaia neighbour
+        check; bands without a PSF entry (and Gaia's own) are absent."""
+        return {b: dict(r) for b, r in self._contamination.items()}
+
+    @property
+    def xmatch_flags(self) -> dict:
+        """{catalogue: {number_of_mates, number_of_neighbours, status}}."""
+        return {c: dict(r) for c, r in self._xmatch_flags.items()}
 
     @property
     def gaia_id(self) -> int | None:
