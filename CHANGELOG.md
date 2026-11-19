@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nearer than ~225 pc x (R / R_sun) against the bound and returning a wrong
   Teff and radius with no warning (#90). With a distance, the ceiling is
   now (100.05 R_sun / D_min)^2, D_min = D - 5 sigma floored at 1 pc.
+- **Fits whose posterior is railed against a prior bound now warn.** A
+  parameter is flagged when its 3-sigma interval runs into a finite prior
+  bound (the gap is under 1% of the interval's width); prior-dominated
+  posteriors and zero floors are not flagged. Previously nothing warned.
+- **The default `norm` ceiling without a distance is 1e-16** (was 1e-20),
+  which covers a 1 R_sun star out to ~2 pc.
+- **`show_priors` prints very small or large bounds in scientific
+  notation;** `U(0, 1e-20)` used to print as `U(0.00, 0.00)`.
 
 ## [2.0.0] - 2026-05-31
 
