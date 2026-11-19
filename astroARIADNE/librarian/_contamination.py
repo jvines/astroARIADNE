@@ -79,12 +79,24 @@ PSF_FWHM_ARCSEC: dict[str, float] = {
 }
 
 
-def band_fwhm(pyphot_name: str) -> float | None:
+# (catalogue, band) overrides of the band-only table above.
+PSF_FWHM_BY_CATALOGUE: dict[tuple[str, str], float] = {
+    ("APASS", "SDSS_g"): 5.0, ("APASS", "SDSS_r"): 5.0,
+    ("APASS", "SDSS_i"): 5.0,
+}
+
+
+def band_fwhm(pyphot_name: str, catalogue: str | None = None) -> float | None:
     """PSF FWHM (arcsec) for a band, or None when the band is not checked.
 
+    The lookup is keyed on (catalogue, band) first, then on the band alone.
     SDSS_g/r/i double as APASS bands in the librarian (first write wins), so
-    they get the SDSS value; an APASS-sourced SDSS_* band is then under-checked.
+    an APASS-sourced SDSS_g is checked with the APASS PSF.
     """
+    if catalogue is not None:
+        v = PSF_FWHM_BY_CATALOGUE.get((catalogue, pyphot_name))
+        if v is not None:
+            return v
     return PSF_FWHM_ARCSEC.get(pyphot_name)
 
 
@@ -153,7 +165,7 @@ def classify(c, flag=CONTAMINATION_FLAG, exclude=CONTAMINATION_EXCLUDE):
     return "ok"
 
 
-def assess_bands(bands, g_target, neighbours, *,
+def assess_bands(bands, g_target, neighbours, *, sources=None,
                  flag=CONTAMINATION_FLAG, exclude=CONTAMINATION_EXCLUDE):
     """Contamination record for every band that has a PSF entry.
 
@@ -166,7 +178,7 @@ def assess_bands(bands, g_target, neighbours, *,
     if g_target is None:
         return out
     for band in bands:
-        fwhm = band_fwhm(band)
+        fwhm = band_fwhm(band, (sources or {}).get(band))
         if fwhm is None:
             continue
         c, terms = contamination_fraction(g_target, neighbours, fwhm)
@@ -243,6 +255,7 @@ class ContaminationMixin:
     _contamination: dict = {}
     _xmatch_flags: dict = {}
     _mates_dropped: frozenset = frozenset()
+    _band_src: dict = {}   # band -> catalogue, where the PSF depends on it
     _gaia_ra = None
     _gaia_dec = None
 
@@ -318,7 +331,8 @@ class ContaminationMixin:
         """
         if not self._contamination_qc or self._gaia_id is None:
             return
-        checkable = [b for b in self._magnitudes if band_fwhm(b) is not None]
+        checkable = [b for b in self._magnitudes
+                     if band_fwhm(b, self._band_src.get(b)) is not None]
         if not checkable:
             return
         tbl = self._run_adql(self._gaia_cone_adql())
@@ -336,7 +350,7 @@ class ContaminationMixin:
                 "cone: flux contamination NOT checked; all bands kept.",
                 self._gaia_id, CONE_RADIUS_ARCSEC)
             return
-        recs = assess_bands(checkable, g_t, nbrs,
+        recs = assess_bands(checkable, g_t, nbrs, sources=self._band_src,
                             flag=self._contamination_flag,
                             exclude=self._contamination_exclude)
         self._contamination = recs
