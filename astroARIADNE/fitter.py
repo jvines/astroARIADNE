@@ -52,6 +52,58 @@ except ModuleNotFoundError:
 set_start_method('fork', force=True)
 
 
+_BOUND_CHECKED = ('teff', 'logg', 'z', 'dist', 'rad', 'norm', 'Av')
+
+
+def _prior_bound_flags(samples, priors, frac=0.01):
+    """Parameters whose posterior is truncated by a finite prior bound.
+
+    A parameter is flagged when the gap between the upper (lower) prior
+    bound and the 99.85th (0.15th) percentile, the edge of the 3-sigma
+    interval, is less than ``frac`` of that interval's width: the posterior
+    runs into the wall instead of tailing off before it. Posteriors wider
+    than half the prior are prior-dominated and skipped. The prior span is
+    no yardstick, as it is orders of magnitude wider than the posterior for
+    rad or norm. A lower bound at exactly zero is a physical floor (Av,
+    norm, dist), not a truncation, and is not checked. Only frozen scipy
+    priors have a known support; spline priors are skipped.
+    """
+    flags = []
+    for p in _BOUND_CHECKED:
+        prior, s = priors.get(p), samples.get(p)
+        if prior is None or s is None or not hasattr(prior, 'support'):
+            continue
+        s = np.asarray(s, dtype=float).ravel()
+        s = s[np.isfinite(s)]
+        if s.size < 2:
+            continue
+        try:
+            lo, hi = (float(b) for b in prior.support())
+        except Exception:
+            continue
+        q_lo, q_hi = np.percentile(s, [0.15, 99.85])
+        span = q_hi - q_lo
+        # A posterior that fills its prior (an unconstrained logg) is
+        # prior-dominated, not railed.
+        if span <= 0 or span > 0.5 * (hi - lo):
+            continue
+        if np.isfinite(hi) and q_hi >= hi - frac * span:
+            flags.append({'param': p, 'edge': 'upper', 'quantile': q_hi,
+                          'bound': hi})
+        if np.isfinite(lo) and lo != 0 and q_lo <= lo + frac * span:
+            flags.append({'param': p, 'edge': 'lower', 'quantile': q_lo,
+                          'bound': lo})
+    return flags
+
+
+def _prior_flag_message(f):
+    pct = '99.85' if f['edge'] == 'upper' else '0.15'
+    return (f"{f['param']} posterior truncated by the {f['edge']} prior "
+            f"bound ({pct}th percentile {f['quantile']:.4g}, bound "
+            f"{f['bound']:.4g}): the fit and everything derived from it "
+            f"may be biased. Widen the prior via prior_setup.")
+
+
 class Fitter:
     """The Fitter class handles the fitting routines and parameter estimation.
 
@@ -603,14 +655,15 @@ class Fitter:
             # every star nearer than ~225 pc * (R / R_sun) against the bound.
             # With a distance, scale the ceiling to the rad prior's upper
             # end, 100.05 R_sun, at the nearest plausible distance
-            # (D - 5 sigma, floored at 1 pc).
+            # (D - 5 sigma, floored at 1 pc). Without one, 1e-16 still covers
+            # a 1 R_sun star out to ~2 pc.
             if self.star.dist != -1:
                 d_min = max(self.star.dist - 5 * self.star.dist_e, 1.)
                 up = (100.05 * u.solRad.to(u.pc) / d_min) ** 2
                 defaults['norm'] = st.uniform(loc=0, scale=up)
                 self.prior_sources['norm'] = 'uniform_distance'
             else:
-                defaults['norm'] = st.uniform(loc=0, scale=1e-20)
+                defaults['norm'] = st.uniform(loc=0, scale=1e-16)
                 self.prior_sources['norm'] = 'uniform_default'
         # Extinction prior setup.
         if self.star.Av == 0.:
@@ -823,17 +876,23 @@ class Fitter:
                 return args[idx]
             return default
 
+        def _num(x, d=2):
+            # Fixed point hides norm-sized values (1e-20 -> "0.00").
+            if x != 0 and (abs(x) < 1e-3 or abs(x) >= 1e6):
+                return f"{x:.{d}e}"
+            return f"{x:.{d}f}"
+
         try:
             if 'norm_gen' in inner_name and 'truncnorm' not in inner_name:
                 mu = _pop('loc', 0)
                 sigma = _pop('scale', 1, 1.0)
-                return f"N({mu:.3f}, {sigma:.3f})"
+                return f"N({_num(mu, 3)}, {_num(sigma, 3)})"
 
             if 'uniform_gen' in inner_name:
                 a = _pop('loc', 0)
                 scale = _pop('scale', 1, 1.0)
                 b = a + scale
-                return f"U({a:.2f}, {b:.2f})"
+                return f"U({_num(a)}, {_num(b)})"
 
             if 'truncnorm_gen' in inner_name:
                 a_std = _pop('a', 0)
@@ -842,9 +901,9 @@ class Fitter:
                 sigma = _pop('scale', 3, 1.0)
                 a_act = mu + a_std * sigma
                 b_act = mu + b_std * sigma
-                a_str = "-inf" if a_std < -1e10 else f"{a_act:.2f}"
-                b_str = "inf" if b_std > 1e10 else f"{b_act:.2f}"
-                return f"TN({mu:.2f}, {sigma:.2f}, [{a_str}, {b_str}])"
+                a_str = "-inf" if a_std < -1e10 else _num(a_act)
+                b_str = "inf" if b_std > 1e10 else _num(b_act)
+                return f"TN({_num(mu)}, {_num(sigma)}, [{a_str}, {b_str}])"
 
             return inner_name
 
@@ -1166,6 +1225,13 @@ class Fitter:
             out['posterior_samples']['loglike'][i] = log_likelihood(
                 theta, flux, flux_er, wave, filts, interpolator, self.norm,
                 av_law)
+
+        # A posterior railed against a prior bound looks like a normal fit;
+        # say so.
+        out['prior_flags'] = _prior_bound_flags(
+            out['posterior_samples'], getattr(self, 'priors', None) or {})
+        for f_ in out['prior_flags']:
+            warnings.warn(_prior_flag_message(f_), stacklevel=2)
 
         # Best fit
         # The logic is as follows:
