@@ -20,7 +20,7 @@ from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands)
 from .isochrone import estimate
 from .librarian import Librarian
 from .librarian._adapter import adapt_librarian
-from .error import StarWarning
+from .error import StarWarning, InputError
 from .phot_utils import *
 from .utils import (display_star_fin, display_star_init)
 
@@ -282,7 +282,8 @@ class Star:
         # Get max Av
         if Av is None:
             self.Av_e = None
-            dmap = self.dustmaps[dustmap]()
+            self.Av_source = 'dustmap'
+            dmap =self.dustmaps[dustmap]()
             coords = SkyCoord(self.ra, self.dec, distance=self.dist,
                               unit=(u.deg, u.deg, u.pc), frame='icrs')
             if dustmap in ['SFD', 'Lenz']:
@@ -302,8 +303,13 @@ class Star:
                 ebv = dmap(coords)
                 self.Av = ebv * 3.1
         else:
+            # Av_e = 0 means Av is known exactly: the fitter pins it.
+            if Av_e is not None and not Av_e >= 0:
+                InputError(f'Av_e must be >= 0 (got {Av_e}). Use Av_e=0 '
+                           'to fix Av at the given value.').__raise__()
             self.Av = Av
             self.Av_e = Av_e
+            self.Av_source = 'user'
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags, self.mag_errs, self.filter_names)
