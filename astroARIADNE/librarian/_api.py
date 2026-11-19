@@ -852,7 +852,7 @@ class Librarian(ContaminationMixin):
                         err_v = _col(row, band.err_col)
                         if _qc_mag(mag_v, err_v):
                             err_f = float(err_v) if err_v is not None else 0.02
-                            self._add_mag(band.pyphot, float(mag_v), err_f)
+                            self._add_mag(band.pyphot, float(mag_v), err_f, src="APASS")
                     continue
 
                 # Tycho-2: composite TYC1-TYC2-TYC3 ID
@@ -1111,7 +1111,7 @@ class Librarian(ContaminationMixin):
             err_v = _col(row, band.err_col)
             if _qc_mag(mag_v, err_v):
                 err_f = float(err_v) if err_v is not None else 0.02
-                self._add_mag(band.pyphot, float(mag_v), err_f)
+                self._add_mag(band.pyphot, float(mag_v), err_f, src="APASS")
 
     def _fetch_skymapper(self):
         """Query SkyMapper DR2 via SkyMapper TAP service."""
@@ -1634,10 +1634,15 @@ class Librarian(ContaminationMixin):
             if err <= 0:
                 self._magnitudes[band] = (mag, imputed)
 
-    def _add_mag(self, pyphot_name, mag, err):
+    def _add_mag(self, pyphot_name, mag, err, src=None):
         """Add magnitude. First-write-wins (catalog priority by query order)."""
+        # ``src`` names the catalogue where it matters for the contamination
+        # PSF lookup (SDSS_g/r/i are also APASS bands); recorded only for the
+        # write that wins.
         if pyphot_name not in self._magnitudes:
             self._magnitudes[pyphot_name] = (mag, err)
+            if src:
+                self._band_src = {**self._band_src, pyphot_name: src}
 
     def _print_summary(self):
         import random

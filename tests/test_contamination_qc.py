@@ -302,3 +302,36 @@ def test_cone_adql_is_centred_on_gaia_position():
     lib._gaia_ra, lib._gaia_dec = 101.5, -2.25
     q = lib._gaia_cone_adql()
     assert "101.50000000" in q and "-2.25000000" in q and "CONTAINS" in q
+
+
+# ── provenance: APASS-sourced SDSS bands use the APASS PSF ───────────────────
+
+def test_band_fwhm_catalogue_key_with_band_only_fallback():
+    assert cq.band_fwhm("SDSS_g") == 1.4
+    assert cq.band_fwhm("SDSS_g", "SDSS") == 1.4
+    assert cq.band_fwhm("SDSS_g", "APASS") == 5.0
+    assert cq.band_fwhm("WISE_RSR_W1", "Wise") == 6.1
+
+
+def test_add_mag_records_source_of_the_winning_write_only():
+    lib = _lib()
+    lib._add_mag("SDSS_g", 12.0, 0.02, src="APASS")
+    lib._add_mag("SDSS_g", 12.5, 0.02)          # loses: first write wins
+    lib._add_mag("SDSS_r", 12.0, 0.02)          # SDSS-sourced: no entry
+    assert lib._band_src == {"SDSS_g": "APASS"}
+    assert lib._magnitudes["SDSS_g"][0] == 12.0
+
+
+def test_apass_sourced_sdss_g_checked_with_apass_psf():
+    # neighbour 4" away, 1 mag fainter: negligible in a 1.4" PSF, large in 5"
+    cone = _cone([(TARGET, 0, 0, 10.0), (5, 4, 0, 11.0)])
+    out = {}
+    for src in (None, "APASS"):
+        lib = _lib()
+        lib._add_mag("SDSS_g", 12.0, 0.02, src=src)
+        lib._run_adql = lambda adql: cone
+        lib._apply_contamination_qc()
+        out[src] = lib.contamination["SDSS_g"]
+    assert out[None]["status"] == "ok" and out[None]["fwhm"] == 1.4
+    assert out["APASS"]["fwhm"] == 5.0
+    assert out["APASS"]["status"] == "exclude"
