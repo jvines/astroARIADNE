@@ -16,7 +16,8 @@ from termcolor import colored
 
 from scipy.constants import h as _h, c as _c, k as _k
 
-from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands)
+from .config import (gridsdir, filter_names, colors, iso_mask, iso_bands,
+                     irx_bands)
 from .isochrone import estimate
 from .librarian import Librarian
 from .librarian._adapter import adapt_librarian
@@ -89,6 +90,14 @@ class Star:
         those in the filter_names attribute) and with a tuple containing the
         magnitude and error for that filter as the value. Provide in case no
         internet connection is available.
+    mag_system: dictionary, optional
+        Magnitude system of bands that are not in their default system, as
+        {filter_name: 'Vega' | 'AB' | 'ST'}. By default PanSTARRS, SDSS, GALEX
+        and SkyMapper are AB and every other band, HST included, is Vega. HST
+        photometry is published in VEGAMAG, ABMAG or STMAG depending on the
+        source (the Hubble Source Catalog is ABMAG), so set it for HST bands
+        whenever they are not VEGAMAG, e.g.
+        ``mag_system={'HST_WFC3_F275W': 'AB'}``.
     offline: bool
         If False it overrides the coordinate search entirely.
     verbose: bool, optional
@@ -147,11 +156,12 @@ class Star:
                  offline=False, mag_dict=None, verbose=True, ignore=None,
                  dustmap='SFD',
                  contamination_qc=True, contamination_flag=None,
-                 contamination_exclude=None):
+                 contamination_exclude=None, mag_system=None):
         """See class docstring."""
         # MISC
         self.verbose = verbose
         self.offline = offline
+        self.mag_system = self._check_mag_system(mag_system)
 
         # Star stuff
         self.starname = starname
@@ -332,7 +342,8 @@ class Star:
             self.Av_source = 'user'
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
-            self.mags, self.mag_errs, self.filter_names)
+            self.mags, self.mag_errs, self.filter_names,
+            getattr(self, 'mag_system', None))
 
         self.wave = np.zeros(self.filter_names.shape[0])
         self.flux = np.zeros(self.filter_names.shape[0])
@@ -509,12 +520,34 @@ class Star:
                     '{:.3f} +/- {:.3f}'.format(self.logg, self.logg_e), c)
             )
 
-    def add_mag(self, mag, err, filt):
-        """Add an individual photometry point to the SED."""
+    @staticmethod
+    def _check_mag_system(mag_system):
+        """Validate {band: system}; returns a normalized copy."""
+        out = {}
+        for band, system in (mag_system or {}).items():
+            if band not in filter_names:
+                InputError(f'mag_system: unknown filter {band!r}; names must '
+                           'match Star.filter_names.').__raise__()
+            try:
+                out[band] = normalize_mag_system(system)
+            except ValueError as e:
+                InputError(f'mag_system[{band!r}]: {e}').__raise__()
+        return out
+
+    def add_mag(self, mag, err, filt, system=None):
+        """Add an individual photometry point to the SED.
+
+        ``system`` ('Vega', 'AB' or 'ST') is the magnitude system of ``mag``
+        when it is not the band's default (see ``mag_system``).
+        """
+        if system is not None:
+            if getattr(self, 'mag_system', None) is None:
+                self.mag_system = {}
+            self.mag_system.update(self._check_mag_system({filt: system}))
         mask = self.filter_names == filt
         self.mags[mask] = mag
         self.mag_errs[mask] = err
-        if filt not in self.filter_names[-5:]:
+        if filt not in irx_bands:
             self.used_filters[mask] = 1
             self.filter_mask = np.where(self.used_filters == 1)[0]
         else:
@@ -586,11 +619,8 @@ class Star:
         # Pre-compute per-filter zero-point fluxes (Vega or AB)
         f0_arr = np.empty(len(filt_names))
         for i, band in enumerate(filt_names):
-            if 'PS1_' in band or 'SDSS_' in band or 'GALEX_' in band:
-                leff = get_effective_wavelength(band)
-                f0_arr[i] = convert_f_nu_to_f_lambda(3.631e-20, leff)
-            else:
-                f0_arr[i] = get_zero_flux(band)
+            f0_arr[i] = zero_flux(
+                band, (getattr(self, 'mag_system', None) or {}).get(band))
 
         def _synth_mags(T):
             x = _h * _c / (lam_m * _k * np.maximum(T, 1.0))
@@ -673,7 +703,8 @@ class Star:
     def __reload_fluxes(self):
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
-            self.mags, self.mag_errs, self.filter_names)
+            self.mags, self.mag_errs, self.filter_names,
+            getattr(self, 'mag_system', None))
 
         self.wave = np.zeros(self.filter_names.shape[0])
         self.flux = np.zeros(self.filter_names.shape[0])

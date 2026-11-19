@@ -34,8 +34,28 @@ filter_names = np.array([
        'PS1_z', 'SDSS_z', 'SkyMapper_z', 'PS1_y', '2MASS_J', '2MASS_H',
        '2MASS_Ks', 'WISE_RSR_W1', 'SPITZER_IRAC_36', 'SPITZER_IRAC_45',
        'WISE_RSR_W2', 'WISE_RSR_W3', 'WISE_RSR_W4', 'HERSCHEL_PACS_BLUE',
-       'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED'
+       'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED',
+       # HST WFC3 (UVIS + IR) and ACS/WFC wide, medium, long-pass and
+       # extremely-wide filters. No catalogue feeds them: add HST photometry
+       # through mag_dict / add_mag. Magnitudes default to VEGAMAG; pass
+       # Star(mag_system={...}) for ABMAG or STMAG.
+       'HST_WFC3_F098M', 'HST_WFC3_F105W', 'HST_WFC3_F110W', 'HST_WFC3_F125W',
+       'HST_WFC3_F127M', 'HST_WFC3_F139M', 'HST_WFC3_F140W', 'HST_WFC3_F153M',
+       'HST_WFC3_F160W', 'HST_WFC3_F200LP', 'HST_WFC3_F218W', 'HST_WFC3_F225W',
+       'HST_WFC3_F275W', 'HST_WFC3_F300X', 'HST_WFC3_F336W', 'HST_WFC3_F350LP',
+       'HST_WFC3_F390M', 'HST_WFC3_F390W', 'HST_WFC3_F410M', 'HST_WFC3_F438W',
+       'HST_WFC3_F467M', 'HST_WFC3_F475W', 'HST_WFC3_F475X', 'HST_WFC3_F547M',
+       'HST_WFC3_F555W', 'HST_WFC3_F600LP', 'HST_WFC3_F606W', 'HST_WFC3_F621M',
+       'HST_WFC3_F625W', 'HST_WFC3_F689M', 'HST_WFC3_F763M', 'HST_WFC3_F775W',
+       'HST_WFC3_F814W', 'HST_WFC3_F845M', 'HST_WFC3_F850LP',
+       'HST_ACS_WFC_F435W', 'HST_ACS_WFC_F475W', 'HST_ACS_WFC_F550M',
+       'HST_ACS_WFC_F555W', 'HST_ACS_WFC_F606W', 'HST_ACS_WFC_F625W',
+       'HST_ACS_WFC_F775W', 'HST_ACS_WFC_F814W', 'HST_ACS_WFC_F850LP',
 ])
+
+# Bands add_mag routes to the IR-excess set instead of the fit.
+irx_bands = frozenset(['WISE_RSR_W3', 'WISE_RSR_W4', 'HERSCHEL_PACS_BLUE',
+                       'HERSCHEL_PACS_GREEN', 'HERSCHEL_PACS_RED'])
 
 # Native wavelength coverage (upper limit, in micron) of model grids whose
 # spectra do not span the full ARIADNE filter set. Photometry redder than the
@@ -66,7 +86,8 @@ iso_mask = np.array([
     0, 0, 0, 0, 1, 1,
     1, 1, 0, 0,
     1, 0, 0, 0,
-    0, 0
+    0, 0,
+    *([0] * 44),                # HST WFC3 + ACS/WFC (not isochrone bands)
 ])
 
 # Filter bands for isochrones.
