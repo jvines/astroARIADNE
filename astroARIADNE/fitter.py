@@ -2343,10 +2343,19 @@ class Fitter:
                 self.prior_sources['rad'] = 'uniform_default'
         # Normalization prior setup.
         else:
-            # up = 1 / 1e-30
-            # defaults['norm'] = st.truncnorm(a=0, b=up, loc=1e-20, scale=1e-10)
-            defaults['norm'] = st.uniform(loc=0, scale=1e-20)
-            self.prior_sources['norm'] = 'uniform_default'
+            # norm = (R / D)^2. A fixed 1e-20 ceiling (R/D < 1e-10) rails
+            # every star nearer than ~225 pc * (R / R_sun) against the bound.
+            # With a distance, scale the ceiling to the rad prior's upper
+            # end, 100.05 R_sun, at the nearest plausible distance
+            # (D - 5 sigma, floored at 1 pc).
+            if self.star.dist != -1:
+                d_min = max(self.star.dist - 5 * self.star.dist_e, 1.)
+                up = (100.05 * u.solRad.to(u.pc) / d_min) ** 2
+                defaults['norm'] = st.uniform(loc=0, scale=up)
+                self.prior_sources['norm'] = 'uniform_distance'
+            else:
+                defaults['norm'] = st.uniform(loc=0, scale=1e-20)
+                self.prior_sources['norm'] = 'uniform_default'
         # Extinction prior setup. Within the Local Bubble (~70 pc) extinction
         # is negligible and a free Av only absorbs blue model mismatch and
         # biases Teff hot, so the DEFAULT prior auto-pins Av=0 for d < 70 pc.
