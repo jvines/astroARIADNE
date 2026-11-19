@@ -818,8 +818,9 @@ class Librarian(ContaminationMixin):
         Gaia-based blend QC (issue #55): drop the 2MASS/AllWISE bands when
         their Gaia best-neighbour match is shared with other Gaia sources
         (``number_of_mates > 0``), and estimate per band the flux leaked by
-        unresolved Gaia neighbours inside the catalogue PSF. ``False``
-        switches both checks off.
+        unresolved Gaia neighbours inside the catalogue PSF (for SPHEREx,
+        inside our own 3-px extraction aperture). ``False`` switches the
+        checks off.
     contamination_flag, contamination_exclude : float
         Fractional contaminating flux c above which a band is flagged /
         removed from the fit (defaults 0.01 / 0.05; see ``_contamination``).
@@ -2636,7 +2637,11 @@ class Librarian(ContaminationMixin):
         for band, (mag, mag_e, n) in _spherex.superband_mags(lam, f, e).items():
             if band not in self._magnitudes:
                 self._add_mag(band, mag, mag_e)
-                added.append(f'{band}({n})')
+                added.append((band, n))
+        # Gaia neighbours inside the extraction aperture (issue #55, check 3).
+        removed = self._apply_spherex_contamination_qc(
+            [b for b, _ in added], method=meta.get('method', 'aperture'))
+        added = [f'{b}({n})' for b, n in added if b not in removed]
         self._spherex_added = added
         if added:
             rel = (meta.get('release') or 'cached').replace('spherex_', '').upper()
@@ -3181,8 +3186,10 @@ class Librarian(ContaminationMixin):
 
     @property
     def contamination(self) -> dict:
-        """{band: {c, status, fwhm, neighbours}} from the Gaia neighbour
-        check; bands without a PSF entry (and Gaia's own) are absent."""
+        """{band: {c, status, fwhm | aperture, neighbours}} from the Gaia
+        neighbour checks (SPHEREx records carry ``aperture``, the extraction
+        radius in arcsec, and may have status 'deblended'); bands without a
+        PSF entry (and Gaia's own) are absent."""
         return {b: dict(r) for b, r in self._contamination.items()}
 
     @property
