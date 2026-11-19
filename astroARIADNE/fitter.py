@@ -11,7 +11,7 @@ import time
 import warnings
 
 logger = logging.getLogger(__name__)
-from multiprocessing import (Pool, set_start_method)
+import multiprocessing as _mp
 from tqdm import tqdm
 
 import extinction
@@ -81,7 +81,16 @@ def _guard_dynesty_kmeans():
 
 _guard_dynesty_kmeans()
 
-set_start_method('fork', force=True)
+# Every Pool here hands its workers the photometry, priors and interpolator
+# through module globals set just before the Pool is created, so the workers
+# must be forked. Use a fork context rather than the process-wide start method:
+# set_start_method(force=True) at import time can be undone by any later
+# import or by user code, and spawned workers then die with
+# "NameError: name 'flux' is not defined" (issue #58, PR #81). Passing the
+# state through logl_args/ptform_args instead would re-pickle the model grid
+# with every pool batch.
+_MP_CTX = _mp.get_context('fork')
+Pool = _MP_CTX.Pool
 
 
 # ---------------------------------------------------------------------------
