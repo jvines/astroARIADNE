@@ -335,6 +335,7 @@ class Star:
                     self.Av = ebv * 3.1
         else:
             self.Av = Av
+            self.Av_e = Av_e
         # Get the wavelength and fluxes of the retrieved magnitudes.
         wave, flux, flux_er, bandpass = extract_info(
             self.mags, self.mag_errs, self.filter_names)
