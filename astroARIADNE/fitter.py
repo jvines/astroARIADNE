@@ -2432,9 +2432,20 @@ class Fitter:
             self.prior_sources['Av'] = ('auto_pinned_d<70pc' if auto_pin
                                         else 'fixed_zero')
         else:
+            # Av passed to Star by the user, or read from a dust map.
+            user = getattr(self.star, 'Av_source', None) == 'user'
             if self.star.Av_e is None:
                 defaults['Av'] = st.uniform(loc=0, scale=self.star.Av)
-                self.prior_sources['Av'] = 'dustmap_uniform'
+                self.prior_sources['Av'] = ('user_uniform' if user
+                                            else 'dustmap_uniform')
+            elif self.star.Av_e == 0:
+                # Known exactly: pin it.
+                av_idx = 4 if self._norm else 5
+                self.coordinator[av_idx] = 1
+                self.fixed[av_idx] = self.star.Av
+                defaults['Av'] = None
+                self.prior_sources['Av'] = ('user_fixed' if user
+                                            else 'dustmap_fixed')
             else:
                 mu = self.star.Av
                 sig = self.star.Av_e
@@ -2442,7 +2453,8 @@ class Fitter:
                 up = 100
                 b, a = (up - mu) / sig, (low - mu) / sig
                 defaults['Av'] = st.truncnorm(loc=mu, scale=sig, a=a, b=b)
-                self.prior_sources['Av'] = 'dustmap'
+                self.prior_sources['Av'] = ('user_truncnorm' if user
+                                            else 'dustmap')
         # Noise model prior setup. Per-band jitter by default; a single shared
         # jitter term when ``jitter == 'shared'`` -- the likelihood broadcasts
         # the one term across all bands, keeping the error/model-adequacy buffer
