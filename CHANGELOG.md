@@ -5,6 +5,14 @@ All notable changes to astroARIADNE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-11-19
+
+### Fixed
+- **SkyMapper magnitudes are converted as AB.** `mag_to_flux` and
+  `flux_to_mag` sent every SkyMapper band (u, v, g, r, i, z) through the
+  Vega zero point, but SkyMapper DR2 magnitudes are AB. The fluxes came out
+  too faint, worse in the redder bands, and tilted every fit that used them.
+
 ## [1.5.5] - 2026-11-13
 
 ### Fixed
