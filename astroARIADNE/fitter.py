@@ -1299,6 +1299,22 @@ def _prior_flag_message(f):
             f"may be biased. Widen the prior via prior_setup.")
 
 
+def _prior_signature(prior):
+    """A comparable description of one prior: frozen scipy distributions by
+    name and parameters, spline priors by their coefficients."""
+    if prior is None:
+        return None
+    if hasattr(prior, 'dist'):
+        return (prior.dist.name,
+                tuple(float(a) for a in getattr(prior, 'args', ())),
+                tuple(sorted((k, float(v)) for k, v in
+                             (getattr(prior, 'kwds', {}) or {}).items())))
+    if hasattr(prior, 'get_coeffs'):
+        return (type(prior).__name__,
+                tuple(np.round(prior.get_coeffs(), 12).tolist()))
+    return repr(prior)
+
+
 class Fitter:
     """The Fitter class handles the fitting routines and parameter estimation.
 
@@ -1609,6 +1625,23 @@ class Fitter:
     def refit(self, refit):
         self._refit = bool(refit)
 
+    def _fit_signature(self):
+        """Everything besides the photometry that shapes a grid's posterior:
+        priors, sampler setup, extinction law and the pinned parameters.
+        Saved in each ``<grid>_out.pkl`` so ``fit_bma`` only reuses a fit made
+        with the same choices."""
+        return {
+            'priors': {k: _prior_signature(v) for k, v in
+                       sorted((getattr(self, 'priors', None) or {}).items())},
+            'setup': (self._engine, self._nlive, self._dlogz,
+                      getattr(self, '_bound', None),
+                      getattr(self, '_sample', None),
+                      getattr(self, '_dynamic', None)),
+            'av_law': str(getattr(self, '_av_law', None)),
+            'fixed': [float(x) for x in np.ravel(self.fixed)],
+            'coordinator': [int(x) for x in np.ravel(self.coordinator)],
+        }
+
     def _reuse_problem(self, grid):
         """Return why ``<grid>_out.pkl`` cannot be reused, or None if it can."""
         path = f'{self.out_folder}/{grid}_out.pkl'
@@ -1628,6 +1661,24 @@ class Fitter:
         cur_filts = list(self.star.filter_names[self.star.filter_mask])
         if prev_filts != cur_filts:
             return 'photometry/filters changed since the previous fit'
+        prev_flux = np.asarray(prev_star.flux)[prev_star.filter_mask]
+        cur_flux = np.asarray(self.star.flux)[self.star.filter_mask]
+        if not np.allclose(prev_flux, cur_flux, rtol=1e-10, atol=0,
+                           equal_nan=True):
+            return 'photometry values changed since the previous fit'
+        sig = prev.get('fit_signature')
+        self._reuse_note = ('' if sig is not None else
+                            ' (older output: priors and sampler settings '
+                            'not recorded, so not checked)')
+        if sig is not None:
+            cur = self._fit_signature()
+            for key, what in (('priors', 'priors'),
+                              ('setup', 'sampler settings'),
+                              ('av_law', 'extinction law'),
+                              ('fixed', 'fixed parameters'),
+                              ('coordinator', 'fixed parameters')):
+                if sig.get(key) != cur[key]:
+                    return f'{what} changed since the previous fit'
         if bool(prev_norm) != bool(self.norm):
             return ('fit parameters changed (norm vs dist/rad) since the '
                     'previous fit')
@@ -3035,7 +3086,8 @@ class Fitter:
         for i, gr in enumerate(self._grids):
             why = None if self.refit else self._reuse_problem(gr)
             if not self.refit and why is None:
-                print(f'\t\t\tREUSING EXISTING FIT : {gr}')
+                print(f'\t\t\tREUSING EXISTING FIT : {gr}'
+                      f'{getattr(self, "_reuse_note", "")}')
                 continue
             if not self.refit and why != 'no previous output':
                 print(f'\t\t\tREFITTING {gr} : {why}')
@@ -3405,6 +3457,7 @@ class Fitter:
 
         # Utilities for plotting.
 
+        out['fit_signature'] = self._fit_signature()
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
         out['star'] = self.star

@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fit_bma` reuses existing per-grid fits.** A `<grid>_out.pkl` already in
   `out_folder` is loaded instead of re-running dynesty, so the BMA can be
   recomputed for a new `models` list (e.g. to re-plot without a bad grid)
-  without refitting (#56). A pickle is reused only if the photometry filters
-  and the norm vs dist/rad layout match the current setup; otherwise that grid
-  is refitted with a note. Set `Fitter.refit = True` to refit every grid.
+  without refitting (#56). A pickle is reused only if the photometry, the
+  norm vs dist/rad layout, the priors, the sampler settings, the extinction
+  law and the fixed parameters all match the current setup; otherwise that
+  grid is refitted with a note saying why. Outputs written before this
+  release don't record priors or settings and are reused with a note saying
+  so. Set `Fitter.refit = True` to refit every grid.
 
 ### Fixed
 - **The default `norm` prior no longer excludes nearby stars.** The fixed
