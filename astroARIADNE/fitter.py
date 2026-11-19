@@ -104,6 +104,22 @@ def _prior_flag_message(f):
             f"may be biased. Widen the prior via prior_setup.")
 
 
+def _prior_signature(prior):
+    """A comparable description of one prior: frozen scipy distributions by
+    name and parameters, spline priors by their coefficients."""
+    if prior is None:
+        return None
+    if hasattr(prior, 'dist'):
+        return (prior.dist.name,
+                tuple(float(a) for a in getattr(prior, 'args', ())),
+                tuple(sorted((k, float(v)) for k, v in
+                             (getattr(prior, 'kwds', {}) or {}).items())))
+    if hasattr(prior, 'get_coeffs'):
+        return (type(prior).__name__,
+                tuple(np.round(prior.get_coeffs(), 12).tolist()))
+    return repr(prior)
+
+
 class Fitter:
     """The Fitter class handles the fitting routines and parameter estimation.
 
@@ -200,6 +216,9 @@ class Fitter:
         # ``n_grid_jobs`` processes, so choose a value your machine's core
         # count and memory can handle (each grid loads its own model grid).
         self.n_grid_jobs = 1
+        # Re-fit every BMA grid even when a compatible ``<grid>_out.pkl``
+        # already exists in ``out_folder`` (see ``refit``).
+        self._refit = False
         # Evidence tolerance for the MIST isochrone age/mass nested sampling
         # (the dominant cost of a BMA run). Lower is more precise but slower;
         # the isochrone fit itself is parallelised across ``threads``.
@@ -341,6 +360,80 @@ class Fitter:
     @models.setter
     def models(self, mods):
         self._bma_models = mods
+
+    @property
+    def refit(self):
+        """Force ``fit_bma`` to re-fit every grid. Default ``False``.
+
+        With ``False``, a grid whose ``<out_folder>/<grid>_out.pkl`` exists and
+        was produced from the same photometry and parameter layout is loaded
+        instead of re-fitted, so the BMA can be recomputed for a new
+        ``models`` list without re-running dynesty.
+        """
+        return self._refit
+
+    @refit.setter
+    def refit(self, refit):
+        self._refit = bool(refit)
+
+    def _fit_signature(self):
+        """Everything besides the photometry that shapes a grid's posterior:
+        priors, sampler setup, extinction law and the pinned parameters.
+        Saved in each ``<grid>_out.pkl`` so ``fit_bma`` only reuses a fit made
+        with the same choices."""
+        return {
+            'priors': {k: _prior_signature(v) for k, v in
+                       sorted((getattr(self, 'priors', None) or {}).items())},
+            'setup': (self._engine, self._nlive, self._dlogz,
+                      getattr(self, '_bound', None),
+                      getattr(self, '_sample', None),
+                      getattr(self, '_dynamic', None)),
+            'av_law': str(getattr(self, '_av_law', None)),
+            'fixed': [float(x) for x in np.ravel(self.fixed)],
+            'coordinator': [int(x) for x in np.ravel(self.coordinator)],
+        }
+
+    def _reuse_problem(self, grid):
+        """Return why ``<grid>_out.pkl`` cannot be reused, or None if it can."""
+        path = f'{self.out_folder}/{grid}_out.pkl'
+        if not os.path.isfile(path):
+            return 'no previous output'
+        try:
+            with open(path, 'rb') as fh:
+                prev = pickle.load(fh)
+            prev_star = prev['star']
+            prev_filts = list(prev_star.filter_names[prev_star.filter_mask])
+            prev_norm = prev['norm']
+            prev['global_lnZ'], prev['posterior_samples']
+        except Exception as e:
+            return f'unreadable previous output ({type(e).__name__})'
+        if prev.get('model_grid', grid) != grid:
+            return f'previous output is for grid {prev["model_grid"]}'
+        cur_filts = list(self.star.filter_names[self.star.filter_mask])
+        if prev_filts != cur_filts:
+            return 'photometry/filters changed since the previous fit'
+        prev_flux = np.asarray(prev_star.flux)[prev_star.filter_mask]
+        cur_flux = np.asarray(self.star.flux)[self.star.filter_mask]
+        if not np.allclose(prev_flux, cur_flux, rtol=1e-10, atol=0,
+                           equal_nan=True):
+            return 'photometry values changed since the previous fit'
+        sig = prev.get('fit_signature')
+        self._reuse_note = ('' if sig is not None else
+                            ' (older output: priors and sampler settings '
+                            'not recorded, so not checked)')
+        if sig is not None:
+            cur = self._fit_signature()
+            for key, what in (('priors', 'priors'),
+                              ('setup', 'sampler settings'),
+                              ('av_law', 'extinction law'),
+                              ('fixed', 'fixed parameters'),
+                              ('coordinator', 'fixed parameters')):
+                if sig.get(key) != cur[key]:
+                    return f'{what} changed since the previous fit'
+        if bool(prev_norm) != bool(self.norm):
+            return ('fit parameters changed (norm vs dist/rad) since the '
+                    'previous fit')
+        return None
 
     @property
     def sequential(self):
@@ -944,7 +1037,20 @@ class Fitter:
 
         global interpolator, _BMA_FITTER
 
-        n_jobs = min(max(int(self.n_grid_jobs), 1), len(self._grids))
+        # Reuse compatible ``<grid>_out.pkl`` files instead of re-running
+        # dynesty (unless ``refit``); only the grids in ``todo`` are fitted.
+        todo = []
+        for i, gr in enumerate(self._grids):
+            why = None if self.refit else self._reuse_problem(gr)
+            if not self.refit and why is None:
+                print(f'\t\t\tREUSING EXISTING FIT : {gr}'
+                      f'{getattr(self, "_reuse_note", "")}')
+                continue
+            if not self.refit and why != 'no previous output':
+                print(f'\t\t\tREFITTING {gr} : {why}')
+            todo.append(i)
+
+        n_jobs = min(max(int(self.n_grid_jobs), 1), max(len(todo), 1))
         if n_jobs > 1:
             # Across-grid parallelism: the grids are independent fits, so run
             # several at once (one core each). Each worker writes its own
@@ -955,16 +1061,16 @@ class Fitter:
                     'n_grid_jobs=%d exceeds the %d available CPU cores; '
                     'this will oversubscribe the machine.', n_jobs, ncpu)
             _BMA_FITTER = self
-            print(f'\t\t\tFITTING {len(self._grids)} MODELS, '
+            print(f'\t\t\tFITTING {len(todo)} MODELS, '
                   f'{n_jobs} CONCURRENTLY')
             with Pool(n_jobs) as pool:
-                for gr, err in pool.map(_bma_grid_worker,
-                                        range(len(self._grids))):
+                for gr, err in pool.map(_bma_grid_worker, todo):
                     if err is not None:
                         dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
                         DynestyError(dump_out, gr, err).__raise__()
         else:
-            for intp, gr in zip(self._interpolators, self._grids):
+            for i in todo:
+                intp, gr = self._interpolators[i], self._grids[i]
                 interpolator = intp
                 self.grid = gr
                 out_file = self.out_folder + '/' + gr + '_out.pkl'
@@ -1329,6 +1435,7 @@ class Fitter:
 
         # Utilities for plotting.
 
+        out['fit_signature'] = self._fit_signature()
         out['fixed'] = self.fixed
         out['coordinator'] = self.coordinator
         out['star'] = self.star
