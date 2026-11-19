@@ -103,6 +103,14 @@ class Star:
         Set to False to suppress printed outputs.
     ignore: list, optional
         A list with the catalogs to ignore for whatever reason.
+    contamination_qc: bool, optional
+        Gaia blend QC (default True): drop 2MASS/AllWISE bands whose Gaia
+        match is shared with other Gaia sources, and flag or exclude bands
+        whose flux is contaminated by unresolved Gaia neighbours. Results
+        are in `contamination` and `xmatch_flags`.
+    contamination_flag, contamination_exclude: float, optional
+        Fractional contaminating flux above which a band is flagged /
+        excluded (defaults 0.01 / 0.05).
 
     Attributes
     ----------
@@ -145,7 +153,9 @@ class Star:
                  temp=None, temp_e=None, lum=None, lum_e=None,
                  dist=None, dist_e=None, Av=None, Av_e=None,
                  offline=False, mag_dict=None, verbose=True, ignore=None,
-                 dustmap='SFD'):
+                 dustmap='SFD',
+                 contamination_qc=True, contamination_flag=None,
+                 contamination_exclude=None):
         """See class docstring."""
         # MISC
         self.verbose = verbose
@@ -188,6 +198,9 @@ class Star:
 
         # Gaia DR3 RUWE (astrometric-fit quality flag): set by the librarian
         # lookup below or restored by from_nc; None otherwise.
+        # Gaia blend QC results (issue #55); filled by the librarian lookup.
+        self.contamination = {}
+        self.xmatch_flags = {}
         self.ruwe = None
         if lookup:
             if not offline:
@@ -197,8 +210,14 @@ class Star:
                                 c)
                     )
                 ignore_arg = ignore if ignore is not None else ()
+                contam_kw = {"contamination_qc": contamination_qc}
+                if contamination_flag is not None:
+                    contam_kw["contamination_flag"] = contamination_flag
+                if contamination_exclude is not None:
+                    contam_kw["contamination_exclude"] = contamination_exclude
                 lib = Librarian(self.ra, self.dec, gaia_id=self.g_id,
-                                ignore=ignore_arg, verbose=self.verbose)
+                                ignore=ignore_arg, verbose=self.verbose,
+                                **contam_kw)
                 adapted = adapt_librarian(lib)
                 self.g_id = adapted.g_id
                 self.tic = adapted.tic
@@ -210,6 +229,8 @@ class Star:
                 # consumed by Fitter.spectra = False to drop these bands.
                 self.xp_filled = list(adapted.xp_filled)
                 self.ruwe = adapted.ruwe
+                self.contamination = adapted.contamination
+                self.xmatch_flags = adapted.xmatch_flags
             else:
                 print(
                     colored('\t\t*** ARCHIVAL LOOKUP OVERRIDDEN ***', c)
@@ -579,6 +600,10 @@ class Star:
             getattr(self, 'spectroscopic_params', None), default=str)
         f.rave_params = json.dumps(getattr(self, 'rave_params', None),
                                    default=str)
+        f.contamination = json.dumps(getattr(self, "contamination", {}),
+                                     default=str)
+        f.xmatch_flags = json.dumps(getattr(self, "xmatch_flags", {}),
+                                    default=str)
         f.Av_source = str(getattr(self, 'Av_source', 'dustmap'))
         f.n_xp_filled = int(len(xp))
         f.createDimension('filter', len(names))
@@ -632,6 +657,8 @@ class Star:
         ids = json.loads(_attr('ids', '{}'))
         spec = json.loads(_attr('spectroscopic_params', 'null'))
         rave = json.loads(_attr('rave_params', 'null'))
+        contam = json.loads(_attr("contamination", "{}"))
+        xmflags = json.loads(_attr("xmatch_flags", "{}"))
         nxp = int(getattr(g, 'n_xp_filled', 0))
         xp = _rows('xp_filled_name', nxp) if nxp > 0 else []
         g.close()
@@ -659,6 +686,8 @@ class Star:
         star.spectroscopic_params = spec
         star.rave_params = rave
         star.xp_filled = xp
+        star.contamination = contam
+        star.xmatch_flags = xmflags
         return star
 
     def __prepare_mags(self):
