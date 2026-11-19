@@ -200,6 +200,9 @@ class Fitter:
         # ``n_grid_jobs`` processes, so choose a value your machine's core
         # count and memory can handle (each grid loads its own model grid).
         self.n_grid_jobs = 1
+        # Re-fit every BMA grid even when a compatible ``<grid>_out.pkl``
+        # already exists in ``out_folder`` (see ``refit``).
+        self._refit = False
         # Evidence tolerance for the MIST isochrone age/mass nested sampling
         # (the dominant cost of a BMA run). Lower is more precise but slower;
         # the isochrone fit itself is parallelised across ``threads``.
@@ -341,6 +344,45 @@ class Fitter:
     @models.setter
     def models(self, mods):
         self._bma_models = mods
+
+    @property
+    def refit(self):
+        """Force ``fit_bma`` to re-fit every grid. Default ``False``.
+
+        With ``False``, a grid whose ``<out_folder>/<grid>_out.pkl`` exists and
+        was produced from the same photometry and parameter layout is loaded
+        instead of re-fitted, so the BMA can be recomputed for a new
+        ``models`` list without re-running dynesty.
+        """
+        return self._refit
+
+    @refit.setter
+    def refit(self, refit):
+        self._refit = bool(refit)
+
+    def _reuse_problem(self, grid):
+        """Return why ``<grid>_out.pkl`` cannot be reused, or None if it can."""
+        path = f'{self.out_folder}/{grid}_out.pkl'
+        if not os.path.isfile(path):
+            return 'no previous output'
+        try:
+            with open(path, 'rb') as fh:
+                prev = pickle.load(fh)
+            prev_star = prev['star']
+            prev_filts = list(prev_star.filter_names[prev_star.filter_mask])
+            prev_norm = prev['norm']
+            prev['global_lnZ'], prev['posterior_samples']
+        except Exception as e:
+            return f'unreadable previous output ({type(e).__name__})'
+        if prev.get('model_grid', grid) != grid:
+            return f'previous output is for grid {prev["model_grid"]}'
+        cur_filts = list(self.star.filter_names[self.star.filter_mask])
+        if prev_filts != cur_filts:
+            return 'photometry/filters changed since the previous fit'
+        if bool(prev_norm) != bool(self.norm):
+            return ('fit parameters changed (norm vs dist/rad) since the '
+                    'previous fit')
+        return None
 
     @property
     def sequential(self):
@@ -944,7 +986,19 @@ class Fitter:
 
         global interpolator, _BMA_FITTER
 
-        n_jobs = min(max(int(self.n_grid_jobs), 1), len(self._grids))
+        # Reuse compatible ``<grid>_out.pkl`` files instead of re-running
+        # dynesty (unless ``refit``); only the grids in ``todo`` are fitted.
+        todo = []
+        for i, gr in enumerate(self._grids):
+            why = None if self.refit else self._reuse_problem(gr)
+            if not self.refit and why is None:
+                print(f'\t\t\tREUSING EXISTING FIT : {gr}')
+                continue
+            if not self.refit and why != 'no previous output':
+                print(f'\t\t\tREFITTING {gr} : {why}')
+            todo.append(i)
+
+        n_jobs = min(max(int(self.n_grid_jobs), 1), max(len(todo), 1))
         if n_jobs > 1:
             # Across-grid parallelism: the grids are independent fits, so run
             # several at once (one core each). Each worker writes its own
@@ -955,16 +1009,16 @@ class Fitter:
                     'n_grid_jobs=%d exceeds the %d available CPU cores; '
                     'this will oversubscribe the machine.', n_jobs, ncpu)
             _BMA_FITTER = self
-            print(f'\t\t\tFITTING {len(self._grids)} MODELS, '
+            print(f'\t\t\tFITTING {len(todo)} MODELS, '
                   f'{n_jobs} CONCURRENTLY')
             with Pool(n_jobs) as pool:
-                for gr, err in pool.map(_bma_grid_worker,
-                                        range(len(self._grids))):
+                for gr, err in pool.map(_bma_grid_worker, todo):
                     if err is not None:
                         dump_out = self.out_folder + '/' + gr + '_DUMP.pkl'
                         DynestyError(dump_out, gr, err).__raise__()
         else:
-            for intp, gr in zip(self._interpolators, self._grids):
+            for i in todo:
+                intp, gr = self._interpolators[i], self._grids[i]
                 interpolator = intp
                 self.grid = gr
                 out_file = self.out_folder + '/' + gr + '_out.pkl'
