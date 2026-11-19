@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AttributeError` for any star beyond the 70 pc Av auto-pin (#89). `Av_e`
   is now stored, and with it the Av prior is the truncated normal
   N(Av, Av_e) on [0, 100] instead of U(0, Av).
+  A user-supplied Av is now labelled `user_*` in `prior_sources` instead of
+  `dustmap*`; `Av_e=0` pins Av at the given value, and a negative `Av_e`
+  is rejected.
 
 ## [1.5.6] - 2026-11-19
 
