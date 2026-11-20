@@ -53,8 +53,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     naming the neighbours. The values are in `star.contamination`; thresholds
     are `Star(contamination_flag=..., contamination_exclude=...)`. Gaia G is
     the flux proxy, with no colour term.
+- **HST WFC3 and ACS/WFC bands (#78).** 44 bands (WFC3/UVIS and WFC3/IR
+  wide, medium, long-pass and extremely wide filters, plus ACS/WFC) are grid
+  bands now, reconvolved from each grid's raw spectra, so HST photometry can
+  be added with `Star.add_mag` and enters the fit like any other band. The
+  names are the SVO ones (`HST_WFC3_F814W`, `HST_ACS_WFC_F606W`, ...); see
+  `filters.md`.
+- **Per-band magnitude systems.** HST photometry is published in Vega, ST or
+  AB magnitudes, so `Star(..., mag_system={'HST_WFC3_F814W': 'AB'})` and
+  `Star.add_mag(mag, err, band, system='ST')` say which one a magnitude is in.
+  HST bands default to Vega and every other band keeps its usual system
+  (AB for SDSS, PS1, SkyMapper and GALEX, Vega otherwise). The choice is used
+  everywhere magnitudes become fluxes and back: the fit, the outlier clip,
+  the plots and the synthetic magnitudes.
 
 ### Fixed
+- **BOSZ and Coelho radii were too large by sqrt(4 pi) and sqrt(pi).** The
+  BOSZ and Coelho grids held fluxes 1/(4 pi) and 1/pi of every other grid's,
+  and nothing corrected for it, so a fit to either inflated the radius
+  (BOSZ by 3.5x, Coelho by 1.8x). Both are on the common flux scale now.
+- **Coelho, BT-Settl, BT-NextGen and BT-Cond nodes hold one spectrum each.**
+  Coelho took the alpha-enhanced spectrum at the 1177 nodes where both
+  variants exist, and the BT grids whichever [alpha/Fe] variant was written
+  last at their 617 multi-variant nodes. Each node now holds the solar-alpha
+  Coelho model and the standard-alpha BT model ([alpha/Fe] = 0 at
+  [Fe/H] >= 0, +0.2 at -0.5, +0.4 below), the same as ARIADNE v2.
+- **BT-NextGen and BT-Cond were copies of BT-Settl.** Both pickles held
+  BT-Settl's fluxes, so a BMA over the three BT grids counted one model
+  three times. They now hold the BT-NextGen and BT-Cond models.
+- **The outlier clip used Vega zero points for SkyMapper.**
+  `Star.clip_outlier_magnitudes` turned SkyMapper (AB) magnitudes into fluxes
+  as if they were Vega, so those bands were judged against a shifted SED. It
+  now uses the same per-band zero points as the fit.
 - **Multi-threaded fits no longer die with `NameError: name 'flux' is not
   defined`** on machines where the worker processes are spawned (macOS
   default) (#58). The fitter's and the isochrone's pools now always fork,
