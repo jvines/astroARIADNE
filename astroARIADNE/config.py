@@ -126,7 +126,26 @@ filter_names = np.array([
        'ROMAN_F062', 'ROMAN_F087', 'ROMAN_F106', 'ROMAN_F129', 'ROMAN_F146',
        'ROMAN_F158', 'ROMAN_F184', 'ROMAN_F213',
        'ROMANP_0800', 'ROMANP_0960', 'ROMANP_1170', 'ROMANP_1400',
-       'ROMANP_1500', 'ROMANP_1680', 'ROMANP_1760'
+       'ROMANP_1500', 'ROMANP_1680', 'ROMANP_1760',
+       # HST WFC3 (UVIS + IR) and ACS/WFC wide, medium, long-pass and
+       # extremely-wide filters (narrow and quad filters left out). Grid
+       # columns are a raw reconvolution of every grid's spectra
+       # (notebooks/build_model_grids.py). No catalogue feeds them: users add
+       # HST photometry through mag_dict / add_mag. Magnitudes default to
+       # VEGAMAG; pass Star(mag_system={...}) for ABMAG or STMAG. All < 1.7 um
+       # -> FIT bands, never irx.
+       'HST_WFC3_F098M', 'HST_WFC3_F105W', 'HST_WFC3_F110W', 'HST_WFC3_F125W',
+       'HST_WFC3_F127M', 'HST_WFC3_F139M', 'HST_WFC3_F140W', 'HST_WFC3_F153M',
+       'HST_WFC3_F160W', 'HST_WFC3_F200LP', 'HST_WFC3_F218W', 'HST_WFC3_F225W',
+       'HST_WFC3_F275W', 'HST_WFC3_F300X', 'HST_WFC3_F336W', 'HST_WFC3_F350LP',
+       'HST_WFC3_F390M', 'HST_WFC3_F390W', 'HST_WFC3_F410M', 'HST_WFC3_F438W',
+       'HST_WFC3_F467M', 'HST_WFC3_F475W', 'HST_WFC3_F475X', 'HST_WFC3_F547M',
+       'HST_WFC3_F555W', 'HST_WFC3_F600LP', 'HST_WFC3_F606W', 'HST_WFC3_F621M',
+       'HST_WFC3_F625W', 'HST_WFC3_F689M', 'HST_WFC3_F763M', 'HST_WFC3_F775W',
+       'HST_WFC3_F814W', 'HST_WFC3_F845M', 'HST_WFC3_F850LP',
+       'HST_ACS_WFC_F435W', 'HST_ACS_WFC_F475W', 'HST_ACS_WFC_F550M',
+       'HST_ACS_WFC_F555W', 'HST_ACS_WFC_F606W', 'HST_ACS_WFC_F625W',
+       'HST_ACS_WFC_F775W', 'HST_ACS_WFC_F814W', 'HST_ACS_WFC_F850LP',
 ])
 
 # IR-excess bands: redward of ~5 um, where warm-dust / debris-disk excess
@@ -207,6 +226,7 @@ iso_mask = np.array([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   # CASSIS/IRS super-bands (not isochrone)
     0, 0, 0, 0, 0, 0, 0, 0,     # Roman WFI imaging (not isochrone bands)
     0, 0, 0, 0, 0, 0, 0,        # Roman P127 prism super-bands
+    *([0] * 44),                # HST WFC3 + ACS/WFC (not isochrone bands)
 ])
 
 # Filter bands for isochrones.
