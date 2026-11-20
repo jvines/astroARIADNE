@@ -24,7 +24,7 @@ from astroARIADNE.config import filter_names, irx_bands  # noqa: E402
 # them. (Roman = ROMAN_F* imaging + ROMANP_* prism, both 'ROMAN'-prefixed.)
 BASE_BANDS = (set(filter_names) - set(irx_bands)
               - {f for f in filter_names
-                 if f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_', 'ROMAN'))})
+                 if f.startswith(('SPHEREX_', 'JPLUS_', 'IRS_', 'ROMAN', 'HST_'))})
 
 
 def test_grid_schema():
@@ -33,7 +33,9 @@ def test_grid_schema():
     # NewEra was re-streamed at the full 66-band set (2026-06, on yuki): its
     # 0.09-930 um spectra cover every band, IR-excess set included, making it
     # the deepest-IR modern grid in the ensemble.
-    assert set(ne.column_index) == set(filter_names)
+    # HST columns wait on the NewEra raws (Hamburg S3 offline, #78).
+    assert set(ne.column_index) == {f for f in filter_names
+                                    if not f.startswith('HST_')}
     assert BASE_BANDS <= set(ne.finite_bands)
     assert {'HERSCHEL_SPIRE_PLW', 'AKARI_FIS_N160'} <= set(ne.finite_bands)
     assert tf.min() == 2300.0 and tf.max() == 12000.0
