@@ -47,8 +47,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     are `Star(contamination_flag=..., contamination_exclude=...)`. Gaia G is
     the flux proxy, with no colour term. Results are saved in the Star's
     NetCDF file.
+- **HST WFC3 and ACS/WFC bands (#78).** 44 bands (WFC3/UVIS and WFC3/IR
+  wide, medium, long-pass and extremely wide filters, plus ACS/WFC) are grid
+  bands now, reconvolved from each grid's raw spectra, so HST photometry can
+  be added with `Star.add_mag` and enters the fit like any other band. The
+  names are the SVO ones (`HST_WFC3_F814W`, `HST_ACS_WFC_F606W`, ...); see
+  `filters.md`.
+- **Per-band magnitude systems.** HST photometry is published in Vega, ST or
+  AB magnitudes, so `Star(..., mag_system={'HST_WFC3_F814W': 'AB'})` and
+  `Star.add_mag(mag, err, band, system='ST')` say which one a magnitude is in.
+  HST bands default to Vega and every other band keeps its usual system
+  (AB for SDSS, PS1, SkyMapper and GALEX, Vega otherwise). The choice is used
+  everywhere magnitudes become fluxes and back: the fit, the outlier clip,
+  the plots and the synthetic magnitudes.
 
 ### Fixed
+- **The Stagger grid is rebuilt from bolometrically verified spectra.**
+  POLLUX serves the wrong spectrum for 34 of the 181 STAGGER-SPEC models
+  (all >= 5700 K: each integrates to sigma T^4 of a different model, some
+  duplicated), and the shipped grid, synthesized from the spectra cache, had
+  them all, plus a flat 2.8% flux deficit and node values taken at each
+  model's actual Teff (up to 156 K from the node). Each node now takes its
+  own verified model, carried to the nominal Teff along its (logg, [Fe/H])
+  sequence; nodes whose model is corrupted are holes (35 of 181) rather than
+  wrong spectra. Stagger fluxes move by a median +3%.
+- **BT-Settl, BT-NextGen and BT-Cond nodes hold one, standard-alpha,
+  spectrum.** Where the AGSS2009 / CIFIST2011 libraries ship several
+  [alpha/Fe] variants of a node (617 nodes at logg 4.0 and 4.5), the cube held
+  whichever variant the builder happened to write last; it now holds the
+  standard one ([alpha/Fe] = 0 at [Fe/H] >= 0, +0.2 at -0.5, +0.4 below).
+  And at 2600-2700 K, [Fe/H] != 0, the fill that patches the solar-only cool
+  shelf had overwritten genuine metal-poor models with the solar one in every
+  band but the Roman ones (100 BT-Settl nodes, 10 each in BT-NextGen and
+  BT-Cond); those are the genuine models again.
+- **The outlier clip used the wrong zero points for SkyMapper and Stromgren.**
+  `Star.clip_outlier_magnitudes` turned SkyMapper (AB) magnitudes into fluxes
+  with Vega zero points and applied the Stromgren standard-system offsets
+  with the opposite sign to the fit, so those bands were judged against a
+  shifted SED. It now uses the same per-band zero points as the fit.
 - **Multi-threaded fits no longer die with `NameError: name 'flux' is not
   defined`** on machines where the worker processes are spawned (macOS
   default) (#58). The fitter's and the isochrone's pools now always fork,
