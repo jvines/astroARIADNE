@@ -604,7 +604,9 @@ class SEDPlotter:
         for i, th in enumerate(self.theta[n_pars:]):
             mag = mags[i]
             filt = filters[i]
-            _, er = mag_to_flux(mag, th, filt)
+            _, er = mag_to_flux(
+                mag, th, filt,
+                (getattr(self.star, 'mag_system', None) or {}).get(filt))
             self.theta[n_pars + i] = er
 
         residuals, errors = get_residuals(
