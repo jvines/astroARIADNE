@@ -464,6 +464,94 @@ def _irx_confusion_sigma(band, lam_um):
         equivalencies=u.spectral_density(float(lam_um) * u.um)).value)
 
 
+# Companion models available for injection-recovery tests, and the default.
+# Injecting from the BT family (BT-Settl) while recovering with BT-NextGen/
+# BT-Cond/BT-Dusty and the BT-Settl fit grid makes the test circular: the
+# recovery grids share the PHOENIX code, opacities and cloud treatment of the
+# injected spectrum. Sonora Bobcat (Marley et al. 2021; its own radiative-
+# convective code, cloudless) is the default injection model. The shipped
+# Sonora cube is Bobcat only (Teff 200-2400 K, logg 3-5.5, [M/H] -0.5..+0.5);
+# Diamondback and Elf Owl are not in the grid cache. Above Bobcat's 2400 K the
+# injection falls back to ATMO 2020 (Phillips et al. 2020; the ATMO code,
+# independent of PHOENIX, to 3000 K) -- the most independent non-BT model
+# reaching the late-M regime. Both are also members of the recovery ensemble
+# (one each of its five companion grids); for a fully held-out test set
+# Fitter.irx_companion_grids to leave the injection grid out.
+IRX_INJECTION_MODELS = ('sonora', 'atmo', 'btsettl', 'btnextgen', 'btcond',
+                        'btdusty')
+IRX_INJECTION_DEFAULT = 'sonora'
+IRX_INJECTION_FALLBACK = 'atmo'
+
+
+def _grid_teff_range(ig, logg, z):
+    """Teff range of the finite nodes of a grid at the (snapped) logg / [M/H]
+    nodes -- the injection support. Returns (lo, hi, logg_node, z_node)."""
+    la, ta, fa = (np.asarray(a, float) for a in ig.index_columns)
+    lg = float(la[int(np.argmin(np.abs(la - logg)))])
+    zz = float(fa[int(np.argmin(np.abs(fa - z)))])
+    il = int(np.argmin(np.abs(la - lg)))
+    iz = int(np.argmin(np.abs(fa - zz)))
+    fin = np.isfinite(ig.grid[il, :, iz, :]).any(axis=-1)
+    if not fin.any():
+        return np.nan, np.nan, lg, zz
+    return float(ta[fin].min()), float(ta[fin].max()), lg, zz
+
+
+def companion_injection_flux(names, wave, teff2, rad2, dist_pc,
+                             model=IRX_INJECTION_DEFAULT,
+                             fallback=IRX_INJECTION_FALLBACK, logg=5.0, z=0.0,
+                             av=0.0, av_law=None, use_norm=False):
+    """Band fluxes of an unresolved cool companion, for injection tests.
+
+    Returns ``(flux, model_used)``: the companion's flux (erg/s/cm^2/um) in
+    every band of ``names`` for a photosphere of ``teff2`` and radius ``rad2``
+    (Rsun) at ``dist_pc``, drawn from grid ``model`` at the logg / [M/H]
+    nodes nearest ``logg`` / ``z`` (snapped, as the recovery does, so sparse
+    cubes never interpolate onto missing nodes). When ``teff2`` lies outside
+    ``model``'s finite Teff range at those nodes, ``fallback`` is used instead
+    (``None`` raises). Bands the grid has no flux for are filled with the
+    same asymptotes the recovery uses: Rayleigh-Jeans from the reddest finite
+    band at >= 8 um, zero below 1 um; anything else is zero.
+    """
+    from .sed_library import load_grid as _lg, model_grid as _mg
+    if av_law is None:
+        av_law = extinction.fitzpatrick99
+    names = np.asarray(names)
+    wave = np.asarray(wave, float)
+    model = str(model).lower()
+    if model not in IRX_INJECTION_MODELS:
+        raise ValueError(f'injection model must be one of '
+                         f'{IRX_INJECTION_MODELS}, got {model!r}')
+    ig = _lg(model)
+    lo, hi, lg, zz = _grid_teff_range(ig, logg, z)
+    if not (np.isfinite(lo) and lo <= float(teff2) <= hi):
+        if fallback is None or str(fallback).lower() == model:
+            raise ValueError(f'Teff2 = {teff2:g} K is outside {model} '
+                             f'({lo:g}-{hi:g} K at logg {lg:g}, [M/H] {zz:g})')
+        return companion_injection_flux(names, wave, teff2, rad2, dist_pc,
+                                        model=fallback, fallback=None,
+                                        logg=logg, z=z, av=av, av_law=av_law,
+                                        use_norm=use_norm)
+    theta = (np.array([float(teff2), lg, zz, 1.0, float(av)]) if use_norm
+             else np.array([float(teff2), lg, zz, float(dist_pc), 1.0,
+                            float(av)]))
+    funit = np.full(len(names), np.nan)
+    in_cols = np.array([str(b) in ig.column_index for b in names])
+    if in_cols.any():
+        funit[in_cols] = np.asarray(_mg(theta, names[in_cols], wave[in_cols],
+                                        ig, use_norm, av_law)).ravel()
+    fin = np.isfinite(funit) & (funit > 0)
+    if not fin.any():
+        raise ValueError(f'{model}: no finite flux at Teff2 = {teff2:g} K')
+    bad = ~fin
+    if bad.any():
+        iref = int(np.argmax(np.where(fin, wave, -np.inf)))
+        rj = funit[iref] * (wave[iref] / wave) ** 4
+        funit = np.where(bad & (wave >= 8.0) & (wave > wave[iref]), rj, funit)
+    funit = np.where(np.isfinite(funit) & (funit > 0), funit, 0.0)
+    return float(rad2) ** 2 * funit, model
+
+
 def _modbb_factor(lam_um):
     """Emission-efficiency factor of the modified blackbody at lam_um."""
     lam = np.asarray(lam_um, float)
@@ -1574,6 +1662,10 @@ class Fitter:
         # reproduces the pre-2026-11 budget (2% floor, evidence-weighted
         # spread only).
         self.irx_error_budget = 'full'
+        # Cool grids of the IRX companion hypothesis. None -> config
+        # COOL_COMPANION_GRIDS. Set e.g. to leave out the grid an injection
+        # was drawn from (a held-out injection-recovery test).
+        self.irx_companion_grids = None
         self.contrast = None
         # Spectro-photometry switch: when False, bands derived from spectra
         # (Gaia XP synthetic fills, SPHEREx super-bands) are dropped from the
@@ -1634,8 +1726,8 @@ class Fitter:
             f"{type(self).__name__!r} has no configuration attribute "
             f"{name!r}. Check for a typo (e.g. 'bma' not 'bmaa'). Valid "
             f"config options: av_law, binary, bma, contrast, estimate_age, "
-            f"estimate_logg, experimental, grid, irx_error_budget, "
-            f"isochrone_dlogz, jitter, models, "
+            f"estimate_logg, experimental, grid, irx_companion_grids, "
+            f"irx_error_budget, isochrone_dlogz, jitter, models, "
             f"n_grid_jobs, n_samples, norm, out_folder, prior_setup, "
             f"sequential, setup, star, verbose, walks."
         )
@@ -3874,7 +3966,8 @@ class Fitter:
             fitg = interps[gname]
             if float(np.min(fitg.index_columns[1])) < 2300.0:
                 cool.append((gname, fitg))
-            for _bd in COOL_COMPANION_GRIDS:
+            _cg = getattr(self, 'irx_companion_grids', None)
+            for _bd in (COOL_COMPANION_GRIDS if _cg is None else _cg):
                 try:
                     cool.append((_bd, load_grid(_bd)))
                 except Exception as _e:

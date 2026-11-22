@@ -1,4 +1,5 @@
-"""IR-excess error budget ('full' vs 'legacy').
+"""IR-excess error budget ('full' vs 'legacy') and the selectable companion
+injection model.
 
 'full' adds each survey's absolute calibration in quadrature to the catalogue
 error and widens the photosphere-model uncertainty to the equal-weight
@@ -17,6 +18,8 @@ sys.path.insert(0, REPO)
 import astroARIADNE.fitter as fmod  # noqa: E402
 from astroARIADNE.fitter import Fitter  # noqa: E402
 from astroARIADNE.config import irx_bands  # noqa: E402
+from astroARIADNE.sed_library import load_grid, model_grid  # noqa: E402
+from astroARIADNE.phot_utils import get_effective_wavelength  # noqa: E402
 from test_irx import (THETA, _avlaw, _fitter, _grid_with_w3, _out,  # noqa: E402
                       _photo_w3)
 
@@ -153,7 +156,66 @@ def test_compute_irx_full_adds_intergrid_spread():
 
 def test_fitter_accepts_irx_options():
     f = Fitter()
-    assert f.irx_error_budget == 'full'
+    assert f.irx_error_budget == 'full' and f.irx_companion_grids is None
     f.irx_error_budget = 'legacy'
+    f.irx_companion_grids = ('atmo',)
     with pytest.raises(AttributeError):
         f.irx_error_budgets = 'full'                     # typo guard
+
+
+# ------------------------------------------------------- injection model
+_NAMES = np.array(['2MASS_J', '2MASS_Ks', 'WISE_RSR_W1', 'WISE_RSR_W2',
+                   'WISE_RSR_W3', 'WISE_RSR_W4', 'HERSCHEL_SPIRE_PSW'])
+_WAVE = np.array([get_effective_wavelength(b) for b in _NAMES])
+
+
+def test_injection_default_is_sonora_and_differs_from_btsettl():
+    f_s, used = fmod.companion_injection_flux(_NAMES, _WAVE, 1500., 0.1, 10.)
+    assert used == 'sonora'
+    f_b, used_b = fmod.companion_injection_flux(_NAMES, _WAVE, 1500., 0.1,
+                                                10., model='btsettl')
+    assert used_b == 'btsettl'
+    assert np.all(f_s > 0) and np.all(f_b > 0)
+    assert np.max(np.abs(f_s / f_b - 1)) > 0.1     # genuinely different model
+
+
+def test_injection_btsettl_reproduces_old_driver():
+    """model='btsettl' is the old injection: theta (T2, 5, 0, d, 1, 0)."""
+    g = load_grid('btsettl')
+    theta = np.array([1800., 5.0, 0.0, 12.0, 1.0, 0.0])
+    old = np.asarray(model_grid(theta, _NAMES, _WAVE, g, False,
+                                fmod.extinction.fitzpatrick99)).ravel()
+    old = 0.12 ** 2 * np.where(np.isfinite(old) & (old > 0), old, 0.0)
+    new, _ = fmod.companion_injection_flux(_NAMES, _WAVE, 1800., 0.12, 12.,
+                                           model='btsettl')
+    fin = old > 0
+    assert np.allclose(new[fin], old[fin], rtol=1e-12)
+
+
+def test_injection_falls_back_above_sonora():
+    lo, hi, _, _ = fmod._grid_teff_range(load_grid('sonora'), 5.0, 0.0)
+    assert (lo, hi) == (200.0, 2400.0)
+    _, used = fmod.companion_injection_flux(_NAMES, _WAVE, 2500., 0.1, 10.)
+    assert used == 'atmo'
+    with pytest.raises(ValueError):
+        fmod.companion_injection_flux(_NAMES, _WAVE, 2500., 0.1, 10.,
+                                      fallback=None)
+    with pytest.raises(ValueError):
+        fmod.companion_injection_flux(_NAMES, _WAVE, 1500., 0.1, 10.,
+                                      model='kurucz')
+
+
+def test_injection_rj_fill_beyond_grid():
+    """SPIRE 250 um is beyond Sonora's reach: filled by Rayleigh-Jeans from
+    the reddest finite band, as the recovery does."""
+    ig = load_grid('sonora')
+    assert 'HERSCHEL_SPIRE_PSW' not in ig.finite_bands
+    f, _ = fmod.companion_injection_flux(_NAMES, _WAVE, 1000., 0.1, 10.)
+    i = list(_NAMES).index('HERSCHEL_SPIRE_PSW')
+    assert f[i] > 0
+    fin = [k for k, b in enumerate(_NAMES) if b in ig.finite_bands]
+    k = max(fin, key=lambda m: _WAVE[m])
+    assert f[i] < f[k]
+    # scales as R2^2
+    f2, _ = fmod.companion_injection_flux(_NAMES, _WAVE, 1000., 0.2, 10.)
+    assert np.allclose(f2, 4 * f)
