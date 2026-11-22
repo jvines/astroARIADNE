@@ -216,9 +216,9 @@ _MODBB_LAM0 = 210.0     # um
 _IRX_ABS_CAL_FLOOR = 0.02
 
 # Per-survey absolute flux-calibration uncertainty (1 sigma, fraction of the
-# flux) of the bands that can enter the IR-excess set. This is the default
-# ('full') error budget: each value is added IN QUADRATURE to the catalogue
-# error of the observed flux, replacing the flat 2% floor above (kept only for
+# flux) of the bands that can enter the IR-excess set, used by the
+# 'covariant' and 'independent' error budgets: each value is added IN
+# QUADRATURE to the catalogue error of the observed flux, replacing the flat 2% floor above (kept only for
 # the 'legacy' budget and as the fallback for bands not listed here). A
 # calibration error is multiplicative on the measured flux, so it is
 # c_b * F_obs. Values are taken from the instrument papers / explanatory
@@ -241,14 +241,20 @@ _IRX_ABS_CAL_FLOOR = 0.02
 #   Herschel PACS 70/100/160 um: 5% -- Balog et al. 2014, Exp. Astron. 37, 129.
 #   Herschel SPIRE 250/350/500 um: 5.5% -- Bendo et al. 2013, MNRAS 433, 3062
 #     (4% Neptune model + 1.5% random, summed linearly as recommended there).
-#   SPHEREx: 3% for detector bands 1-4 (<= 3.82 um), 5% for bands 5-6
-#     (3.82-5.0 um) -- the gain-calibration reliability of the QR spectral
-#     images (SPHEREx Explanatory Supplement, IRSA), against the 3% mission
-#     requirement of Bock et al. 2025 (arXiv:2511.02985).
-# Calibration errors are correlated between bands of one instrument; they are
-# treated as independent per band here, which is conservative for a
-# colour-driven discrimination (a common scale error cancels in colours) and
-# slightly generous for a single-instrument excess.
+#   SPHEREx: 1.4% for detector bands 1-4 (<= 3.82 um), 2.2% for bands 5-6
+#     (3.82-5.0 um) -- SPHEREx Explanatory Supplement v2.0 (SSDC-DP-017,
+#     2026-08-25) Sect. 4.2.1, which covers the DR1/QR3 gains that the
+#     librarian's DR1 extraction uses: the CALSPEC scale is "of order 1% or
+#     less" and the channels match it "to an accuracy of <1% ... with
+#     uncertainties of similar magnitude", i.e. 1% common + 1% per channel.
+#     Bands 5-6 are tied to only 1-6 standards (Table 26), most with 2-4%
+#     model systematics, so their common term is taken as 2% rather than
+#     averaged down to 1%. (The 3% term of Eq. 19 there is the catalogue's
+#     repeatability scatter, not a calibration term.)
+# These are each band's TOTAL calibration error. The 'independent' budget uses
+# them as independent per band; the default 'covariant' budget splits them
+# into an instrument-level absolute-scale term, fully correlated across the
+# instrument's bands, and an independent band-to-band term (_IRX_CAL_SPLIT).
 _IRX_ABS_CAL = {
     'WISE_RSR_W1': 0.024, 'WISE_RSR_W2': 0.028,
     'WISE_RSR_W3': 0.045, 'WISE_RSR_W4': 0.057,
@@ -266,18 +272,88 @@ _IRX_ABS_CAL = {
     'HERSCHEL_SPIRE_PLW': 0.055,
     **{f'IRS_{w}': 0.05 for w in (5500, 6500, 8000, 10000, 12000, 13000,
                                   15000, 18000, 23000, 30000, 35000)},
-    **{f'SPHEREX_{w}': 0.03 for w in (1050, 1130, 1400, 1850, 2350, 2750,
-                                      3050, 3350, 3700)},
-    **{f'SPHEREX_{w}': 0.05 for w in (4050, 4300, 4650, 4900)},
+    **{f'SPHEREX_{w}': 0.014 for w in (1050, 1130, 1400, 1850, 2350, 2750,
+                                       3050, 3350, 3700)},
+    **{f'SPHEREX_{w}': 0.022 for w in (4050, 4300, 4650, 4900)},
 }
 
-# IR-excess error budgets. 'full' (default): catalogue error + per-survey
-# calibration (_IRX_ABS_CAL) in quadrature on the observed side, and on the
-# model side the posterior-predictive spread widened to the EQUAL-WEIGHT
-# spread of the ensemble grids (see _irx_model_variance). 'legacy': the
-# pre-2026-11 budget -- max(catalogue error, 2% of the flux) and the
-# evidence-weighted posterior-predictive spread only.
-IRX_ERROR_BUDGETS = ('full', 'legacy')
+# Instrument-level split of the calibration error: band -> (instrument,
+# a_b, r_b), with a_b the fraction of the flux in the instrument's common
+# absolute scale (fully correlated between its bands) and r_b the independent
+# band-to-band part. Covariance of two bands b, b' of one instrument:
+# a_b a_b' F_b F_b' (+ r_b^2 F_b^2 on the diagonal).
+# Where a source documents the split it is used:
+#   IRAS: 3% common (the 12 um ground-based reference scale) + 2/5/5/10%
+#     relative (Explanatory Supplement VI.C.2.c).
+#   Herschel SPIRE: 4% common (Neptune model) + 1.5% per band (Bendo et al.
+#     2013). In this Gaussian model they add in quadrature (4.3%) rather than
+#     linearly (5.5%, Bendo's conservative single-band recommendation).
+#   SPHEREx: 1% common (CALSPEC scale; 2% in detector bands 5-6) + 1% per
+#     channel (Explanatory Supplement v2.0 Sect. 4.2.1).
+# Elsewhere no inter-band correlation is documented. Each instrument's bands
+# are tied to one set of standard-star (or planet/asteroid) models, so the
+# smallest total error among its bands is taken as the common absolute scale,
+# a = min_b c_b, and the remainder r_b = sqrt(c_b^2 - a^2) as independent. For
+# instruments with a single quoted value (IRAC 3%, IRS 5%, PACS 5%) this makes
+# the bands fully correlated; WISE gets 2.4% common (W1's total) and
+# 1.5/3.8/5.2% for W2/W3/W4; MIPS 2% common; AKARI IRC 3%, FIS 20%. The
+# diagonal is then each band's total calibration error, as in the
+# independent budget (except SPIRE, above). Bands of unknown instrument are
+# independent (2%).
+_IRX_INSTRUMENT_PREFIX = (
+    ('WISE_RSR_', 'WISE'), ('SPITZER_IRAC_', 'IRAC'), ('SPITZER_MIPS_', 'MIPS'),
+    ('IRS_', 'IRS'), ('AKARI_IRC_', 'AKARI_IRC'), ('AKARI_FIS_', 'AKARI_FIS'),
+    ('IRAS_', 'IRAS'), ('HERSCHEL_PACS_', 'PACS'),
+    ('HERSCHEL_SPIRE_', 'SPIRE'), ('SPHEREX_', 'SPHEREX'))
+
+
+def _irx_instrument(band):
+    """Instrument (calibration chain) of a band, or None if unknown."""
+    band = str(band)
+    for pre, inst in _IRX_INSTRUMENT_PREFIX:
+        if band.startswith(pre):
+            return inst
+    return None
+
+
+def _build_cal_split():
+    split = {}
+    groups = {}
+    for b, c in _IRX_ABS_CAL.items():
+        groups.setdefault(_irx_instrument(b), []).append(b)
+    for inst, bands in groups.items():
+        a = min(_IRX_ABS_CAL[b] for b in bands)
+        for b in bands:
+            c = _IRX_ABS_CAL[b]
+            split[b] = (inst, a, float(np.sqrt(max(c * c - a * a, 0.0))))
+    for b, r in (('IRAS_12', 0.02), ('IRAS_25', 0.05), ('IRAS_60', 0.05),
+                 ('IRAS_100', 0.10)):
+        split[b] = ('IRAS', 0.03, r)
+    for b in ('HERSCHEL_SPIRE_PSW', 'HERSCHEL_SPIRE_PMW',
+              'HERSCHEL_SPIRE_PLW'):
+        split[b] = ('SPIRE', 0.04, 0.015)
+    for b in _IRX_ABS_CAL:
+        if b.startswith('SPHEREX_'):
+            split[b] = ('SPHEREX', 0.02 if int(b.split('_')[1]) >= 3820
+                        else 0.01, 0.01)
+    return split
+
+
+_IRX_CAL_SPLIT = _build_cal_split()
+
+# IR-excess error budgets.
+#   'covariant' (default): catalogue error, the band's calibration split into
+#     an instrument-level common term (correlated between the instrument's
+#     bands) and an independent band term (_IRX_CAL_SPLIT), the confusion
+#     noise, and the photosphere-model term widened to the EQUAL-WEIGHT spread
+#     of the ensemble grids (_irx_model_variance); the evidence uses the full
+#     covariance matrix.
+#   'independent': the same terms, with each band's total calibration error
+#     (_IRX_ABS_CAL) treated as independent -- a diagonal covariance.
+#   'legacy': the pre-2026-11 budget -- max(catalogue error, 2% of the flux)
+#     and the evidence-weighted posterior-predictive spread only.
+IRX_ERROR_BUDGETS = ('covariant', 'independent', 'legacy')
+IRX_ERROR_BUDGET_DEFAULT = 'covariant'
 
 
 def _irx_abs_cal_frac(band):
@@ -286,19 +362,51 @@ def _irx_abs_cal_frac(band):
     return float(_IRX_ABS_CAL.get(str(band), _IRX_ABS_CAL_FLOOR))
 
 
-def _irx_obs_error(band, obs, obs_err, budget='full'):
-    """Observed-side error of an excess band before the confusion term.
+def _irx_cal_total(band, budget):
+    """Total fractional calibration error of a band under a budget."""
+    if budget == 'covariant' and str(band) in _IRX_CAL_SPLIT:
+        _, a, r = _IRX_CAL_SPLIT[str(band)]
+        return float(np.hypot(a, r))
+    if budget == 'legacy':
+        return _IRX_ABS_CAL_FLOOR
+    return _irx_abs_cal_frac(band)
 
-    'full': catalogue error and the band's absolute calibration in quadrature.
-    'legacy': the catalogue error floored at 2% of the observed flux."""
+
+def _irx_obs_error(band, obs, obs_err, budget=IRX_ERROR_BUDGET_DEFAULT):
+    """Observed-side (marginal) error of an excess band before the confusion
+    term.
+
+    'covariant' / 'independent': catalogue error and the band's total
+    calibration error in quadrature. 'legacy': the catalogue error floored at
+    2% of the observed flux."""
     obs, obs_err = float(obs), float(obs_err)
     if budget == 'legacy':
         return max(obs_err, _IRX_ABS_CAL_FLOOR * obs)
-    return float(np.hypot(obs_err, _irx_abs_cal_frac(band) * abs(obs)))
+    return float(np.hypot(obs_err, _irx_cal_total(band, budget) * abs(obs)))
+
+
+def _irx_cal_offdiag(bands, obs):
+    """Off-diagonal calibration covariance of the 'covariant' budget:
+    a_b a_b' F_b F_b' for two different bands of one instrument, else 0
+    (the diagonal carries each band's full variance already)."""
+    bands = [str(b) for b in bands]
+    obs = np.asarray(obs, float)
+    n = len(bands)
+    C = np.zeros((n, n))
+    for i in range(n):
+        si = _IRX_CAL_SPLIT.get(bands[i])
+        if si is None:
+            continue
+        for j in range(i + 1, n):
+            sj = _IRX_CAL_SPLIT.get(bands[j])
+            if sj is None or sj[0] != si[0]:
+                continue
+            C[i, j] = C[j, i] = si[1] * sj[1] * obs[i] * obs[j]
+    return C
 
 
 def _irx_model_variance(pp_var, grid_means, grid_vars, weights, mean):
-    """Photosphere-model variance of one excess band (the 'full' budget).
+    """Photosphere-model variance of one excess band (the non-legacy budgets).
 
     The BMA posterior-predictive variance is, by the law of total variance,
     sum_g w_g var_g + sum_g w_g (mu_g - mean)^2: the between-grid term is
@@ -815,7 +923,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                             fit_errs=None, rad_primary=None, prim_ig=None,
                             logg_primary=None, teff_primary_err=None,
                             rad_primary_err=None, exc_obs=None, fit_obs=None,
-                            wd_host=False, exc_corr=None):
+                            wd_host=False, exc_corr=None, excess_cov=None):
     """Bayesian model selection on the IR excess.
 
     Compares three hypotheses for the excess fluxes by their Bayesian evidence:
@@ -838,6 +946,13 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     one. Returns ``None`` if <2 finite bands
     or distance/luminosity are unknown. ``wd_host`` lifts the main-sequence
     hot-dust ceiling on the disk hypothesis (see ``_disk_lmax``).
+
+    ``excess_cov`` (n x n, same band order as ``excess``) replaces the
+    diagonal ``excess_err**2`` by a full covariance -- the instrument-level
+    calibration term of the 'covariant' error budget. Every excess-band
+    chi^2 then becomes r^T C^-1 r (and every profiled amplitude the matching
+    generalised least-squares solution); log det C is common to all
+    hypotheses and cancels, so the quadrature evidences stay exact.
     """
     from scipy.constants import h as H, c as C, k as KB, sigma as SB
     w = np.asarray(waves_um, float)
@@ -851,10 +966,30 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     w, F, E = w[sel], F[sel], E[sel]
     lam = w * 1e-6
     inv2 = 1.0 / E ** 2
+    Ci = None
+    if excess_cov is not None:
+        Cm = np.asarray(excess_cov, float)[np.ix_(sel, sel)]
+        try:
+            Ci = np.linalg.inv(Cm)
+        except np.linalg.LinAlgError:      # singular: fully correlated, no noise
+            Ci = np.linalg.pinv(Cm)
+        Ci = 0.5 * (Ci + Ci.T)
+
+    def _qf(R):
+        """Excess-band chi^2 of residual(s) R along the last axis."""
+        if Ci is None:
+            return np.sum(R ** 2 * inv2, axis=-1)
+        return np.sum((R @ Ci) * R, axis=-1)
+
+    def _bf(X, Y):
+        """Excess-band inner product <X, Y> along the last axis."""
+        if Ci is None:
+            return np.sum(X * Y * inv2, axis=-1)
+        return np.sum((X @ Ci) * Y, axis=-1)
     d_cm = dist_pc * 3.0856775815e18
     l_star = lum_lsun * 3.828e33
 
-    chi2_null = float(np.sum(F ** 2 * inv2))             # model = 0
+    chi2_null = float(_qf(F))             # model = 0
 
     # Fit-band consistency penalty. The photosphere fit converged on the fit
     # bands, so any flux an excess component adds there would have appeared as
@@ -899,7 +1034,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
         B = _bmod(lam, T, mod_irx)
         Omega = Lg * l_star / (4 * d_cm ** 2 * SB * T ** 4 * 1e3 * Xg[i])
         mod = Omega[:, None] * B[None, :]
-        chi2_disk[i] = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
+        chi2_disk[i] = _qf(F[None, :] - mod)
         if have_fit:
             Bf = _bmod(flam_fit, T, mod_fit)
             chi2_disk[i] += Omega ** 2 * float(np.sum(Bf ** 2 * finv2))
@@ -945,7 +1080,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             if not ordered.any():
                 continue
             mod2 = Mc[i][None, :] + Mc[ordered]
-            c2 = np.sum((F[None, :] - mod2) ** 2 * inv2[None, :], axis=1)
+            c2 = _qf(F[None, :] - mod2)
             if have_fit:
                 c2 += np.sum((Pf2[i][None, :] + Pf2[ordered]) ** 2
                              * finv2[None, :], axis=1)
@@ -1080,9 +1215,9 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
         c_fit = float(np.min(chi2_p)) if np.isfinite(chi2_p).any() else 0.0
         V_prim = float(np.mean(np.exp(-(chi2_p - c_fit) / 2)))
         # Pre-summed primary terms for the joint A1 profile (teff1-only).
-        num0 = (np.sum(obs_e[None, :] * Pe * inv2, axis=1)
+        num0 = (_bf(obs_e[None, :], Pe)
                 + np.sum(obs_f[None, :] * Pf * finv2, axis=1))
-        den = den_f + np.sum(Pe ** 2 * inv2, axis=1)
+        den = den_f + _qf(Pe)
         # Re-optimised NULL (the R2 -> 0 limit of the joint companion), on the
         # SAME [(fit - c_fit) + excess] scale as the companion chi^2. The null
         # MUST get the same primary (teff1, rad1) re-optimisation the companion
@@ -1096,7 +1231,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             if not np.isfinite(a1n[k]):
                 continue
             cf_k = float(np.sum((obs_f - a1n[k] * Pf[k]) ** 2 * finv2))
-            ce_k = float(np.sum((obs_e - a1n[k] * Pe[k]) ** 2 * inv2))
+            ce_k = float(_qf(obs_e - a1n[k] * Pe[k]))
             chi2_null_re[k] = (cf_k - c_fit) + ce_k
 
     # Dust hypotheses on the same footing in the joint branch. The null and the
@@ -1130,12 +1265,12 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             for k in range(n1):
                 if not ok1[k]:
                     continue
-                cbp = float(np.sum(Be * Pe[k] * inv2))
+                cbp = float(_bf(Be, Pe[k]))
                 a1 = np.clip((num0[k] - Om * cbp) / den[k], a1_lo, a1_hi)
                 me = a1[:, None] * Pe[k][None, :] + Om[:, None] * Be[None, :]
                 mf = a1[:, None] * Pf[k][None, :]
                 c = ((np.sum((obs_f[None, :] - mf) ** 2 * finv2[None, :], axis=1) - c_fit)
-                     + np.sum((obs_e[None, :] - me) ** 2 * inv2[None, :], axis=1)
+                     + _qf(obs_e[None, :] - me)
                      + Om ** 2 * float(np.sum(Bfit ** 2 * finv2)))
                 x = np.where(valid, -c / 2, -np.inf)
                 mnew = np.maximum(lse_m[i], x)
@@ -1147,7 +1282,8 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             chi2_disk = np.where(np.isfinite(lse_m) & (lse_s > 0),
                                  -2 * (lse_m + np.log(lse_s / n1)), np.inf)
         if chi2_disk2 is not None:
-            cB_all = [Mc @ (Pe[k] * inv2) for k in range(n1)]
+            cB_all = [(Mc @ (Pe[k] * inv2)) if Ci is None
+                      else _bf(Mc, Pe[k][None, :]) for k in range(n1)]
             m2 = np.full((ncomb, ncomb), -np.inf)
             s2 = np.zeros((ncomb, ncomb))
             for i in range(ncomb):
@@ -1166,7 +1302,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                     mf = a1[:, None] * Pf[k][None, :]
                     pen = np.sum((Pf2[i][None, :] + Pf2[idx]) ** 2 * finv2[None, :], axis=1)
                     x = -((np.sum((obs_f[None, :] - mf) ** 2 * finv2[None, :], axis=1) - c_fit)
-                          + np.sum((obs_e[None, :] - me) ** 2 * inv2[None, :], axis=1)
+                          + _qf(obs_e[None, :] - me)
                           + pen) / 2
                     mold = m2[i, idx]
                     mnew = np.maximum(mold, x)
@@ -1231,7 +1367,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                     else np.zeros(fn_b.size)
                 cf_b = np.where(np.isfinite(cf_b), cf_b, 0.0)
                 R2sq = R2g ** 2
-                cP = (np.sum(funit[None, :] * Pe * inv2, axis=1)
+                cP = (_bf(funit[None, :], Pe)
                       + np.sum(cf_b[None, :] * Pf * finv2, axis=1))   # per t1
                 for k in range(Tg1.size):
                     if not np.isfinite(den[k]) or den[k] <= 0:
@@ -1242,8 +1378,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                         + R2sq[:, None] * funit[None, :]
                     mf = a1[:, None] * Pf[k][None, :] \
                         + R2sq[:, None] * cf_b[None, :]
-                    ce = np.sum((obs_e[None, :] - me) ** 2 * inv2[None, :],
-                                axis=1)
+                    ce = _qf(obs_e[None, :] - me)
                     cfit = np.sum((obs_f[None, :] - mf) ** 2 * finv2[None, :],
                                   axis=1)
                     chi2[k, i] = (cfit - c_fit) + ce      # Delta-fit + excess
@@ -1256,7 +1391,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                         np.inf, chi2[k, i])
             else:
                 mod = (R2g ** 2)[:, None] * funit[None, :]
-                c0 = np.sum((F[None, :] - mod) ** 2 * inv2[None, :], axis=1)
+                c0 = _qf(F[None, :] - mod)
                 if have_fit:
                     cf = funit_all[len(names):]
                     okc = np.isfinite(cf) & (cf > 0)
@@ -1657,11 +1792,12 @@ class Fitter:
         self._do_irx = False
         self._force_wd = False        # set by fit_wd(); forces the WD path
         # IR-excess error budget (see IRX_ERROR_BUDGETS / docs/irx.md):
-        # 'full' adds each survey's absolute calibration and the equal-weight
-        # inter-grid photosphere spread to the per-band variance; 'legacy'
-        # reproduces the pre-2026-11 budget (2% floor, evidence-weighted
-        # spread only).
-        self.irx_error_budget = 'full'
+        # 'covariant' (default) adds each survey's calibration, correlated
+        # between the bands of one instrument, and the equal-weight inter-grid
+        # photosphere spread; 'independent' treats calibration as independent
+        # per band; 'legacy' reproduces the pre-2026-11 budget (2% floor,
+        # evidence-weighted spread only).
+        self.irx_error_budget = IRX_ERROR_BUDGET_DEFAULT
         # Cool grids of the IRX companion hypothesis. None -> config
         # COOL_COMPANION_GRIDS. Set e.g. to leave out the grid an injection
         # was drawn from (a held-out injection-recovery test).
@@ -3128,7 +3264,7 @@ class Fitter:
         Koester photosphere + WD priors automatically; fit_wd() is the
         explicit WD endpoint.
 
-        ``error_budget`` ('full' or 'legacy') overrides
+        ``error_budget`` ('covariant', 'independent' or 'legacy') overrides
         ``self.irx_error_budget`` for this call; see docs/irx.md.
         """
         if error_budget is not None:
@@ -3831,13 +3967,14 @@ class Fitter:
         ndraw = 256
         gpick = rng.choice(len(members), size=ndraw,
                            p=[w for _, w, _ in members])
-        budget = getattr(self, 'irx_error_budget', 'full') or 'full'
+        budget = (getattr(self, 'irx_error_budget', None)
+                  or IRX_ERROR_BUDGET_DEFAULT)
         if budget not in IRX_ERROR_BUDGETS:
             raise ValueError(f'irx_error_budget must be one of '
                              f'{IRX_ERROR_BUDGETS}, got {budget!r}')
         # Per-grid predictive draws for the equal-weight model spread of the
-        # 'full' budget; a separate stream keeps the posterior-predictive draws
-        # (and so the 'legacy' numbers) unchanged.
+        # non-legacy budgets; a separate stream keeps the posterior-predictive
+        # draws (and so the 'legacy' numbers) unchanged.
         rng_g = np.random.default_rng(1)
         ngrid_draw = 32
 
@@ -3892,7 +4029,7 @@ class Fitter:
             model_err = float(np.nanstd(draws))
             model_err_pp = model_err
             model_err_grid = 0.0
-            if budget == 'full' and len(members) > 1:
+            if budget != 'legacy' and len(members) > 1:
                 gmu, gvar = [], []
                 for g, _w, ps in members:
                     n = len(ps['teff'])
@@ -3918,8 +4055,8 @@ class Fitter:
                 model = model * (1.0 + r_base)
             excess = float(fo) - model
             # Absolute calibration of the survey (see _IRX_ABS_CAL): in
-            # quadrature with the catalogue error ('full'), or the old 2% floor
-            # on it ('legacy'). The raw catalogue error omits it and can be
+            # quadrature with the catalogue error ('covariant', 'independent'),
+            # or the old 2% floor on it ('legacy'). The raw catalogue error omits it and can be
             # unphysically small for bright IR points.
             obs_e_eff = _irx_obs_error(f, fo, fe, budget)
             # Add the far-IR confusion noise (see _IRX_CONF_MJY): the catalogue
@@ -3937,8 +4074,7 @@ class Fitter:
                              baseline_corr=r_base,
                              model_err_pp=model_err_pp,
                              model_err_grid=model_err_grid,
-                             cal_frac=(_irx_abs_cal_frac(f) if budget == 'full'
-                                       else _IRX_ABS_CAL_FLOOR))
+                             cal_frac=_irx_cal_total(f, budget))
         q = {k: v for k, v in result.items() if v['quantified']}
         sig = sorted(k for k, v in q.items()
                      if np.isfinite(v['sigma']) and v['sigma'] >= _IRX_SIG_THRESH)
@@ -3955,6 +4091,14 @@ class Fitter:
         errs = [float(np.hypot(v.get('obs_err_eff', v['obs_err']),
                                v['model_err']))
                 for v in q.values()]
+        # Full covariance of the excess bands ('covariant' budget): the
+        # diagonal is errs^2; instrument-level calibration correlates bands of
+        # one instrument.
+        exc_cov = None
+        if budget == 'covariant' and q:
+            exc_cov = (np.diag(np.asarray(errs, float) ** 2)
+                       + _irx_cal_offdiag(list(q),
+                                          [v['obs'] for v in q.values()]))
         ms = {}
         if members:
             gname = max(members, key=lambda mm: mm[1])[0]   # highest weight
@@ -4011,7 +4155,7 @@ class Fitter:
                 teff_primary_err=unc.get('teff'), rad_primary_err=unc.get('rad'),
                 exc_obs=[v['obs'] for v in q.values()], wd_host=wd,
                 exc_corr=[1.0 + v.get('baseline_corr', 0.0) for v in q.values()],
-                **fkw) or {}
+                excess_cov=exc_cov, **fkw) or {}
             # Compact-primary composite demotion: a companion whose radius RAILS
             # at the substellar cap (_IRX_WD_R2_MAX) is too luminous to be a
             # brown dwarf -- it is a luminous (dM) companion (the joint-binary

@@ -100,13 +100,35 @@ err_phot^2 = max(var_pp, sum_g w_g var_g + mean_g (mu_g - F_phot)^2)
   | IRAS 12/25/60/100 µm | 3.6 / 5.8 / 5.8 / 10.4% | IRAS Explanatory Supplement VI.C.2.c: 2/5/5/10% relative to the 12 µm reference, which is itself 3%, combined in quadrature |
   | Herschel PACS 70/100/160 | 5% | Balog et al. 2014 |
   | Herschel SPIRE 250/350/500 | 5.5% | Bendo et al. 2013 |
-  | SPHEREx ≤ 3.82 µm / 3.82–5 µm | 3 / 5% | QR gain-calibration reliability, SPHEREx Explanatory Supplement (IRSA) |
+  | SPHEREx ≤ 3.82 µm / 3.82–5 µm | 1.4 / 2.2% | SPHEREx Explanatory Supplement v2.0 (2026-08-25) Sect. 4.2.1: ~1% CALSPEC scale + <1% per channel; bands 5–6 rest on 1–6 standards with 2–4% model systematics, so 2% common there |
   | any other band | 2% | the former generic floor |
 
-  Calibration errors are correlated between bands of one instrument; they
-  are treated as independent per band. In colours a common scale error
-  cancels, so independence overstates the error there, while for a
-  single-instrument excess level it understates it slightly.
+  **Correlation between bands (default `'covariant'` budget).** Bands of
+  one instrument share its absolute scale, so `c_b` is split into a common
+  term `a_b`, fully correlated across the instrument's bands, and an
+  independent band-to-band term `r_b`, with `c_b^2 = a_b^2 + r_b^2`. Two
+  bands `b ≠ b'` of one instrument have covariance `a_b a_b' F_b F_b'`.
+  Where the source documents the split it is used: IRAS 3% common (the
+  12 µm reference scale) + 2/5/5/10%; SPIRE 4% common (Neptune model) +
+  1.5% per band, combined in quadrature (4.3%) rather than linearly as in
+  the 5.5% above; SPHEREx 1% common (2% in detector bands 5–6) + 1% per
+  channel. No other instrument documents an inter-band correlation. Their
+  bands are tied to one set of standard-star (or planet/asteroid) models,
+  so the smallest `c_b` among an instrument's bands is taken as the common
+  scale and the rest as independent: IRAC, IRS and PACS are fully
+  correlated (3, 5, 5%); WISE has 2.4% common and 0/1.4/3.8/5.2%
+  independent for W1–W4; MIPS has 2% common; AKARI IRC 3%; FIS 20%. Bands
+  of an unknown instrument are independent.
+
+  The evidence then uses the full covariance matrix `C`: every excess-band
+  χ² is `rᵀ C⁻¹ r` and the profiled primary amplitude of the cool-host joint
+  fit is the matching generalised least-squares solution. `log det C` does
+  not depend on the hypothesis and cancels, so the quadrature evidences
+  stay exact. The per-band significances use the marginal (diagonal)
+  errors. A common offset of one instrument's whole scale is now mostly
+  absorbed. Independent errors would read it as a coherent excess in all of
+  that instrument's bands. The photosphere-model and confusion terms stay
+  diagonal.
 - `err_conf` is the far-IR extragalactic confusion noise (unchanged).
 - `err_phot` is the **photosphere model uncertainty**. `var_pp` is the
   variance of the BMA posterior-predictive draws, i.e. the within-grid
@@ -122,9 +144,14 @@ err_phot^2 = max(var_pp, sum_g w_g var_g + mean_g (mu_g - F_phot)^2)
   The empirical WISE baseline correction and its error are applied on top,
   as before.
 
-This is the `'full'` budget and the default. `Fitter.irx_error_budget =
-'legacy'` (or `fit_irx(error_budget='legacy')`) reproduces the earlier
-budget exactly: the catalogue error floored at 2% of the flux (`max(err_cat,
+Three budgets are available through `Fitter.irx_error_budget` or
+`fit_irx(error_budget=...)`:
+
+- `'covariant'` (default): the terms above with the instrument-level
+  calibration covariance.
+- `'independent'`: the same terms, with each band's total `c_b` treated as
+  independent (a diagonal covariance).
+- `'legacy'`: reproduces the earlier budget exactly: the catalogue error floored at 2% of the flux (`max(err_cat,
 0.02 F_obs)`) and `err_phot^2 = var_pp`. The budget used is recorded as
 `out['irx']['_summary']['error_budget']`. Each band also stores
 `model_err_pp` (the posterior-predictive part), `model_err_grid` (the
