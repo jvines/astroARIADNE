@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Selectable companion injection model for injection-recovery tests.**
+  `fitter.companion_injection_flux(..., model='sonora')` builds an injected
+  companion from Sonora Bobcat by default (no longer BT-Settl, which shares
+  its PHOENIX physics with the BT-family recovery grids). Above Bobcat's
+  2400 K ceiling it falls back to ATMO 2020 and reports the model it used;
+  `model='btsettl'` reproduces the old injections. The new
+  `Fitter.irx_companion_grids` overrides the companion recovery grids, so
+  the injection grid can be held out.
 - **Predict the best-fit SED in any filter.** `Fitter.synthetic_filters`
   takes pyphot library filter names, `pyphot.Filter` objects or
   `(name, wavelength_um, transmission[, 'energy'])` tuples. Filters that are
@@ -60,6 +68,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (AB for SDSS, PS1, SkyMapper and GALEX, Vega otherwise). The choice is used
   everywhere magnitudes become fluxes and back: the fit, the outlier clip,
   the plots and the synthetic magnitudes.
+
+### Changed
+- **IR-excess error budget now includes survey calibration and model
+  uncertainty (`irx_error_budget='full'`, the default).** The excess
+  likelihood used the catalogue error floored at 2% and the
+  evidence-weighted posterior-predictive spread of the photosphere, which
+  gave |ln B| of several hundred on three bands. Each excess band now adds
+  its survey's absolute calibration uncertainty in quadrature (WISE, Spitzer
+  IRAC/MIPS/IRS, AKARI IRC/FIS, IRAS, Herschel PACS/SPIRE and SPHEREx values
+  from the instrument papers; 2% for any other band). The photosphere-model
+  term uses the equal-weight spread of the ensemble grids, because grid
+  evidences from the optical/NIR say nothing about the mid/far-IR. Set
+  `Fitter.irx_error_budget = 'legacy'` or call
+  `fit_irx(error_budget='legacy')` to reproduce the earlier numbers exactly.
+  See docs/irx.md, "Error budget".
 
 ### Fixed
 - **SPHEREx VARIANCE plane read from the wrong bytes in all but the first

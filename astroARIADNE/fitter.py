@@ -215,6 +215,118 @@ _MODBB_LAM0 = 210.0     # um
 # Floor the *observed* error at this fraction of the observed flux.
 _IRX_ABS_CAL_FLOOR = 0.02
 
+# Per-survey absolute flux-calibration uncertainty (1 sigma, fraction of the
+# flux) of the bands that can enter the IR-excess set. This is the default
+# ('full') error budget: each value is added IN QUADRATURE to the catalogue
+# error of the observed flux, replacing the flat 2% floor above (kept only for
+# the 'legacy' budget and as the fallback for bands not listed here). A
+# calibration error is multiplicative on the measured flux, so it is
+# c_b * F_obs. Values are taken from the instrument papers / explanatory
+# supplements; where a source quotes a reference-scale term and a transfer term
+# separately they are combined in quadrature.
+#   WISE W1-W4: 2.4, 2.8, 4.5, 5.7% -- Jarrett et al. 2011, ApJ 735, 112.
+#   Spitzer IRAC (all four channels): 3% -- Reach et al. 2005, PASP 117, 978.
+#   Spitzer MIPS 24/70/160: 2, 5, 12% -- Engelbracht et al. 2007, PASP 119,
+#     994; Gordon et al. 2007, PASP 119, 1019; Stansberry et al. 2007, PASP
+#     119, 1038.
+#   Spitzer IRS low-res (CASSIS super-bands): 5% -- IRS Instrument Handbook
+#     v5.0 Sect. 9.3 (synthetic IRS photometry of the calibrators reproduces
+#     IRAC 8, PU16/22 and MIPS 24 to better than 5%).
+#   AKARI IRC 9/18 um: 3, 4% -- Ishihara et al. 2010, A&A 514, A1.
+#   AKARI FIS N60/WIDE-S/WIDE-L/N160: 20, 20, 30, 40% -- Kawada et al. 2007,
+#     PASJ 59, S389 (signal-to-flux calibration uncertainties).
+#   IRAS 12/25/60/100 um: 3.6, 5.8, 5.8, 10.4% -- IRAS Explanatory Supplement
+#     (Beichman et al. 1988) Sect. VI.C.2.c: 2/5/5/10% relative to the 12 um
+#     ground-based reference, whose own absolute scale is 3%, in quadrature.
+#   Herschel PACS 70/100/160 um: 5% -- Balog et al. 2014, Exp. Astron. 37, 129.
+#   Herschel SPIRE 250/350/500 um: 5.5% -- Bendo et al. 2013, MNRAS 433, 3062
+#     (4% Neptune model + 1.5% random, summed linearly as recommended there).
+#   SPHEREx: 3% for detector bands 1-4 (<= 3.82 um), 5% for bands 5-6
+#     (3.82-5.0 um) -- the gain-calibration reliability of the QR spectral
+#     images (SPHEREx Explanatory Supplement, IRSA), against the 3% mission
+#     requirement of Bock et al. 2025 (arXiv:2511.02985).
+# Calibration errors are correlated between bands of one instrument; they are
+# treated as independent per band here, which is conservative for a
+# colour-driven discrimination (a common scale error cancels in colours) and
+# slightly generous for a single-instrument excess.
+_IRX_ABS_CAL = {
+    'WISE_RSR_W1': 0.024, 'WISE_RSR_W2': 0.028,
+    'WISE_RSR_W3': 0.045, 'WISE_RSR_W4': 0.057,
+    'SPITZER_IRAC_36': 0.03, 'SPITZER_IRAC_45': 0.03,
+    'SPITZER_IRAC_58': 0.03, 'SPITZER_IRAC_80': 0.03,
+    'SPITZER_MIPS_24': 0.02, 'SPITZER_MIPS_70': 0.05,
+    'SPITZER_MIPS_160': 0.12,
+    'AKARI_IRC_S9W': 0.03, 'AKARI_IRC_L18W': 0.04,
+    'AKARI_FIS_N60': 0.20, 'AKARI_FIS_WIDE_S': 0.20,
+    'AKARI_FIS_WIDE_L': 0.30, 'AKARI_FIS_N160': 0.40,
+    'IRAS_12': 0.036, 'IRAS_25': 0.058, 'IRAS_60': 0.058, 'IRAS_100': 0.104,
+    'HERSCHEL_PACS_BLUE': 0.05, 'HERSCHEL_PACS_GREEN': 0.05,
+    'HERSCHEL_PACS_RED': 0.05,
+    'HERSCHEL_SPIRE_PSW': 0.055, 'HERSCHEL_SPIRE_PMW': 0.055,
+    'HERSCHEL_SPIRE_PLW': 0.055,
+    **{f'IRS_{w}': 0.05 for w in (5500, 6500, 8000, 10000, 12000, 13000,
+                                  15000, 18000, 23000, 30000, 35000)},
+    **{f'SPHEREX_{w}': 0.03 for w in (1050, 1130, 1400, 1850, 2350, 2750,
+                                      3050, 3350, 3700)},
+    **{f'SPHEREX_{w}': 0.05 for w in (4050, 4300, 4650, 4900)},
+}
+
+# IR-excess error budgets. 'full' (default): catalogue error + per-survey
+# calibration (_IRX_ABS_CAL) in quadrature on the observed side, and on the
+# model side the posterior-predictive spread widened to the EQUAL-WEIGHT
+# spread of the ensemble grids (see _irx_model_variance). 'legacy': the
+# pre-2026-11 budget -- max(catalogue error, 2% of the flux) and the
+# evidence-weighted posterior-predictive spread only.
+IRX_ERROR_BUDGETS = ('full', 'legacy')
+
+
+def _irx_abs_cal_frac(band):
+    """Fractional absolute-calibration uncertainty of a band (_IRX_ABS_CAL),
+    falling back to the generic 2% floor for bands not tabulated."""
+    return float(_IRX_ABS_CAL.get(str(band), _IRX_ABS_CAL_FLOOR))
+
+
+def _irx_obs_error(band, obs, obs_err, budget='full'):
+    """Observed-side error of an excess band before the confusion term.
+
+    'full': catalogue error and the band's absolute calibration in quadrature.
+    'legacy': the catalogue error floored at 2% of the observed flux."""
+    obs, obs_err = float(obs), float(obs_err)
+    if budget == 'legacy':
+        return max(obs_err, _IRX_ABS_CAL_FLOOR * obs)
+    return float(np.hypot(obs_err, _irx_abs_cal_frac(band) * abs(obs)))
+
+
+def _irx_model_variance(pp_var, grid_means, grid_vars, weights, mean):
+    """Photosphere-model variance of one excess band (the 'full' budget).
+
+    The BMA posterior-predictive variance is, by the law of total variance,
+    sum_g w_g var_g + sum_g w_g (mu_g - mean)^2: the between-grid term is
+    weighted by the grid evidences. Those evidences come from the optical/NIR
+    fit bands and say nothing about how well each grid's atmosphere physics
+    holds in the mid/far-IR, so a weight that collapses onto one grid also
+    collapses the model uncertainty at exactly the wavelengths it was never
+    tested on. The full budget therefore uses the EQUAL-WEIGHT spread of the
+    grids' predictions about the reported (BMA) mean for the between-grid
+    term, keeps the evidence-weighted within-grid term, and never returns
+    less than the posterior-predictive variance itself:
+
+        var = max(pp_var, sum_g w_g var_g + mean_g (mu_g - mean)^2).
+
+    With one grid the between-grid term is zero and the result is pp_var.
+    """
+    gm = np.asarray(grid_means, float)
+    gv = np.asarray(grid_vars, float)
+    w = np.asarray(weights, float)
+    ok = np.isfinite(gm) & np.isfinite(gv) & np.isfinite(w)
+    if not ok.any():
+        return float(pp_var)
+    gm, gv, w = gm[ok], gv[ok], w[ok]
+    w = w / w.sum() if w.sum() > 0 else np.full(w.size, 1.0 / w.size)
+    within = float(np.sum(w * gv))
+    between_eq = float(np.mean((gm - float(mean)) ** 2))
+    return float(max(float(pp_var), within + between_eq))
+
 # Substellar companion radius ceiling (Rsun) for the IR-excess companion
 # hypothesis on a COMPACT (WD / sdB) primary. A companion detectable ONLY as IR
 # excess -- unresolved, not dominating the optical (the host still fits as a
@@ -350,6 +462,94 @@ def _irx_confusion_sigma(band, lam_um):
     return float(((c * 1e-3) * u.Jy).to(
         u.erg / u.s / u.cm ** 2 / u.um,
         equivalencies=u.spectral_density(float(lam_um) * u.um)).value)
+
+
+# Companion models available for injection-recovery tests, and the default.
+# Injecting from the BT family (BT-Settl) while recovering with BT-NextGen/
+# BT-Cond/BT-Dusty and the BT-Settl fit grid makes the test circular: the
+# recovery grids share the PHOENIX code, opacities and cloud treatment of the
+# injected spectrum. Sonora Bobcat (Marley et al. 2021; its own radiative-
+# convective code, cloudless) is the default injection model. The shipped
+# Sonora cube is Bobcat only (Teff 200-2400 K, logg 3-5.5, [M/H] -0.5..+0.5);
+# Diamondback and Elf Owl are not in the grid cache. Above Bobcat's 2400 K the
+# injection falls back to ATMO 2020 (Phillips et al. 2020; the ATMO code,
+# independent of PHOENIX, to 3000 K) -- the most independent non-BT model
+# reaching the late-M regime. Both are also members of the recovery ensemble
+# (one each of its five companion grids); for a fully held-out test set
+# Fitter.irx_companion_grids to leave the injection grid out.
+IRX_INJECTION_MODELS = ('sonora', 'atmo', 'btsettl', 'btnextgen', 'btcond',
+                        'btdusty')
+IRX_INJECTION_DEFAULT = 'sonora'
+IRX_INJECTION_FALLBACK = 'atmo'
+
+
+def _grid_teff_range(ig, logg, z):
+    """Teff range of the finite nodes of a grid at the (snapped) logg / [M/H]
+    nodes -- the injection support. Returns (lo, hi, logg_node, z_node)."""
+    la, ta, fa = (np.asarray(a, float) for a in ig.index_columns)
+    lg = float(la[int(np.argmin(np.abs(la - logg)))])
+    zz = float(fa[int(np.argmin(np.abs(fa - z)))])
+    il = int(np.argmin(np.abs(la - lg)))
+    iz = int(np.argmin(np.abs(fa - zz)))
+    fin = np.isfinite(ig.grid[il, :, iz, :]).any(axis=-1)
+    if not fin.any():
+        return np.nan, np.nan, lg, zz
+    return float(ta[fin].min()), float(ta[fin].max()), lg, zz
+
+
+def companion_injection_flux(names, wave, teff2, rad2, dist_pc,
+                             model=IRX_INJECTION_DEFAULT,
+                             fallback=IRX_INJECTION_FALLBACK, logg=5.0, z=0.0,
+                             av=0.0, av_law=None, use_norm=False):
+    """Band fluxes of an unresolved cool companion, for injection tests.
+
+    Returns ``(flux, model_used)``: the companion's flux (erg/s/cm^2/um) in
+    every band of ``names`` for a photosphere of ``teff2`` and radius ``rad2``
+    (Rsun) at ``dist_pc``, drawn from grid ``model`` at the logg / [M/H]
+    nodes nearest ``logg`` / ``z`` (snapped, as the recovery does, so sparse
+    cubes never interpolate onto missing nodes). When ``teff2`` lies outside
+    ``model``'s finite Teff range at those nodes, ``fallback`` is used instead
+    (``None`` raises). Bands the grid has no flux for are filled with the
+    same asymptotes the recovery uses: Rayleigh-Jeans from the reddest finite
+    band at >= 8 um, zero below 1 um; anything else is zero.
+    """
+    from .sed_library import load_grid as _lg, model_grid as _mg
+    if av_law is None:
+        av_law = extinction.fitzpatrick99
+    names = np.asarray(names)
+    wave = np.asarray(wave, float)
+    model = str(model).lower()
+    if model not in IRX_INJECTION_MODELS:
+        raise ValueError(f'injection model must be one of '
+                         f'{IRX_INJECTION_MODELS}, got {model!r}')
+    ig = _lg(model)
+    lo, hi, lg, zz = _grid_teff_range(ig, logg, z)
+    if not (np.isfinite(lo) and lo <= float(teff2) <= hi):
+        if fallback is None or str(fallback).lower() == model:
+            raise ValueError(f'Teff2 = {teff2:g} K is outside {model} '
+                             f'({lo:g}-{hi:g} K at logg {lg:g}, [M/H] {zz:g})')
+        return companion_injection_flux(names, wave, teff2, rad2, dist_pc,
+                                        model=fallback, fallback=None,
+                                        logg=logg, z=z, av=av, av_law=av_law,
+                                        use_norm=use_norm)
+    theta = (np.array([float(teff2), lg, zz, 1.0, float(av)]) if use_norm
+             else np.array([float(teff2), lg, zz, float(dist_pc), 1.0,
+                            float(av)]))
+    funit = np.full(len(names), np.nan)
+    in_cols = np.array([str(b) in ig.column_index for b in names])
+    if in_cols.any():
+        funit[in_cols] = np.asarray(_mg(theta, names[in_cols], wave[in_cols],
+                                        ig, use_norm, av_law)).ravel()
+    fin = np.isfinite(funit) & (funit > 0)
+    if not fin.any():
+        raise ValueError(f'{model}: no finite flux at Teff2 = {teff2:g} K')
+    bad = ~fin
+    if bad.any():
+        iref = int(np.argmax(np.where(fin, wave, -np.inf)))
+        rj = funit[iref] * (wave[iref] / wave) ** 4
+        funit = np.where(bad & (wave >= 8.0) & (wave > wave[iref]), rj, funit)
+    funit = np.where(np.isfinite(funit) & (funit > 0), funit, 0.0)
+    return float(rad2) ** 2 * funit, model
 
 
 def _modbb_factor(lam_um):
@@ -1456,6 +1656,16 @@ class Fitter:
         # routed out of the fit either way).
         self._do_irx = False
         self._force_wd = False        # set by fit_wd(); forces the WD path
+        # IR-excess error budget (see IRX_ERROR_BUDGETS / docs/irx.md):
+        # 'full' adds each survey's absolute calibration and the equal-weight
+        # inter-grid photosphere spread to the per-band variance; 'legacy'
+        # reproduces the pre-2026-11 budget (2% floor, evidence-weighted
+        # spread only).
+        self.irx_error_budget = 'full'
+        # Cool grids of the IRX companion hypothesis. None -> config
+        # COOL_COMPANION_GRIDS. Set e.g. to leave out the grid an injection
+        # was drawn from (a held-out injection-recovery test).
+        self.irx_companion_grids = None
         self.contrast = None
         # Spectro-photometry switch: when False, bands derived from spectra
         # (Gaia XP synthetic fills, SPHEREx super-bands) are dropped from the
@@ -1516,8 +1726,9 @@ class Fitter:
             f"{type(self).__name__!r} has no configuration attribute "
             f"{name!r}. Check for a typo (e.g. 'bma' not 'bmaa'). Valid "
             f"config options: av_law, binary, bma, contrast, estimate_age, "
-            f"estimate_logg, experimental, grid, isochrone_dlogz, jitter, "
-            f"models, n_grid_jobs, n_samples, norm, out_folder, prior_setup, "
+            f"estimate_logg, experimental, grid, irx_companion_grids, "
+            f"irx_error_budget, isochrone_dlogz, jitter, models, "
+            f"n_grid_jobs, n_samples, norm, out_folder, prior_setup, "
             f"sequential, setup, star, verbose, walks."
         )
 
@@ -2893,7 +3104,8 @@ class Fitter:
         self._force_wd = True
         return self.fit_irx(models=models, excess_from_um=excess_from_um)
 
-    def fit_irx(self, models=None, route_mid_ir=False, excess_from_um=None):
+    def fit_irx(self, models=None, route_mid_ir=False, excess_from_um=None,
+                error_budget=None):
         """BMA fit + IR-excess characterization -- the endpoint that
         quantifies and classifies IR excess.
 
@@ -2915,7 +3127,15 @@ class Fitter:
         A WD host is detected from the Gaia HR position and dispatched to the
         Koester photosphere + WD priors automatically; fit_wd() is the
         explicit WD endpoint.
+
+        ``error_budget`` ('full' or 'legacy') overrides
+        ``self.irx_error_budget`` for this call; see docs/irx.md.
         """
+        if error_budget is not None:
+            if error_budget not in IRX_ERROR_BUDGETS:
+                raise ValueError(f'error_budget must be one of '
+                                 f'{IRX_ERROR_BUDGETS}, got {error_budget!r}')
+            self.irx_error_budget = error_budget
         from .sed_library import grid_irx_reach, load_grid
         from .phot_utils import get_effective_wavelength
 
@@ -3611,6 +3831,48 @@ class Fitter:
         ndraw = 256
         gpick = rng.choice(len(members), size=ndraw,
                            p=[w for _, w, _ in members])
+        budget = getattr(self, 'irx_error_budget', 'full') or 'full'
+        if budget not in IRX_ERROR_BUDGETS:
+            raise ValueError(f'irx_error_budget must be one of '
+                             f'{IRX_ERROR_BUDGETS}, got {budget!r}')
+        # Per-grid predictive draws for the equal-weight model spread of the
+        # 'full' budget; a separate stream keeps the posterior-predictive draws
+        # (and so the 'legacy' numbers) unchanged.
+        rng_g = np.random.default_rng(1)
+        ngrid_draw = 32
+
+        def _predict(g, ps, j, f, wv):
+            """Photosphere flux of grid g at posterior sample j in band f."""
+            band = np.array([f])
+            wl = np.array([float(wv)])
+            # fixed parameters (e.g. a pinned Av) are stored as scalars, not
+            # posterior arrays -- take the scalar; index the rest by draw.
+            theta = self._irx_theta(
+                {k: (ps[k][j] if hasattr(ps[k], '__len__') else ps[k])
+                 for k in ps})
+            try:
+                m = model_grid(theta, band, wl, interps[g], self._norm,
+                               av_law, binary=self.binary)
+                val = float(np.asarray(m).ravel()[0])
+            except (KeyError, ValueError, IndexError):
+                # the grid carries no column for this band (e.g. Koester
+                # has none of the >3 um IR-excess bands) -> RJ below.
+                val = float('nan')
+            if (wd and rj_ref_band is not None
+                    and (not np.isfinite(val) or float(wv) > 2.9)):
+                # Band beyond Koester's ~3 um spectral reach -> RJ-extrapolate
+                # the WD photosphere from the reddest reliably-modeled band.
+                # Force this for ALL bands > 2.9 um even when the grid returns
+                # a (finite) value: the Koester band fluxes are unreliable
+                # there (W2 ~10x high, IRAC-4.5 = 0). The WD continuum is pure
+                # Rayleigh-Jeans there (F_lam ~ lam^-4), so this is exact.
+                mref = model_grid(theta, np.array([rj_ref_band]),
+                                  np.array([rj_ref_wl]), interps[g],
+                                  self._norm, av_law, binary=self.binary)
+                vref = float(np.asarray(mref).ravel()[0])
+                if np.isfinite(vref) and vref > 0:
+                    val = vref * (rj_ref_wl / float(wv)) ** 4
+            return val
 
         result = {}
         for f, wv, fo, fe, fmag in zip(irx_filt, irx_wave, irx_obs, irx_obs_e, irx_mag):
@@ -3621,43 +3883,31 @@ class Fitter:
                                  model_err=float('nan'), excess=float('nan'),
                                  sigma=float('nan'), quantified=False)
                 continue
-            band = np.array([f])
-            wl = np.array([float(wv)])
             draws = np.empty(ndraw)
             for d in range(ndraw):
                 g, _w, ps = members[gpick[d]]
-                n = len(ps['teff'])
-                j = int(rng.integers(n))
-                # fixed parameters (e.g. a pinned Av) are stored as scalars, not
-                # posterior arrays -- take the scalar; index the rest by draw.
-                theta = self._irx_theta(
-                    {k: (ps[k][j] if hasattr(ps[k], '__len__') else ps[k])
-                     for k in ps})
-                try:
-                    m = model_grid(theta, band, wl, interps[g], self._norm,
-                                   av_law, binary=self.binary)
-                    val = float(np.asarray(m).ravel()[0])
-                except (KeyError, ValueError, IndexError):
-                    # the grid carries no column for this band (e.g. Koester
-                    # has none of the >3 um IR-excess bands) -> RJ below.
-                    val = float('nan')
-                if (wd and rj_ref_band is not None
-                        and (not np.isfinite(val) or float(wv) > 2.9)):
-                    # Band beyond Koester's ~3 um spectral reach -> RJ-extrapolate
-                    # the WD photosphere from the reddest reliably-modeled band.
-                    # Force this for ALL bands > 2.9 um even when the grid returns
-                    # a (finite) value: the Koester band fluxes are unreliable
-                    # there (W2 ~10x high, IRAC-4.5 = 0). The WD continuum is pure
-                    # Rayleigh-Jeans there (F_lam ~ lam^-4), so this is exact.
-                    mref = model_grid(theta, np.array([rj_ref_band]),
-                                      np.array([rj_ref_wl]), interps[g],
-                                      self._norm, av_law, binary=self.binary)
-                    vref = float(np.asarray(mref).ravel()[0])
-                    if np.isfinite(vref) and vref > 0:
-                        val = vref * (rj_ref_wl / float(wv)) ** 4
-                draws[d] = val
+                j = int(rng.integers(len(ps['teff'])))
+                draws[d] = _predict(g, ps, j, f, wv)
             model = float(np.nanmean(draws))
             model_err = float(np.nanstd(draws))
+            model_err_pp = model_err
+            model_err_grid = 0.0
+            if budget == 'full' and len(members) > 1:
+                gmu, gvar = [], []
+                for g, _w, ps in members:
+                    n = len(ps['teff'])
+                    jj = rng_g.integers(n, size=ngrid_draw)
+                    v = np.array([_predict(g, ps, int(j), f, wv) for j in jj])
+                    v = v[np.isfinite(v)]
+                    gmu.append(float(np.mean(v)) if v.size else np.nan)
+                    gvar.append(float(np.var(v)) if v.size else np.nan)
+                var_m = _irx_model_variance(model_err ** 2, gmu, gvar,
+                                            [w for _, w, _ in members], model)
+                model_err = float(np.sqrt(var_m))
+                gmu = np.asarray(gmu, float)
+                if np.isfinite(gmu).sum() > 1:
+                    model_err_grid = float(np.sqrt(np.nanmean(
+                        (gmu - model) ** 2)))
             # Empirical mid-IR baseline (see _IRX_BASELINE); main-sequence
             # hosts only -- the WD photosphere is a Rayleigh-Jeans extrapolation.
             r_base, e_base = (0.0, 0.0) if wd else _irx_baseline(
@@ -3667,10 +3917,11 @@ class Fitter:
                                            e_base * model))
                 model = model * (1.0 + r_base)
             excess = float(fo) - model
-            # Floor the observed error at the absolute-calibration level before
-            # forming the significance (see _IRX_ABS_CAL_FLOOR): the raw
-            # catalogue error can be unphysically small for bright IR points.
-            obs_e_eff = max(float(fe), _IRX_ABS_CAL_FLOOR * float(fo))
+            # Absolute calibration of the survey (see _IRX_ABS_CAL): in
+            # quadrature with the catalogue error ('full'), or the old 2% floor
+            # on it ('legacy'). The raw catalogue error omits it and can be
+            # unphysically small for bright IR points.
+            obs_e_eff = _irx_obs_error(f, fo, fe, budget)
             # Add the far-IR confusion noise (see _IRX_CONF_MJY): the catalogue
             # error omits the unresolved background filling a large far-IR beam,
             # so a confusion-limited point would otherwise look spuriously
@@ -3683,7 +3934,11 @@ class Fitter:
                              obs_err_eff=obs_e_eff, model=model,
                              model_err=model_err, excess=excess,
                              sigma=sigma, quantified=True,
-                             baseline_corr=r_base)
+                             baseline_corr=r_base,
+                             model_err_pp=model_err_pp,
+                             model_err_grid=model_err_grid,
+                             cal_frac=(_irx_abs_cal_frac(f) if budget == 'full'
+                                       else _IRX_ABS_CAL_FLOOR))
         q = {k: v for k, v in result.items() if v['quantified']}
         sig = sorted(k for k, v in q.items()
                      if np.isfinite(v['sigma']) and v['sigma'] >= _IRX_SIG_THRESH)
@@ -3711,7 +3966,8 @@ class Fitter:
             fitg = interps[gname]
             if float(np.min(fitg.index_columns[1])) < 2300.0:
                 cool.append((gname, fitg))
-            for _bd in COOL_COMPANION_GRIDS:
+            _cg = getattr(self, 'irx_companion_grids', None)
+            for _bd in (COOL_COMPANION_GRIDS if _cg is None else _cg):
                 try:
                     cool.append((_bd, load_grid(_bd)))
                 except Exception as _e:
@@ -3831,6 +4087,7 @@ class Fitter:
                            'per-band significances only; disk L_dust/L_* and '
                            'companion BMA unavailable'),
             companion=ms.get('companion'),
+            error_budget=budget,
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
                              if q else float('nan')))
         return result
