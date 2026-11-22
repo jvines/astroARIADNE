@@ -241,10 +241,16 @@ _IRX_ABS_CAL_FLOOR = 0.02
 #   Herschel PACS 70/100/160 um: 5% -- Balog et al. 2014, Exp. Astron. 37, 129.
 #   Herschel SPIRE 250/350/500 um: 5.5% -- Bendo et al. 2013, MNRAS 433, 3062
 #     (4% Neptune model + 1.5% random, summed linearly as recommended there).
-#   SPHEREx: 3% for detector bands 1-4 (<= 3.82 um), 5% for bands 5-6
-#     (3.82-5.0 um) -- the gain-calibration reliability of the QR spectral
-#     images (SPHEREx Explanatory Supplement, IRSA), against the 3% mission
-#     requirement of Bock et al. 2025 (arXiv:2511.02985).
+#   SPHEREx: 1.4% for detector bands 1-4 (<= 3.82 um), 2.2% for bands 5-6
+#     (3.82-5.0 um) -- SPHEREx Explanatory Supplement v2.0 (SSDC-DP-017,
+#     2026-08-25) Sect. 4.2.1, which covers the DR1/QR3 gains that the
+#     librarian's DR1 extraction uses: the CALSPEC scale is "of order 1% or
+#     less" and the channels match it "to an accuracy of <1% ... with
+#     uncertainties of similar magnitude", i.e. 1% common + 1% per channel.
+#     Bands 5-6 are tied to only 1-6 standards (Table 26), most with 2-4%
+#     model systematics, so their common term is taken as 2% rather than
+#     averaged down to 1%. (The 3% term of Eq. 19 there is the catalogue's
+#     repeatability scatter, not a calibration term.)
 # Calibration errors are correlated between bands of one instrument; they are
 # treated as independent per band here, which is conservative for a
 # colour-driven discrimination (a common scale error cancels in colours) and
@@ -266,9 +272,9 @@ _IRX_ABS_CAL = {
     'HERSCHEL_SPIRE_PLW': 0.055,
     **{f'IRS_{w}': 0.05 for w in (5500, 6500, 8000, 10000, 12000, 13000,
                                   15000, 18000, 23000, 30000, 35000)},
-    **{f'SPHEREX_{w}': 0.03 for w in (1050, 1130, 1400, 1850, 2350, 2750,
-                                      3050, 3350, 3700)},
-    **{f'SPHEREX_{w}': 0.05 for w in (4050, 4300, 4650, 4900)},
+    **{f'SPHEREX_{w}': 0.014 for w in (1050, 1130, 1400, 1850, 2350, 2750,
+                                       3050, 3350, 3700)},
+    **{f'SPHEREX_{w}': 0.022 for w in (4050, 4300, 4650, 4900)},
 }
 
 # IR-excess error budgets. 'full' (default): catalogue error + per-survey

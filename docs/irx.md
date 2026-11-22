@@ -100,7 +100,7 @@ err_phot^2 = max(var_pp, sum_g w_g var_g + mean_g (mu_g - F_phot)^2)
   | IRAS 12/25/60/100 µm | 3.6 / 5.8 / 5.8 / 10.4% | IRAS Explanatory Supplement VI.C.2.c: 2/5/5/10% relative to the 12 µm reference, which is itself 3%, combined in quadrature |
   | Herschel PACS 70/100/160 | 5% | Balog et al. 2014 |
   | Herschel SPIRE 250/350/500 | 5.5% | Bendo et al. 2013 |
-  | SPHEREx ≤ 3.82 µm / 3.82–5 µm | 3 / 5% | QR gain-calibration reliability, SPHEREx Explanatory Supplement (IRSA) |
+  | SPHEREx ≤ 3.82 µm / 3.82–5 µm | 1.4 / 2.2% | SPHEREx Explanatory Supplement v2.0 (2026-08-25) Sect. 4.2.1: ~1% CALSPEC scale + <1% per channel; bands 5–6 rest on 1–6 standards with 2–4% model systematics, so 2% common there |
   | any other band | 2% | the former generic floor |
 
   Calibration errors are correlated between bands of one instrument; they

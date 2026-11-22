@@ -32,7 +32,7 @@ def test_calibration_table_covers_every_excess_band():
     missing = sorted(b for b in routable if b not in fmod._IRX_ABS_CAL)
     assert missing == [], missing
     v = np.array(list(fmod._IRX_ABS_CAL.values()))
-    assert np.all((v >= 0.02) & (v <= 0.4))
+    assert np.all((v >= 0.01) & (v <= 0.4))
 
 
 def test_calibration_values():
@@ -40,7 +40,8 @@ def test_calibration_values():
     assert fmod._irx_abs_cal_frac('WISE_RSR_W4') == 0.057
     assert fmod._irx_abs_cal_frac('SPITZER_MIPS_70') == 0.05
     assert fmod._irx_abs_cal_frac('HERSCHEL_SPIRE_PSW') == 0.055
-    assert fmod._irx_abs_cal_frac('SPHEREX_4900') == 0.05
+    assert fmod._irx_abs_cal_frac('SPHEREX_4900') == 0.022
+    assert fmod._irx_abs_cal_frac('SPHEREX_3050') == 0.014
     # untabulated band (e.g. Ks routed by excess_from_um=2.2) -> 2% fallback
     assert fmod._irx_abs_cal_frac('2MASS_Ks') == fmod._IRX_ABS_CAL_FLOOR
 
