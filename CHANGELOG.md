@@ -71,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **IR-excess error budget now includes survey calibration and model
-  uncertainty (`irx_error_budget='full'`, the default).** The excess
+  uncertainty (`irx_error_budget='covariant'`, the default).** The excess
   likelihood used the catalogue error floored at 2% and the
   evidence-weighted posterior-predictive spread of the photosphere, which
   gave |ln B| of several hundred on three bands. Each excess band now adds
@@ -79,9 +79,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   IRAC/MIPS/IRS, AKARI IRC/FIS, IRAS, Herschel PACS/SPIRE and SPHEREx values
   from the instrument papers; 2% for any other band). The photosphere-model
   term uses the equal-weight spread of the ensemble grids, because grid
-  evidences from the optical/NIR say nothing about the mid/far-IR. Set
-  `Fitter.irx_error_budget = 'legacy'` or call
-  `fit_irx(error_budget='legacy')` to reproduce the earlier numbers exactly.
+  evidences from the optical/NIR say nothing about the mid/far-IR.
+  Calibration is modelled at the instrument level. Each instrument's
+  absolute scale is fully correlated across its bands and the band-to-band
+  remainder is independent, using the documented split for IRAS, SPIRE and
+  SPHEREx. The evidence uses the full covariance matrix.
+  `irx_error_budget='independent'` treats calibration as independent per
+  band. `Fitter.irx_error_budget = 'legacy'` or
+  `fit_irx(error_budget='legacy')` reproduces the earlier numbers exactly.
+  SPHEREx calibration follows the SPHEREx Explanatory Supplement v2.0
+  (1.4% in detector bands 1–4, 2.2% in bands 5–6).
   See docs/irx.md, "Error budget".
 
 ### Fixed
