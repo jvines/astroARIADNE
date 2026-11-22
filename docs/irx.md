@@ -71,7 +71,82 @@ sigma = (F_obs - F_phot) / sqrt(err_obs^2 + err_phot^2)
 ```
 
 Bands at `sigma >= 3` are flagged significant; the summary aggregates them
-into `excess_chi2`, `n_significant` and the `has_excess` flag.
+into `excess_chi2`, `n_significant` and the `has_excess` flag. The same
+per-band variance enters every hypothesis' likelihood in the evidence
+comparison below.
+
+### Error budget
+
+The per-band variance is
+
+```
+err_obs^2  = err_cat^2 + (c_b * F_obs)^2 + err_conf^2
+err_phot^2 = max(var_pp, sum_g w_g var_g + mean_g (mu_g - F_phot)^2)
+```
+
+- `err_cat` is the catalogue error.
+- `c_b` is the **absolute calibration uncertainty of the survey** that
+  measured band `b`. Catalogue errors omit it, and it is multiplicative on
+  the measured flux:
+
+  | Survey | `c_b` | Source |
+  |---|---|---|
+  | WISE W1/W2/W3/W4 | 2.4 / 2.8 / 4.5 / 5.7% | Jarrett et al. 2011 |
+  | Spitzer IRAC (all channels) | 3% | Reach et al. 2005 |
+  | Spitzer MIPS 24/70/160 | 2 / 5 / 12% | Engelbracht+2007, Gordon+2007, Stansberry+2007 |
+  | Spitzer IRS (CASSIS bands) | 5% | IRS Instrument Handbook v5.0, Sect. 9.3 |
+  | AKARI IRC 9/18 µm | 3 / 4% | Ishihara et al. 2010 |
+  | AKARI FIS N60/WIDE-S/WIDE-L/N160 | 20 / 20 / 30 / 40% | Kawada et al. 2007 |
+  | IRAS 12/25/60/100 µm | 3.6 / 5.8 / 5.8 / 10.4% | IRAS Explanatory Supplement VI.C.2.c: 2/5/5/10% relative to the 12 µm reference, which is itself 3%, combined in quadrature |
+  | Herschel PACS 70/100/160 | 5% | Balog et al. 2014 |
+  | Herschel SPIRE 250/350/500 | 5.5% | Bendo et al. 2013 |
+  | SPHEREx ≤ 3.82 µm / 3.82–5 µm | 3 / 5% | QR gain-calibration reliability, SPHEREx Explanatory Supplement (IRSA) |
+  | any other band | 2% | the former generic floor |
+
+  Calibration errors are correlated between bands of one instrument; they
+  are treated as independent per band. In colours a common scale error
+  cancels, so independence overstates the error there, while for a
+  single-instrument excess level it understates it slightly.
+- `err_conf` is the far-IR extragalactic confusion noise (unchanged).
+- `err_phot` is the **photosphere model uncertainty**. `var_pp` is the
+  variance of the BMA posterior-predictive draws, i.e. the within-grid
+  scatter plus the evidence-weighted scatter between grids. The grid
+  evidences are set by the optical and near-IR fit bands and carry no
+  information on how well each grid's atmosphere physics works at 10–500 µm.
+  When the weight collapses onto one grid, `var_pp` drops the other grids'
+  disagreement at exactly the wavelengths where it was never tested. The
+  default budget therefore replaces the between-grid term with the
+  **equal-weight** spread of the grids' mean predictions `mu_g` about the
+  reported BMA flux, keeps the evidence-weighted within-grid term `var_g`,
+  and never goes below `var_pp`. A single-grid fit has no between-grid term.
+  The empirical WISE baseline correction and its error are applied on top,
+  as before.
+
+This is the `'full'` budget and the default. `Fitter.irx_error_budget =
+'legacy'` (or `fit_irx(error_budget='legacy')`) reproduces the earlier
+budget exactly: the catalogue error floored at 2% of the flux (`max(err_cat,
+0.02 F_obs)`) and `err_phot^2 = var_pp`. The budget used is recorded as
+`out['irx']['_summary']['error_budget']`. Each band also stores
+`model_err_pp` (the posterior-predictive part), `model_err_grid` (the
+equal-weight inter-grid spread) and `cal_frac`.
+
+### Injection model for injection–recovery tests
+
+`astroARIADNE.fitter.companion_injection_flux(names, wave, teff2, rad2,
+dist_pc, model='sonora')` returns the band fluxes of a companion to inject.
+Recovering BT-Settl injections with BT-NextGen, BT-Cond and BT-Dusty, plus
+the BT-Settl fit grid, is circular, because all of them share the PHOENIX
+code, opacities and cloud treatment. Injections therefore default to
+**Sonora Bobcat** (Marley et al. 2021). The shipped Sonora cube is Bobcat
+only (200–2400 K, log g 3–5.5, [M/H] −0.5 to +0.5). Diamondback and Elf Owl
+are not in the grid cache. Above 2400 K the injection falls back to **ATMO
+2020** (Phillips et al. 2020, to 3000 K), the most independent non-BT model
+that reaches late-M temperatures. So companions injected at 2400–2600 K come
+from ATMO, and the recorded `model_used` says so. `model='btsettl'`
+reproduces the old injections. Sonora and ATMO are each one of the five
+companion recovery grids. For a fully held-out test, set
+`Fitter.irx_companion_grids` to the recovery grids minus the injection grid
+(the IRX_experiment drivers do this with `IRX_INJ_HOLDOUT=1`).
 
 ## Classification: four hypotheses, one evidence comparison
 
