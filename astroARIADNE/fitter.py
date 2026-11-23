@@ -660,6 +660,286 @@ def companion_injection_flux(names, wave, teff2, rad2, dist_pc,
     return float(rad2) ** 2 * funit, model
 
 
+# Flux of the re-fitted primary in bands its grid cannot model, in the joint
+# (cool-host) branch of _excess_model_selection: 'model' (the model-averaged
+# photosphere) or 'zero' (cal_run4 and earlier).
+IRX_PRIMARY_FILLS = ('model', 'zero')
+IRX_PRIMARY_FILL_DEFAULT = 'model'
+
+
+# ---------------------------------------------------------------------------
+# Companion prior from Gaia astrometry (Fitter.irx_companion_prior).
+#
+# The excess photometry alone cannot tell a weak dust excess from a second,
+# near-twin photosphere: a companion grid at the primary's own Teff, added to
+# a primary re-profiled to share the light, also reshapes the mid-IR. Whether
+# such a companion exists is answered far better by Gaia than by the SED. A
+# stellar companion of light ratio q = L2/L1 moves the photocentre by
+# alpha = a |B - beta| / d around the centre of mass (B = M2/(M1+M2), beta =
+# q/(1+q)), and a binary is overluminous for its Teff by log10(1+q). The prior
+# is the likelihood of the observed astrometric and photometric diagnostics
+# under a companion of (Teff2, q), relative to no companion, applied as a
+# weight on every (Teff2, R2) node of the companion hypothesis. It is a
+# likelihood factor, not a renormalised prior, so a companion Gaia would have
+# seen loses evidence instead of moving it to fainter nodes:
+#
+#   w(Teff2, q) = [eps + (1 - eps)(1 - f_det)] * min(1, exp(-chi2_lum / 2))
+#
+# f_det, the probability that Gaia DR3 would have flagged the companion
+# with a RUWE above what is observed, is the separation-averaged detection
+# probability:
+#   - separations a from the Raghavan et al. (2010) log-normal period
+#     distribution (mean log P/d = 5.03, sigma 2.28), with Kepler's law at
+#     M1 + M2, restricted to a < rho_res * d (an unresolved companion; a
+#     wider one would be a separate Gaia source);
+#   - the DR3 single-star solution absorbs orbital motion slower than its
+#     T = 34 month baseline into the proper motion, leaving the curvature
+#     alpha_eff = alpha * min(1, (2 pi T / P)^2 / 2);
+#   - an unmodelled wobble adds alpha^2 / (2 sigma_AL^2) to UWE^2 (a single
+#     star has RUWE 1), so the wobble the astrometry still allows is
+#     alpha_thr = sigma_AL sqrt(2 (r^2 - 1)), r = max(RUWE, ruwe_threshold):
+#     the detection threshold for a clean star, and for an elevated RUWE the
+#     wobble that RUWE implies, so it supports a binary up to there and no
+#     further. sigma_AL is the per-transit along-scan precision,
+#     sigma_al_mas brightward of G = sigma_al_ref_g and photon-limited
+#     (x 10^(0.2 (G - ref))) fainter;
+#   - P_det = 1 - exp(-(alpha_eff / alpha_thr)^2), a smooth step.
+# Masses come from the Mamajek main-sequence Teff-mass sequence, so the
+# astrometric term applies to stellar companions only (Teff2 inside the
+# table's mass column, i.e. above the hydrogen-burning limit): a substellar
+# companion's mass, hence its wobble, is age-degenerate and the IR SED does not
+# fix it, so the prior makes no claim there. beta uses the bolometric light
+# ratio; Gaia's G-band ratio is smaller for a cooler companion, so this
+# underestimates the wobble and errs towards allowing the companion.
+#
+# eps (1 - astrometric_reliability) is the probability that the astrometric
+# solution is uninformative for reasons the model above omits (an orbit near
+# the 1-yr parallax period, a poor solution); it bounds the suppression.
+#
+# chi2_lum compares the system's overluminosity, Delta = log L - log L_MS(Teff)
+# (fitted L and Teff against the Mamajek sequence), with the log10(1+q) a
+# companion of light ratio q produces, in units of the main-sequence width
+# sigma_ms_dex combined with the Teff uncertainty (posterior error with a
+# teff_sys_frac floor) times the local slope of log L_MS. It is capped at 1 (it
+# only suppresses). Near-twins move the photocentre little, and this term is
+# what constrains them.
+#
+# The astrometric term is switched off (factor 1) when Gaia reports a binary it
+# does not quantify through RUWE: a DR3 non_single_star flag, or (when
+# aen_sig_threshold is set) astrometric_excess_noise_sig above it. It is also
+# off when no RUWE is known. Nothing here ever raises the companion evidence.
+IRX_COMPANION_PRIORS = ('astrometric', 'legacy')
+IRX_COMPANION_PRIOR_DEFAULT = 'astrometric'
+IRX_COMPANION_PRIOR_SETTINGS = dict(
+    ruwe_threshold=1.4,            # Lindegren et al. 2018/2021 binarity flag
+    # astrometric_excess_noise_sig above this marks a binary. Off (None) by
+    # default: in DR3 the excess noise of bright stars is dominated by
+    # attitude and calibration errors (Lindegren et al. 2021), and 952 of the
+    # 1533 cal_run5 stars, single or not, have a significance above 2. RUWE
+    # is the renormalised form of the same information.
+    aen_sig_threshold=None,
+    sigma_al_mas=0.1,              # per-transit AL precision, bright end
+    sigma_al_ref_g=13.0,           # G where photon noise takes over
+    baseline_yr=34.0 / 12.0,       # Gaia DR3 time baseline
+    rho_res_arcsec=1.0,            # closer pairs are one Gaia source
+    log_p_mean=5.03,               # Raghavan et al. 2010, log10(P / d)
+    log_p_sigma=2.28,
+    astrometric_reliability=0.99,  # 1 - eps
+    sigma_ms_dex=0.1,              # main-sequence width in log L at fixed Teff
+    teff_sys_frac=0.02,            # Teff systematic floor (fractional)
+)
+
+
+def _load_ms_sequence():
+    """(Teff, log L, mass) of the Mamajek dwarf sequence, Teff ascending.
+    Mass is NaN where the table has none (below the hydrogen-burning limit)."""
+    def _num(s):
+        try:
+            return float(s)
+        except ValueError:
+            return np.nan
+    rows = []
+    with open(os.path.join(filesdir, 'mamajek_spt.dat')) as fh:
+        for ln in fh:
+            if ln.startswith('#') or not ln.strip():
+                continue
+            p = ln.split()
+            rows.append((_num(p[1]), _num(p[3]), _num(p[29])))
+    a = np.array(rows, float)
+    a = a[np.isfinite(a[:, 0])]
+    return a[np.argsort(a[:, 0])]
+
+
+_MS_SEQ = None
+
+
+def _ms_sequence():
+    global _MS_SEQ
+    if _MS_SEQ is None:
+        _MS_SEQ = _load_ms_sequence()
+    return _MS_SEQ
+
+
+def _ms_mass(teff):
+    """Main-sequence mass (Msun) at ``teff``; NaN outside the table's mass
+    column (substellar, or hotter than the sequence)."""
+    s = _ms_sequence()
+    ok = np.isfinite(s[:, 2])
+    return np.interp(np.asarray(teff, float), s[ok, 0], s[ok, 2],
+                     left=np.nan, right=np.nan)
+
+
+def _ms_logl(teff):
+    """Main-sequence log10(L/Lsun) at ``teff`` and the local slope
+    d log L / d log Teff (finite difference over +-5%)."""
+    s = _ms_sequence()
+    ok = np.isfinite(s[:, 1])
+    lt, ll = np.log10(s[ok, 0]), s[ok, 1]
+    x = np.log10(float(teff))
+    if not (lt[0] <= x <= lt[-1]):
+        return np.nan, np.nan
+    y = float(np.interp(x, lt, ll))
+    h = np.log10(1.05)
+    lo, hi = max(x - h, lt[0]), min(x + h, lt[-1])
+    slope = float((np.interp(hi, lt, ll) - np.interp(lo, lt, ll)) / (hi - lo))
+    return y, slope
+
+
+def _finite_or_none(x):
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if np.isfinite(v) else None
+
+
+class CompanionAstrometricPrior:
+    """Weight of a companion node (Teff2, q = L2/L1) given the Gaia astrometry
+    and the system's overluminosity; see the block comment above
+    ``IRX_COMPANION_PRIORS``. ``ln_weight`` is <= 0 everywhere."""
+
+    def __init__(self, ruwe=None, aen_sig=None, non_single_star=None,
+                 gmag=None, dist_pc=None, lum_sys=None, teff_sys=None,
+                 teff_sys_err=None, settings=None):
+        cfg = dict(IRX_COMPANION_PRIOR_SETTINGS)
+        unknown = set(settings or {}) - set(cfg)
+        if unknown:
+            raise ValueError(f'unknown companion-prior settings: '
+                             f'{sorted(unknown)}; valid: {sorted(cfg)}')
+        cfg.update(settings or {})
+        self.cfg = cfg
+        self.ruwe = _finite_or_none(ruwe)
+        self.aen_sig = _finite_or_none(aen_sig)
+        nss = _finite_or_none(non_single_star)
+        self.non_single_star = int(nss) if nss is not None else None
+        self.gmag = _finite_or_none(gmag)
+        self.dist_pc = _finite_or_none(dist_pc)
+        if self.ruwe is None or self.dist_pc is None or self.dist_pc <= 0:
+            self.astrometry = 'unknown'
+        elif ((self.aen_sig is not None
+               and cfg['aen_sig_threshold'] is not None
+               and self.aen_sig > cfg['aen_sig_threshold'])
+              or (self.non_single_star or 0) > 0):
+            self.astrometry = 'binary'
+        elif self.ruwe > cfg['ruwe_threshold']:
+            self.astrometry = 'elevated'
+        else:
+            self.astrometry = 'clean'
+        g = self.gmag if self.gmag is not None else cfg['sigma_al_ref_g']
+        self.sigma_al_mas = cfg['sigma_al_mas'] * max(
+            1.0, 10.0 ** (0.2 * (g - cfg['sigma_al_ref_g'])))
+        # Wobble a companion may have without contradicting the astrometry:
+        # the threshold wobble for a clean star; for an elevated RUWE, the
+        # wobble that RUWE itself implies (it supports a binary up to there).
+        r_eff = max(self.ruwe or 0.0, cfg['ruwe_threshold'])
+        self.alpha_thr_mas = self.sigma_al_mas * np.sqrt(
+            2.0 * (r_eff ** 2 - 1.0))
+        self.eps = 1.0 - float(cfg['astrometric_reliability'])
+        self.delta_lum = None
+        self.sigma_lum = None
+        L, T = _finite_or_none(lum_sys), _finite_or_none(teff_sys)
+        if L is not None and L > 0 and T is not None and T > 0:
+            llms, slope = _ms_logl(T)
+            if np.isfinite(llms):
+                te = _finite_or_none(teff_sys_err)
+                te = te if te is not None and te > 0 else 0.0
+                slt = np.hypot(te, cfg['teff_sys_frac'] * T) / (T * np.log(10))
+                self.delta_lum = float(np.log10(L) - llms)
+                self.sigma_lum = float(np.hypot(cfg['sigma_ms_dex'],
+                                                slope * slt))
+
+    def summary(self):
+        return dict(mode='astrometric', astrometry=self.astrometry,
+                    ruwe=self.ruwe, astrometric_excess_noise_sig=self.aen_sig,
+                    non_single_star=self.non_single_star,
+                    alpha_thr_mas=float(self.alpha_thr_mas),
+                    overluminosity_dex=self.delta_lum,
+                    overluminosity_sigma_dex=self.sigma_lum,
+                    settings=dict(self.cfg))
+
+    def detection_probability(self, teff2, q, teff1):
+        """f_det: probability that Gaia DR3 flags a stellar companion of
+        Teff2 and light ratio q (array) around a primary of teff1. Zero for a
+        substellar companion, or when the astrometry is unknown or reports a
+        binary RUWE does not quantify."""
+        q = np.atleast_1d(np.asarray(q, float))
+        if self.astrometry not in ('clean', 'elevated'):
+            return np.zeros_like(q)
+        m1 = float(_ms_mass(teff1))
+        m2 = float(_ms_mass(teff2))
+        if not (np.isfinite(m1) and np.isfinite(m2)):
+            return np.zeros_like(q)
+        cfg = self.cfg
+        mt = m1 + m2
+        delta = np.abs(m2 / mt - q / (1.0 + q))                  # |B - beta|
+        a_res = cfg['rho_res_arcsec'] * self.dist_pc              # au
+        loga = np.linspace(np.log10(5e-3), np.log10(max(a_res, 6e-3)), 240)
+        a = 10.0 ** loga
+        # log-normal in log P -> log-normal in log a (a^3 = M P^2)
+        mu_a = (np.log10(mt) + 2.0 * (cfg['log_p_mean']
+                                      - np.log10(365.25))) / 3.0
+        sd_a = 2.0 * cfg['log_p_sigma'] / 3.0
+        pa = np.exp(-0.5 * ((loga - mu_a) / sd_a) ** 2)
+        pa = pa / pa.sum()
+        P = np.sqrt(a ** 3 / mt)                                  # yr
+        kappa = np.minimum(1.0,
+                           0.5 * (2 * np.pi * cfg['baseline_yr'] / P) ** 2)
+        alpha = (1e3 * a[None, :] * delta[:, None] / self.dist_pc
+                 * kappa[None, :])                                # mas
+        pdet = 1.0 - np.exp(-(alpha / self.alpha_thr_mas) ** 2)
+        return np.sum(pdet * pa[None, :], axis=1)
+
+    def ln_weight(self, teff2, q, teff1):
+        """ln w for companion nodes at Teff2 with light ratios q (array)."""
+        q = np.atleast_1d(np.asarray(q, float))
+        lw = np.zeros_like(q)
+        if self.astrometry in ('clean', 'elevated'):
+            fd = self.detection_probability(teff2, q, teff1)
+            lw = lw + np.log(self.eps + (1.0 - self.eps) * (1.0 - fd))
+        if self.delta_lum is not None:
+            d = self.delta_lum
+            c2 = ((d - np.log10(1.0 + q)) ** 2 - d ** 2) / self.sigma_lum ** 2
+            lw = lw + np.minimum(0.0, -0.5 * c2)
+        return lw
+
+
+def _apply_companion_prior(chi2, prior, teff2, r2sq, r1sq, teff1):
+    """chi^2 of companion nodes (one Teff2, array of R2^2 with matching primary
+    R1^2) with the companion prior folded in as -2 ln w. The light ratio
+    q = R2^2 Teff2^4 / (R1^2 Teff1^4) must be < 1: the companion is the
+    fainter body by definition, bolometrically."""
+    r2sq = np.asarray(r2sq, float)
+    q = r2sq * teff2 ** 4 / (np.asarray(r1sq, float) * teff1 ** 4)
+    q = np.broadcast_to(q, np.shape(chi2))
+    out = np.where(q >= 1.0, np.inf, chi2)
+    ok = np.isfinite(out)
+    if ok.any():
+        lw = prior.ln_weight(teff2, q[ok], teff1)
+        out = np.array(out, float)
+        out[ok] = out[ok] - 2.0 * lw
+    return out
+
+
 def _modbb_factor(lam_um):
     """Emission-efficiency factor of the modified blackbody at lam_um."""
     lam = np.asarray(lam_um, float)
@@ -923,7 +1203,8 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                             fit_errs=None, rad_primary=None, prim_ig=None,
                             logg_primary=None, teff_primary_err=None,
                             rad_primary_err=None, exc_obs=None, fit_obs=None,
-                            wd_host=False, exc_corr=None, excess_cov=None):
+                            wd_host=False, exc_corr=None, excess_cov=None,
+                            comp_prior=None, primary_fill='model'):
     """Bayesian model selection on the IR excess.
 
     Compares three hypotheses for the excess fluxes by their Bayesian evidence:
@@ -953,6 +1234,17 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     chi^2 then becomes r^T C^-1 r (and every profiled amplitude the matching
     generalised least-squares solution); log det C is common to all
     hypotheses and cancels, so the quadrature evidences stay exact.
+
+    ``comp_prior`` (a :class:`CompanionAstrometricPrior`) weights every
+    companion node by the Gaia astrometric / overluminosity likelihood of its
+    light ratio q = L2/L1 and makes the companion strictly fainter than the
+    primary (q < 1); ``None`` is the legacy companion hypothesis (q <= 1, no
+    weight).
+
+    ``primary_fill`` ('model' or 'zero') sets the re-fitted primary's flux in
+    bands its grid cannot model (joint, cool-host branch only): the
+    model-averaged photosphere, or 0 as before 2026-11-23 (see the comment at
+    the fill).
     """
     from scipy.constants import h as H, c as C, k as KB, sigma as SB
     w = np.asarray(waves_um, float)
@@ -1187,6 +1479,31 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                 vf = np.asarray(model_grid(th, fn_b[pcol_f], fw[pcol_f],
                                            prim_ig, use_norm, av_law)).ravel()
                 Pf[k, pcol_f] = np.where(np.isfinite(vf), vf, 0.0)
+        # Bands the primary grid cannot model at these nodes (no column, or a
+        # NaN column: the top-weight grid of an M dwarf has no finite IRS
+        # synthetic bands, which other ensemble members do model). Zero-filling
+        # them (primary_fill='zero', the cal_run4 behaviour) sets the
+        # re-fitted primary's flux there to 0: the null then misses the whole
+        # observed flux in those bands (Delta ln Z ~ -90 for GJ 876 with no
+        # injected excess), and a near-twin companion or hot dust "wins" by
+        # supplying it. With 'model' they take the model-averaged photosphere
+        # the excess itself was measured against, per unit rad1^2 (the same at
+        # every teff1 node); a fit band gets its observed flux per unit
+        # rad1^2, i.e. the primary is taken to fit it.
+        if primary_fill == 'model' and rad_primary is not None \
+                and np.isfinite(rad_primary) and rad_primary > 0 \
+                and not use_norm:
+            a_ref = float(rad_primary) ** 2
+            corr_e = (np.asarray(exc_corr, float)[sel] if exc_corr is not None
+                      else np.ones(names.size))
+            m_avg = (obs_e - F) / corr_e / a_ref       # averaged model / R1^2
+            miss_e = ~(Pe > 0)
+            if miss_e.any():
+                Pe = np.where(miss_e, np.broadcast_to(m_avg, Pe.shape), Pe)
+            miss_f = ~(Pf > 0)
+            if miss_f.any():
+                Pf = np.where(miss_f, np.broadcast_to(obs_f / a_ref, Pf.shape),
+                              Pf)
         # The empirical mid-IR baseline (_IRX_BASELINE) applies to the re-fitted
         # primary exactly as to the model-averaged photosphere: without it the
         # joint branch -- every host below COOL_HOST_GATE_K, i.e. every M dwarf --
@@ -1389,6 +1706,10 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                     chi2[k, i] = np.where(
                         R2sq * float(T2) ** 4 > a1 * float(Tg1[k]) ** 4,
                         np.inf, chi2[k, i])
+                    if comp_prior is not None:
+                        chi2[k, i] = _apply_companion_prior(
+                            chi2[k, i], comp_prior, float(T2), R2sq,
+                            a1, float(Tg1[k]))
             else:
                 mod = (R2g ** 2)[:, None] * funit[None, :]
                 c0 = _qf(F[None, :] - mod)
@@ -1407,6 +1728,10 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                         R2g ** 2 * float(T2) ** 4
                         > float(rad_primary) ** 2 * float(teff_primary) ** 4,
                         np.inf, c0)
+                    if comp_prior is not None:
+                        c0 = _apply_companion_prior(
+                            c0, comp_prior, float(T2), R2g ** 2,
+                            float(rad_primary) ** 2, float(teff_primary))
                 chi2[0, i] = c0
         if np.isfinite(chi2).any():
             comp_per_grid.append((gname_g, T2g, Tg1, chi2))
@@ -1802,6 +2127,19 @@ class Fitter:
         # COOL_COMPANION_GRIDS. Set e.g. to leave out the grid an injection
         # was drawn from (a held-out injection-recovery test).
         self.irx_companion_grids = None
+        # Companion prior of the IRX model selection (IRX_COMPANION_PRIORS):
+        # 'astrometric' (default) weights companion nodes by the Gaia
+        # astrometry (RUWE, excess noise, non-single-star flag) and the
+        # system's overluminosity and keeps the companion strictly fainter
+        # than the primary; 'legacy' is the cal_run4 (2026-11-22) companion
+        # hypothesis with no weight. irx_companion_prior_settings overrides
+        # entries of IRX_COMPANION_PRIOR_SETTINGS.
+        self.irx_companion_prior = IRX_COMPANION_PRIOR_DEFAULT
+        self.irx_companion_prior_settings = None
+        # Joint (cool-host) branch: flux of the re-fitted primary in bands its
+        # grid cannot model -- 'model' (default) the model-averaged
+        # photosphere, 'zero' the cal_run4 behaviour (IRX_PRIMARY_FILLS).
+        self.irx_primary_fill = IRX_PRIMARY_FILL_DEFAULT
         self.contrast = None
         # Spectro-photometry switch: when False, bands derived from spectra
         # (Gaia XP synthetic fills, SPHEREx super-bands) are dropped from the
@@ -1863,6 +2201,8 @@ class Fitter:
             f"{name!r}. Check for a typo (e.g. 'bma' not 'bmaa'). Valid "
             f"config options: av_law, binary, bma, contrast, estimate_age, "
             f"estimate_logg, experimental, grid, irx_companion_grids, "
+            f"irx_companion_prior, irx_companion_prior_settings, "
+            f"irx_primary_fill, "
             f"irx_error_budget, isochrone_dlogz, jitter, models, "
             f"n_grid_jobs, n_samples, norm, out_folder, prior_setup, "
             f"sequential, setup, star, verbose, walks."
@@ -3241,7 +3581,7 @@ class Fitter:
         return self.fit_irx(models=models, excess_from_um=excess_from_um)
 
     def fit_irx(self, models=None, route_mid_ir=False, excess_from_um=None,
-                error_budget=None):
+                error_budget=None, companion_prior=None):
         """BMA fit + IR-excess characterization -- the endpoint that
         quantifies and classifies IR excess.
 
@@ -3266,7 +3606,15 @@ class Fitter:
 
         ``error_budget`` ('covariant', 'independent' or 'legacy') overrides
         ``self.irx_error_budget`` for this call; see docs/irx.md.
+        ``companion_prior`` ('astrometric' or 'legacy') likewise overrides
+        ``self.irx_companion_prior``.
         """
+        if companion_prior is not None:
+            if companion_prior not in IRX_COMPANION_PRIORS:
+                raise ValueError(f'companion_prior must be one of '
+                                 f'{IRX_COMPANION_PRIORS}, got '
+                                 f'{companion_prior!r}')
+            self.irx_companion_prior = companion_prior
         if error_budget is not None:
             if error_budget not in IRX_ERROR_BUDGETS:
                 raise ValueError(f'error_budget must be one of '
@@ -3893,6 +4241,49 @@ class Fitter:
                 order += ['teff2', 'logg2', 'rad2']
         return np.array([float(d[k]) for k in order])
 
+    def _irx_primary_fill_mode(self):
+        mode = getattr(self, 'irx_primary_fill', None) \
+            or IRX_PRIMARY_FILL_DEFAULT
+        if mode not in IRX_PRIMARY_FILLS:
+            raise ValueError(f'irx_primary_fill must be one of '
+                             f'{IRX_PRIMARY_FILLS}, got {mode!r}')
+        return mode
+
+    def _irx_companion_prior_obj(self, bf, unc):
+        """The CompanionAstrometricPrior for this star, or None for the
+        'legacy' companion hypothesis."""
+        mode = getattr(self, 'irx_companion_prior', None) \
+            or IRX_COMPANION_PRIOR_DEFAULT
+        if mode not in IRX_COMPANION_PRIORS:
+            raise ValueError(f'irx_companion_prior must be one of '
+                             f'{IRX_COMPANION_PRIORS}, got {mode!r}')
+        if mode == 'legacy':
+            return None
+        star = self.star
+        gmag = None
+        names = [str(b) for b in getattr(star, 'filter_names', [])]
+        mags = np.asarray(getattr(star, 'mags', np.full(len(names), np.nan)),
+                          float)
+        for i, b in enumerate(names):
+            if b.startswith('Gaia') and b.endswith('_G') and i < mags.size \
+                    and np.isfinite(mags[i]):
+                gmag = float(mags[i])
+                break
+        te = unc.get('teff') if unc else None
+        try:
+            te = np.atleast_1d(np.asarray(te, float))
+            te = te[np.isfinite(te) & (te > 0)]
+            te = float(np.max(te)) if te.size else None
+        except (TypeError, ValueError):
+            te = None
+        return CompanionAstrometricPrior(
+            ruwe=getattr(star, 'ruwe', None),
+            aen_sig=getattr(star, 'astrometric_excess_noise_sig', None),
+            non_single_star=getattr(star, 'non_single_star', None),
+            gmag=gmag, dist_pc=getattr(star, 'dist', None),
+            lum_sys=bf.get('lum'), teff_sys=bf.get('teff'), teff_sys_err=te,
+            settings=getattr(self, 'irx_companion_prior_settings', None))
+
     def _compute_irx(self, out, grids, av_law):
         """Quantify IR excess on the bands every in-play grid reaches.
 
@@ -4100,6 +4491,7 @@ class Fitter:
                        + _irx_cal_offdiag(list(q),
                                           [v['obs'] for v in q.values()]))
         ms = {}
+        comp_prior = None
         if members:
             gname = max(members, key=lambda mm: mm[1])[0]   # highest weight
             # Cool-grid ensemble for the companion BMA: the dedicated BD grids
@@ -4146,6 +4538,7 @@ class Fitter:
             # posterior widths let the companion path re-fit (teff1, rad1)
             # against the full SED instead of inheriting the absorbed photosphere.
             unc = out.get('uncertainties_averaged', {}) or {}
+            comp_prior = self._irx_companion_prior_obj(bf, unc)
             ms = _excess_model_selection(
                 list(q), waves, exc, errs, cool,
                 float(bf.get('z', 0.0)), float(bf.get('Av', 0.0)),
@@ -4155,7 +4548,8 @@ class Fitter:
                 teff_primary_err=unc.get('teff'), rad_primary_err=unc.get('rad'),
                 exc_obs=[v['obs'] for v in q.values()], wd_host=wd,
                 exc_corr=[1.0 + v.get('baseline_corr', 0.0) for v in q.values()],
-                excess_cov=exc_cov, **fkw) or {}
+                excess_cov=exc_cov, comp_prior=comp_prior,
+                primary_fill=self._irx_primary_fill_mode(), **fkw) or {}
             # Compact-primary composite demotion: a companion whose radius RAILS
             # at the substellar cap (_IRX_WD_R2_MAX) is too luminous to be a
             # brown dwarf -- it is a luminous (dM) companion (the joint-binary
@@ -4232,6 +4626,9 @@ class Fitter:
                            'companion BMA unavailable'),
             companion=ms.get('companion'),
             error_budget=budget,
+            primary_fill=self._irx_primary_fill_mode(),
+            companion_prior=(comp_prior.summary() if comp_prior is not None
+                             else {'mode': 'legacy'}),
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
                              if q else float('nan')))
         return result
