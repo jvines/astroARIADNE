@@ -21,6 +21,22 @@ _COOL_GROUPS = {'btsettl': 'btsettl_cool', 'atmo': 'atmo', 'sonora': 'sonora',
                 'btdusty': 'btdusty'}
 
 
+# Excess/companion model colours and SED details (plot_settings.dat keys).
+# These are the values the plotter always used; a settings file can override
+# any of them.
+_EXCESS_COLOR_DEFAULTS = {
+    'irx_comp_color': 'tab:red',          # companion total and component
+    'irx_comp_draw_color': 'lightcoral',  # companion posterior draws
+    'irx_disk_color': 'tab:red',          # dust model when shown alone
+    'irx_disk_alt_color': 'seagreen',     # dust model when shown with a companion
+    'irx_provisional_color': 'darkorange',  # residuals of unquantified bands
+    'binary_comp_color': 'tab:red',       # secondary of a fit_binary model
+    'legend_fontsize': 9,                 # excess-model legend of IRX_SED
+    'legend_loc': 'upper right',          # its location; 'none' omits it
+    'sed_draws': 100,                     # gray posterior spectra on a BMA SED
+}
+
+
 def _load_cool_cache(gname):
     if gname in _COOL_SPEC_CACHE:
         return _COOL_SPEC_CACHE[gname]
@@ -919,7 +935,7 @@ class SEDPlotter:
         # the posterior (the method handles all three; gating on bma/binary
         # silently dropped the single-grid draws).
         try:
-            self._plot_bma_gray_spectra(ax)
+            self._plot_bma_gray_spectra(ax, n_samples=self.sed_draws)
         except Exception as e:
             logger.warning('gray posterior spectra skipped: %s', e)
         # The cache declines to draw a Teff outside its range rather than clamp
@@ -1178,7 +1194,7 @@ class SEDPlotter:
                     return ph_w[m], ph_f[m] + ci
 
                 if show_comp:
-                    comp_color = 'tab:red'
+                    comp_color = self.irx_comp_color
 
                     # Start the companion curve a short lead blueward of the
                     # first IR-excess band, so it leads INTO the excess rather
@@ -1257,7 +1273,7 @@ class SEDPlotter:
                             cur = _comp_curve(t2, r2, gn, _gi(gn))
                             if cur is not None:
                                 _dw, _dc = _trim_blue(cur[0], _smooth(cur[1]))
-                                ax.plot(_dw, _dc, color='lightcoral',
+                                ax.plot(_dw, _dc, color=self.irx_comp_draw_color,
                                         lw=0.8, alpha=0.12, zorder=1)
                     # Companion display grid: the highest-weight per-grid member
                     # that has a cool spectra cache (_COOL_GROUPS), so the curve
@@ -1318,7 +1334,8 @@ class SEDPlotter:
                     # When both hypotheses are shown the disk switches to green
                     # with its own line styles so the two are unmistakable; a
                     # clean disk keeps the established red styling.
-                    disk_color = 'seagreen' if both else 'tab:red'
+                    disk_color = (self.irx_disk_alt_color if both
+                                  else self.irx_disk_color)
                     d_ls, t_ls = (':', '--') if both else ('--', '-.')
                     # Trim the combined star+disk curve to start just blueward
                     # of the bluest IR-excess band, so it spans every irx band
@@ -1358,7 +1375,9 @@ class SEDPlotter:
                                        r'L$_d$/L$_*$=%.1g'
                                        % (p_d + p_d2, bb['t_dust'],
                                           bb['l_dust_over_lstar'])))
-                ax.legend(loc='upper right', fontsize=9, frameon=False)
+                if str(self.legend_loc).lower() != 'none':
+                    ax.legend(loc=self.legend_loc,
+                              fontsize=self.legend_fontsize, frameon=False)
 
             # Deferred model diamonds: photosphere + winning excess model. Open,
             # same size as the photosphere diamonds, drawn BEHIND the data so the
@@ -1411,7 +1430,8 @@ class SEDPlotter:
                            / self.irx_flux_er[_po])
                 ax_r.scatter(self.irx_wave[_po], _po_res, zorder=3,
                              marker=self.marker, facecolor='none',
-                             edgecolors='darkorange', s=self.scatter_size,
+                             edgecolors=self.irx_provisional_color,
+                             s=self.scatter_size,
                              lw=1.5)
             ax_r.errorbar(self.irx_wave, irx_res, zorder=3,
                           xerr=self.irx_bandpass, yerr=np.ones_like(irx_res),
@@ -1584,7 +1604,7 @@ class SEDPlotter:
                 comp2 = apply(ext, f2 * norm2) * w
                 ax.plot(w, comp1, lw=0.8, ls='--', color=self.model_color,
                         alpha=0.55, zorder=0)
-                ax.plot(w, comp2, lw=0.8, ls=':', color='tab:red',
+                ax.plot(w, comp2, lw=0.8, ls=':', color=self.binary_comp_color,
                         alpha=0.6, zorder=0)
                 ax.plot(w, comp1 + comp2, lw=1.25, color=self.model_color,
                         zorder=0)
@@ -2688,6 +2708,10 @@ class SEDPlotter:
         # savefig on machines without a TeX install -- pin it off.
         import matplotlib
         matplotlib.rcParams['text.usetex'] = False
+        # Colours of the excess and companion models. Settings files written
+        # before these keys existed keep the original colours.
+        for attr, val in _EXCESS_COLOR_DEFAULTS.items():
+            setattr(self, attr, val)
         if self.settings_dir is None:
             settings = open(filesdir + '/plot_settings.dat', 'r')
         else:
@@ -2697,12 +2721,10 @@ class SEDPlotter:
                 continue
             splt = line.split(' ')
             attr = splt[0]
-            if attr == 'figsize':
+            if attr in ('figsize', 'hr_figsize'):
+                # floats, so a figure can be sized to a journal column in inches
                 vals = splt[1].split('\n')[0].split(',')
-                val = (int(vals[0]), int(vals[1]))
-            elif attr == 'hr_figsize':
-                vals = splt[1].split('\n')[0].split(',')
-                val = (int(vals[0]), int(vals[1]))
+                val = (float(vals[0]), float(vals[1]))
             elif 'alpha' in attr:
                 val = float(splt[1].split('\n')[0])
             else:
