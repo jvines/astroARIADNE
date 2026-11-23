@@ -210,6 +210,10 @@ class Star:
         self.contamination = {}
         self.xmatch_flags = {}
         self.ruwe = None
+        # Gaia DR3 astrometric_excess_noise_sig and non_single_star (the IRX
+        # companion prior reads them with RUWE); None when unknown.
+        self.astrometric_excess_noise_sig = None
+        self.non_single_star = None
         if lookup:
             if not offline:
                 if verbose:
@@ -237,6 +241,8 @@ class Star:
                 # consumed by Fitter.spectra = False to drop these bands.
                 self.xp_filled = list(adapted.xp_filled)
                 self.ruwe = adapted.ruwe
+                self.astrometric_excess_noise_sig = adapted.astrometric_excess_noise_sig
+                self.non_single_star = adapted.non_single_star
                 self.contamination = adapted.contamination
                 self.xmatch_flags = adapted.xmatch_flags
             else:
@@ -601,7 +607,8 @@ class Star:
         f.format_version = '1'
         f.starname = str(self.starname)
         for a in ('ra', 'dec', 'plx', 'plx_e', 'dist', 'dist_e', 'rad', 'rad_e',
-                  'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e', 'ruwe'):
+                  'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e', 'ruwe',
+                  'astrometric_excess_noise_sig', 'non_single_star'):
             setattr(f, a, _f(getattr(self, a, None)))
         f.ids = json.dumps({'g_id': self.g_id, 'tic': getattr(self, 'tic', None),
                             'kic': getattr(self, 'kic', None)})
@@ -660,7 +667,8 @@ class Star:
         errs = np.asarray(g.variables['mag_err'][:], float)
         meta = {a: _fa(a) for a in
                 ('ra', 'dec', 'plx', 'plx_e', 'dist', 'dist_e', 'rad', 'rad_e',
-                 'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e', 'ruwe')}
+                 'temp', 'temp_e', 'lum', 'lum_e', 'Av', 'Av_e', 'ruwe',
+                 'astrometric_excess_noise_sig', 'non_single_star')}
         starname = _attr('starname')
         # Files written before Av_source existed: the old label, 'dustmap'.
         av_source = _attr('Av_source', 'dustmap')
@@ -691,6 +699,8 @@ class Star:
         star.plx, star.plx_e = meta['plx'], meta['plx_e']
         star.dist, star.dist_e = meta['dist'], meta['dist_e']
         star.ruwe = meta['ruwe']
+        star.astrometric_excess_noise_sig = meta['astrometric_excess_noise_sig']
+        star.non_single_star = meta['non_single_star']
         star.Av_e = meta['Av_e']
         star.Av_source = av_source
         star.tic = ids.get('tic')
