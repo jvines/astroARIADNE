@@ -1,0 +1,24 @@
+{
+ "cool": [
+  "btsettl",
+  "atmo",
+  "sonora",
+  "btnextgen",
+  "btcond",
+  "btdusty"
+ ],
+ "prim": "btsettl",
+ "z": -0.1755290744944623,
+ "av": 0.7513039418481874,
+ "dist_pc": 112.99312591552734,
+ "lum_lsun": 0.004501307114079128,
+ "use_norm": false,
+ "teff_primary": 2923.6756086619853,
+ "rad_primary": 0.26064448119445444,
+ "logg_primary": 3.6168029252791625,
+ "wd_host": false,
+ "dist_fit": 54.5569,
+ "ruwe": 5.6922626,
+ "gmag": 16.3052,
+ "note": "Gaia DR3 6244258239317113088, Upper Scorpius M dwarf with a primordial disk; inputs of the IRX model selection of a cal_run5 refit (2026-11-24). rad_primary and lum_lsun are the fitted values, at the fitted distance dist_fit; dist_pc is the catalogue distance."
+}

@@ -724,6 +724,32 @@ IRX_PRIMARY_FILL_DEFAULT = 'model'
 # only suppresses). Near-twins move the photocentre little, and this term is
 # what constrains them.
 #
+# Hosts off the main sequence. Delta is evidence about a companion only for a
+# main-sequence primary. A companion fainter than its primary (q < 1) adds at
+# most log10(2) = 0.30 dex, so a system further above the sequence than that
+# owes its luminosity to the primary's evolutionary state: a pre-main-sequence
+# star still contracting (0.5-1.5 dex above the sequence for an M dwarf of
+# 1-20 Myr), or an evolved one. The reference for such a host is its own
+# isochrone, not the main sequence. Stars of one age and one Teff have one
+# luminosity, and along a pre-main-sequence isochrone the cooler star is the
+# further above the main sequence (it contracts more slowly), so a coeval
+# stellar companion of Teff2 is at least as far above the sequence as the
+# primary:
+#   log q >= log q_c = log L_MS(Teff2) - log L_MS(Teff1).
+# A companion fainter than that is older than its primary. The coeval term is
+#   chi2_c = (max(0, log q_c - log q) / sigma_c)^2,
+#   sigma_c^2 = 2 sigma_ms^2 + (s1 sigma_logT1)^2 + (s2 sigma_logT2)^2,
+# with s the local slope of log L_MS and sigma_logT the Teff error (posterior
+# with the teff_sys_frac floor for the primary, the floor alone for the
+# companion). It applies to stellar companions only, as the astrometric term
+# does: a brown dwarf has no main sequence. The two references are mixed by
+# the probability that the host is off the sequence,
+#   p_off = Phi((Delta - log10(2)) / sigma_lum - offms_gate_sigma),
+#   w_lum = (1 - p_off) min(1, exp(-chi2_lum / 2)) + p_off exp(-chi2_c / 2).
+# p_off is below 1e-4 for a star on the sequence (sigma_lum up to 0.23), 0.02
+# for GJ 876 and above 0.8 for a star 1.2 dex above it, so main-sequence hosts
+# keep chi2_lum and pre-main-sequence hosts get the coeval term.
+#
 # The astrometric term is switched off (factor 1) when Gaia reports a binary it
 # does not quantify through RUWE: a DR3 non_single_star flag, or (when
 # aen_sig_threshold is set) astrometric_excess_noise_sig above it. It is also
@@ -747,6 +773,12 @@ IRX_COMPANION_PRIOR_SETTINGS = dict(
     astrometric_reliability=0.99,  # 1 - eps
     sigma_ms_dex=0.1,              # main-sequence width in log L at fixed Teff
     teff_sys_frac=0.02,            # Teff systematic floor (fractional)
+    # A host is off the main sequence when its overluminosity exceeds what a
+    # fainter companion can add, log10(2), by this many sigma (half-weight
+    # point of the gate). The Teff scale of M-dwarf SED fits puts
+    # main-sequence stars up to ~0.3 dex above the Mamajek sequence (GJ 876:
+    # 0.37 dex, sigma 0.22), so the gate opens well clear of log10(2).
+    offms_gate_sigma=2.5,
 )
 
 
@@ -857,6 +889,8 @@ class CompanionAstrometricPrior:
         self.eps = 1.0 - float(cfg['astrometric_reliability'])
         self.delta_lum = None
         self.sigma_lum = None
+        self.p_offms = 0.0        # probability that the host is off the MS
+        self._slt1 = 0.0          # sigma of log Teff of the primary
         L, T = _finite_or_none(lum_sys), _finite_or_none(teff_sys)
         if L is not None and L > 0 and T is not None and T > 0:
             llms, slope = _ms_logl(T)
@@ -867,6 +901,11 @@ class CompanionAstrometricPrior:
                 self.delta_lum = float(np.log10(L) - llms)
                 self.sigma_lum = float(np.hypot(cfg['sigma_ms_dex'],
                                                 slope * slt))
+                self._slt1 = float(slt)
+                from scipy.special import ndtr
+                self.p_offms = float(ndtr(
+                    (self.delta_lum - np.log10(2.0)) / self.sigma_lum
+                    - cfg['offms_gate_sigma']))
 
     def summary(self):
         return dict(mode='astrometric', astrometry=self.astrometry,
@@ -875,6 +914,7 @@ class CompanionAstrometricPrior:
                     alpha_thr_mas=float(self.alpha_thr_mas),
                     overluminosity_dex=self.delta_lum,
                     overluminosity_sigma_dex=self.sigma_lum,
+                    p_off_main_sequence=self.p_offms,
                     settings=dict(self.cfg))
 
     def detection_probability(self, teff2, q, teff1):
@@ -919,8 +959,35 @@ class CompanionAstrometricPrior:
         if self.delta_lum is not None:
             d = self.delta_lum
             c2 = ((d - np.log10(1.0 + q)) ** 2 - d ** 2) / self.sigma_lum ** 2
-            lw = lw + np.minimum(0.0, -0.5 * c2)
+            lw_ms = np.minimum(0.0, -0.5 * c2)
+            p = self.p_offms
+            if p <= 0.0:
+                lw = lw + lw_ms
+            else:
+                lw = lw + np.minimum(0.0, np.logaddexp(
+                    np.log1p(-p) + lw_ms if p < 1.0
+                    else np.full_like(q, -np.inf),
+                    np.log(p) + self.ln_coeval(teff2, q, teff1)))
         return lw
+
+    def ln_coeval(self, teff2, q, teff1):
+        """ln of the coeval factor exp(-chi2_c / 2) for companion nodes of
+        Teff2 and light ratios q (array): 0 for a substellar companion, or
+        where the main sequence is undefined."""
+        q = np.atleast_1d(np.asarray(q, float))
+        if not np.isfinite(float(_ms_mass(teff2))):
+            return np.zeros_like(q)
+        l1, s1 = _ms_logl(teff1)
+        l2, s2 = _ms_logl(teff2)
+        if not (np.isfinite(l1) and np.isfinite(l2)):
+            return np.zeros_like(q)
+        cfg = self.cfg
+        slt2 = cfg['teff_sys_frac'] / np.log(10)
+        slt1 = self._slt1 if self._slt1 > 0 else slt2
+        sig2 = (2.0 * cfg['sigma_ms_dex'] ** 2 + (s1 * slt1) ** 2
+                + (s2 * slt2) ** 2)
+        dev = np.maximum(0.0, (l2 - l1) - np.log10(np.maximum(q, 1e-300)))
+        return -0.5 * dev ** 2 / sig2
 
 
 def _apply_companion_prior(chi2, prior, teff2, r2sq, r1sq, teff1):
@@ -4249,9 +4316,49 @@ class Fitter:
                              f'{IRX_PRIMARY_FILLS}, got {mode!r}')
         return mode
 
-    def _irx_companion_prior_obj(self, bf, unc):
+    def _irx_frame(self, bf, unc):
+        """Primary radius, its error and the luminosity at the catalogue
+        distance: (dist, rad, rad_err, lum, scale).
+
+        The SED fixes the angular radius R/d, not R and d. The fit samples
+        both, with the parallax distance as the prior on d, and its (R, d)
+        can sit anywhere along that degeneracy: far from the catalogue
+        distance when the parallax is poor (a RUWE of 5.7 trebles the
+        distance error of a disk-bearing Upper Scorpius M dwarf, whose fits
+        return 55-80 pc against 113 pc). The excess hypotheses are evaluated
+        at the catalogue distance, so R and L are moved there along the
+        degeneracy, scale = d_cat / d_fit: R scale, L scale^2. Mixing the
+        fitted radius with the catalogue distance instead left the re-fitted
+        primary too faint by scale^2 (4.3 for that star), which the null and
+        the dust could not make up and a companion as bright as the primary
+        could. Without a fitted distance (normalisation mode) or a catalogue
+        one, scale = 1."""
+        star = self.star
+        dist = getattr(star, 'dist', None)
+        rad, lum = bf.get('rad'), bf.get('lum')
+        rad_err = unc.get('rad') if unc else None
+        scale = 1.0
+        d_fit = _finite_or_none(bf.get('dist'))
+        d_cat = _finite_or_none(dist)
+        if (not self._norm and d_fit is not None and d_fit > 0
+                and d_cat is not None and d_cat > 0):
+            scale = d_cat / d_fit
+            if rad is not None:
+                rad = float(rad) * scale
+            if lum is not None:
+                lum = float(lum) * scale ** 2
+            if rad_err is not None:
+                try:
+                    rad_err = tuple(float(x) * scale
+                                    for x in np.atleast_1d(rad_err))
+                except (TypeError, ValueError):
+                    pass
+        return dist, rad, rad_err, lum, scale
+
+    def _irx_companion_prior_obj(self, bf, unc, lum=None):
         """The CompanionAstrometricPrior for this star, or None for the
-        'legacy' companion hypothesis."""
+        'legacy' companion hypothesis. ``lum`` is the system luminosity at
+        the catalogue distance (``_irx_frame``; default ``bf['lum']``)."""
         mode = getattr(self, 'irx_companion_prior', None) \
             or IRX_COMPANION_PRIOR_DEFAULT
         if mode not in IRX_COMPANION_PRIORS:
@@ -4281,7 +4388,8 @@ class Fitter:
             aen_sig=getattr(star, 'astrometric_excess_noise_sig', None),
             non_single_star=getattr(star, 'non_single_star', None),
             gmag=gmag, dist_pc=getattr(star, 'dist', None),
-            lum_sys=bf.get('lum'), teff_sys=bf.get('teff'), teff_sys_err=te,
+            lum_sys=(lum if lum is not None else bf.get('lum')),
+            teff_sys=bf.get('teff'), teff_sys_err=te,
             settings=getattr(self, 'irx_companion_prior_settings', None))
 
     def _compute_irx(self, out, grids, av_law):
@@ -4477,6 +4585,9 @@ class Fitter:
         # unresolved companion -- returning posterior model probabilities and
         # marginal parameter posteriors (the evidence-based analogue of BMA).
         bf = out.get('best_fit_averaged', {})
+        # R and L at the catalogue distance (see _irx_frame)
+        f_dist, f_rad, f_rad_err, f_lum, f_scale = self._irx_frame(
+            bf, out.get('uncertainties_averaged', {}) or {})
         waves = [v['wave'] for v in q.values()]
         exc = [v['excess'] for v in q.values()]
         errs = [float(np.hypot(v.get('obs_err_eff', v['obs_err']),
@@ -4538,14 +4649,14 @@ class Fitter:
             # posterior widths let the companion path re-fit (teff1, rad1)
             # against the full SED instead of inheriting the absorbed photosphere.
             unc = out.get('uncertainties_averaged', {}) or {}
-            comp_prior = self._irx_companion_prior_obj(bf, unc)
+            comp_prior = self._irx_companion_prior_obj(bf, unc, lum=f_lum)
             ms = _excess_model_selection(
                 list(q), waves, exc, errs, cool,
                 float(bf.get('z', 0.0)), float(bf.get('Av', 0.0)),
-                getattr(star, 'dist', None), bf.get('lum'), self._norm, av_law,
-                bf.get('teff'), rad_primary=bf.get('rad'),
+                f_dist, f_lum, self._norm, av_law,
+                bf.get('teff'), rad_primary=f_rad,
                 prim_ig=interps.get(gname), logg_primary=bf.get('logg'),
-                teff_primary_err=unc.get('teff'), rad_primary_err=unc.get('rad'),
+                teff_primary_err=unc.get('teff'), rad_primary_err=f_rad_err,
                 exc_obs=[v['obs'] for v in q.values()], wd_host=wd,
                 exc_corr=[1.0 + v.get('baseline_corr', 0.0) for v in q.values()],
                 excess_cov=exc_cov, comp_prior=comp_prior,
@@ -4558,7 +4669,7 @@ class Fitter:
             # sample (the WD over-call: R2 pinned at the cap). A genuine BD/L/T
             # companion (e.g. GD 1400, R2 ~ 0.08) sits well below the cap and is
             # untouched; MS primaries (cap = R1) never reach this branch.
-            _rp = bf.get('rad')
+            _rp = f_rad
             if (ms.get('excess_class') == 'companion' and _rp is not None
                     and np.isfinite(float(_rp)) and float(_rp) <= 0.05):
                 _r2 = (ms.get('companion') or {}).get('rad2')
@@ -4592,7 +4703,7 @@ class Fitter:
         # `disk` posterior-mean omega is skewed high by its log-uniform prior
         # (the integrated L_dust/L_star is robust; the curve shape is not).
         disk_bb = _fit_excess_blackbody(
-            waves, exc, errs, getattr(star, 'dist', None), bf.get('lum'))
+            waves, exc, errs, f_dist, f_lum)
         result['_summary'] = dict(
             quantified=sorted(q),
             plot_only=sorted(k for k, v in result.items()
@@ -4627,6 +4738,9 @@ class Fitter:
             companion=ms.get('companion'),
             error_budget=budget,
             primary_fill=self._irx_primary_fill_mode(),
+            # d_cat / d_fit and the primary radius and luminosity at the
+            # catalogue distance, as used by every hypothesis (_irx_frame)
+            distance_scale=f_scale, rad_primary=f_rad, lum_primary=f_lum,
             companion_prior=(comp_prior.summary() if comp_prior is not None
                              else {'mode': 'legacy'}),
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))
