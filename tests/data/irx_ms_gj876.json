@@ -1,0 +1,27 @@
+{
+ "cool": [
+  "btsettl",
+  "atmo",
+  "sonora",
+  "btnextgen",
+  "btcond",
+  "btdusty"
+ ],
+ "prim": "btsettl",
+ "result": {
+  "p_none": 2.4037894703425747e-42,
+  "p_disk": 5.856760273764752e-13,
+  "p_disk2": 1.5408513612894717e-13,
+  "p_companion": 0.9999999999992603,
+  "excess_class": "companion"
+ },
+ "z": 0.09409823943473677,
+ "av": 0.0,
+ "dist_pc": 4.671021461486816,
+ "lum_lsun": 0.013445260157882345,
+ "use_norm": false,
+ "teff_primary": 3162.0268079376856,
+ "rad_primary": 0.38615866072689453,
+ "logg_primary": 4.947999348841671,
+ "wd_host": false
+}

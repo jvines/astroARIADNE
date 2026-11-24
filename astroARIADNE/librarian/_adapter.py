@@ -104,6 +104,8 @@ class AdaptedStar:
     xp_filled: tuple = ()
     # Gaia DR3 RUWE (astrometric-fit quality); None when offline/unavailable.
     ruwe: float | None = None
+    astrometric_excess_noise_sig: float | None = None
+    non_single_star: float | None = None
     # Gaia-based blend QC (issue #55); empty when the check is off or failed.
     contamination: dict = field(default_factory=dict)
     xmatch_flags: dict = field(default_factory=dict)
@@ -181,6 +183,9 @@ def adapt_librarian(lib) -> AdaptedStar:
         xp_filled=tuple(b for b in (getattr(lib, '_xp_filled', ()) or ())
                         if b in ariadne_mags),
         ruwe=getattr(lib, 'ruwe', None),
+        astrometric_excess_noise_sig=getattr(
+            lib, 'astrometric_excess_noise_sig', None),
+        non_single_star=getattr(lib, 'non_single_star', None),
         contamination=dict(getattr(lib, "contamination", None) or {}),
         xmatch_flags=dict(getattr(lib, "xmatch_flags", None) or {}),
     )

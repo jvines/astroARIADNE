@@ -873,6 +873,8 @@ class Librarian(ContaminationMixin):
         self._parallax: float | None = None
         self._parallax_e: float | None = None
         self._ruwe: float | None = None
+        self._aen_sig: float | None = None
+        self._nss: float | None = None
         # Gaia proper motion + reference epoch, for PM-propagating the search
         # position to a catalog's epoch (high-PM crossmatch recovery).
         self._pmra: float | None = None
@@ -1092,17 +1094,23 @@ class Librarian(ContaminationMixin):
         # always means an unresolved companion / perturbed astrometry, so the
         # parallax (hence distance and radius) is unreliable. Sync then async,
         # so a full ESA sync queue does not drop the flag.
+        # astrometric_excess_noise_sig and non_single_star come along: with
+        # RUWE they set the IRX companion prior.
         ruwe_row = _esa_first_row(
-            "SELECT ruwe FROM gaiadr3.gaia_source "
+            "SELECT ruwe, astrometric_excess_noise_sig, non_single_star "
+            "FROM gaiadr3.gaia_source "
             f"WHERE source_id = {int(self._gaia_id)}")
         if ruwe_row:
-            rv = ruwe_row.get("ruwe")
-            try:
-                if rv is not None and not np.ma.is_masked(rv) \
-                        and np.isfinite(float(rv)):
-                    self._ruwe = float(rv)
-            except (TypeError, ValueError):
-                pass
+            for col, attr in (("ruwe", "_ruwe"),
+                              ("astrometric_excess_noise_sig", "_aen_sig"),
+                              ("non_single_star", "_nss")):
+                rv = ruwe_row.get(col)
+                try:
+                    if rv is not None and not np.ma.is_masked(rv) \
+                            and np.isfinite(float(rv)):
+                        setattr(self, attr, float(rv))
+                except (TypeError, ValueError):
+                    pass
 
         # Gaia GSP-Phot Teff is intentionally NOT extracted as a likelihood
         # prior. The photometric SED already constrains Teff via BC tables;
@@ -3136,6 +3144,16 @@ class Librarian(ContaminationMixin):
         ``_RUWE_BINARITY_THRESH`` (1.4) the single-star astrometric solution
         fits poorly -- typically an unresolved binary or perturbed astrometry."""
         return self._ruwe
+
+    @property
+    def astrometric_excess_noise_sig(self) -> float | None:
+        """Gaia DR3 significance of the astrometric excess noise."""
+        return self._aen_sig
+
+    @property
+    def non_single_star(self) -> float | None:
+        """Gaia DR3 non_single_star flag (> 0: a DR3 NSS solution)."""
+        return self._nss
 
     @property
     def teff(self) -> tuple[float, float] | None:

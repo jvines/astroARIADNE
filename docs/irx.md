@@ -211,6 +211,53 @@ Two physical constraints make the disk-vs-companion comparison meaningful:
   a companion constrained only at W3/W4 from wandering to near-IR-bright
   solutions.
 
+### Companion prior from Gaia astrometry
+
+A second, near-twin photosphere can reshape the mid-IR as well as weak dust
+can, and the photometry alone does not separate them. Gaia does: a stellar
+companion of light ratio `q = L2/L1` moves the photocentre by
+`α = a |B − β| / d` (`B` the mass fraction from the Mamajek main-sequence
+masses, `β = q/(1+q)`), and makes the system `log10(1+q)` dex overluminous for
+its Teff. `Fitter.irx_companion_prior = 'astrometric'` (the default) weights
+every companion node by the likelihood of the observed diagnostics under that
+companion, relative to none:
+
+- **Astrometric term**: `ε + (1−ε)(1 − f_det)`, with `f_det` the probability
+  that Gaia DR3 would have shown the wobble: separations from the Raghavan et
+  al. (2010) period distribution, restricted to unresolved pairs
+  (`a < 1″ × d`); orbits slower than the 34-month baseline leave only their
+  curvature; a wobble is detected when it exceeds `σ_AL √(2(r² − 1))`,
+  `r = max(RUWE, 1.4)`, so an elevated RUWE allows a companion up to the
+  wobble it implies. Stellar companions only (Teff2 inside the Mamajek mass
+  column); a substellar companion's mass is age-degenerate. Off when RUWE is
+  unknown or Gaia flags the star as non-single (`non_single_star > 0`).
+  `ε = 1 − astrometric_reliability` (0.01) bounds the suppression.
+- **Overluminosity term**: a Gaussian comparison of the fitted
+  `log L − log L_MS(Teff)` with `log10(1+q)`, width 0.1 dex combined with the
+  Teff error (2% floor) times the local slope of the sequence; capped at 1.
+
+The weight is never above 1: astrometry can veto a companion, never vote for
+one. The companion is also strictly fainter than the primary bolometrically
+(`q < 1`). The star's `ruwe`, `astrometric_excess_noise_sig` and
+`non_single_star` come from the Gaia archive lookup and round-trip through
+`Star.to_nc`. The excess-noise significance is ignored by default: for bright
+stars in DR3 it is dominated by attitude and calibration noise. Every constant
+is in `IRX_COMPANION_PRIOR_SETTINGS` and can be overridden through
+`Fitter.irx_companion_prior_settings`; `irx_companion_prior = 'legacy'`
+removes the weight. `_summary['companion_prior']` records the state used.
+
+### Bands the re-fitted primary cannot model
+
+For cool hosts (below 4000 K) the null, disk and companion are scored against
+a primary re-fitted to all bands with the top-weight grid. Where that grid has
+no finite flux (BT-Settl has none in the Spitzer IRS synthetic bands at M-dwarf
+temperatures), `irx_primary_fill = 'model'` (default) uses the model-averaged
+photosphere the excess was measured against. The earlier behaviour, `'zero'`,
+set the primary's flux there to 0, so the null missed the whole observed IRS
+flux and a near-twin companion or hot dust won by supplying it.
+`irx_companion_prior = 'legacy'` with `irx_primary_fill = 'zero'` reproduces
+the cal_run4 (2026-11-22) results.
+
 The posterior model probabilities (`P(none)`, `P(disk)`, `P(disk2)`,
 `P(companion)`) classify the excess as `none` / `disk` / `companion` /
 `ambiguous` (the latter when neither disk-total nor companion exceeds 75%
