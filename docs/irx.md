@@ -235,6 +235,21 @@ companion, relative to none:
 - **Overluminosity term**: a Gaussian comparison of the fitted
   `log L − log L_MS(Teff)` with `log10(1+q)`, width 0.1 dex combined with the
   Teff error (2% floor) times the local slope of the sequence; capped at 1.
+- **Hosts off the main sequence**: the overluminosity term assumes a
+  main-sequence primary. A companion fainter than its primary adds at most
+  `log10(2) = 0.30` dex, so a system further above the sequence than that is
+  there by its evolutionary state (a pre-main-sequence star, 0.5-1.5 dex above
+  the sequence for an M dwarf of 1-20 Myr, or an evolved one), and its
+  overluminosity says nothing about a companion. For such a host the reference
+  is its own isochrone: along a pre-main-sequence isochrone the cooler star is
+  the further above the main sequence, so a coeval stellar companion satisfies
+  `log q ≥ log L_MS(Teff2) − log L_MS(Teff1)`, and a companion fainter than
+  that is penalised (one-sided Gaussian, width from the main-sequence width
+  and both Teff errors). The two terms are mixed by the probability that the
+  host is off the sequence, `p_off = Φ((Δ − log10 2)/σ − offms_gate_sigma)`
+  with `offms_gate_sigma = 2.5`: below 1e-4 on the sequence, 0.02 for GJ 876,
+  above 0.8 at 1.2 dex. `_summary['companion_prior']['p_off_main_sequence']`
+  records it.
 
 The weight is never above 1: astrometry can veto a companion, never vote for
 one. The companion is also strictly fainter than the primary bolometrically
@@ -245,6 +260,19 @@ stars in DR3 it is dominated by attitude and calibration noise. Every constant
 is in `IRX_COMPANION_PRIOR_SETTINGS` and can be overridden through
 `Fitter.irx_companion_prior_settings`; `irx_companion_prior = 'legacy'`
 removes the weight. `_summary['companion_prior']` records the state used.
+
+### One distance for the radius, the luminosity and the excess
+
+The SED fixes the angular radius `R/d`. The photosphere fit samples `R` and
+`d` separately, with the parallax distance as the prior on `d`, and where the
+parallax is poor its `(R, d)` can sit far along that degeneracy from the
+catalogue distance (Gaia DR3 6244258239317113088, RUWE 5.7: fitted at 55-80 pc
+against 113 pc). The excess hypotheses are evaluated at the catalogue distance
+(`star.dist`), with the primary's radius and luminosity moved there,
+`R → R d_cat/d_fit`, `L → L (d_cat/d_fit)²` (`Fitter._irx_frame`). The dust
+fractional luminosity, the companion radius bounds and the overluminosity of
+the companion prior then all refer to one distance. `_summary` records
+`distance_scale`, `rad_primary` and `lum_primary`.
 
 ### Bands the re-fitted primary cannot model
 
