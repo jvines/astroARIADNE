@@ -1013,7 +1013,20 @@ def _modbb_factor(lam_um):
     return np.where(lam > _MODBB_LAM0, (_MODBB_LAM0 / lam) ** _MODBB_BETA, 1.0)
 
 
-def _disk_lmax(T, wd_host=False):
+# Dust ceiling for hosts off the main sequence (pre-main-sequence stars). A
+# primordial disk reprocesses and accretes far more than a debris disk emits:
+# a flat passive disk intercepts a quarter of the stellar luminosity, flaring
+# and accretion raise that, and an inclined disk that dims its star raises the
+# ratio further, so L_dust/L_* reaches ~1. Its inner rim sits at the dust
+# sublimation temperature and re-emits ~10% of L_* at ~1500 K.
+_IRX_YOUNG_DISK_LMAX = 1.0        # at T <= 500 K
+_IRX_YOUNG_DISK_LMAX_HOT = 1e-1   # at 1500 K
+# A host is treated as young when the companion prior puts it off the main
+# sequence with at least this probability (CompanionAstrometricPrior.p_offms).
+IRX_YOUNG_HOST_P = 0.5
+
+
+def _disk_lmax(T, wd_host=False, young_host=False):
     """Empirical ceiling on the disk fractional luminosity L_dust/L_* vs dust
     temperature. Cold/warm debris disks reach ~1e-1 only in extreme
     (giant-impact) systems; sustained HOT dust is observed only at hot-exozodi
@@ -1032,6 +1045,10 @@ def _disk_lmax(T, wd_host=False):
         return np.full_like(T, _IRX_WD_DISK_LMAX)
     frac = ((np.log10(np.clip(T, 500.0, 1500.0)) - np.log10(500.0))
             / (np.log10(1500.0) - np.log10(500.0)))
+    if young_host:
+        # primordial disk: 1 at <= 500 K, log-linear to 1e-1 at 1500 K
+        lo, hi = np.log10(_IRX_YOUNG_DISK_LMAX), np.log10(_IRX_YOUNG_DISK_LMAX_HOT)
+        return 10.0 ** (lo + (hi - lo) * frac)
     return 10.0 ** (-1.0 - 3.0 * frac)
 
 
@@ -1271,7 +1288,8 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                             logg_primary=None, teff_primary_err=None,
                             rad_primary_err=None, exc_obs=None, fit_obs=None,
                             wd_host=False, exc_corr=None, excess_cov=None,
-                            comp_prior=None, primary_fill='model'):
+                            comp_prior=None, primary_fill='model',
+                            young_host=False, compact_primary=None):
     """Bayesian model selection on the IR excess.
 
     Compares three hypotheses for the excess fluxes by their Bayesian evidence:
@@ -1307,6 +1325,15 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     light ratio q = L2/L1 and makes the companion strictly fainter than the
     primary (q < 1); ``None`` is the legacy companion hypothesis (q <= 1, no
     weight).
+
+    ``young_host`` raises the dust ceiling to that of a primordial disk
+    (``_IRX_YOUNG_DISK_LMAX``; see ``_disk_lmax``) and extends the L grid to it.
+
+    ``compact_primary`` says whether the primary is a compact star (white
+    dwarf branch), which sets the companion radius bound; ``None`` decides it
+    from ``rad_primary <= 0.05``. The caller passes it from the FITTED radius:
+    ``rad_primary`` is the radius at the catalogue distance and can fall below
+    0.05 Rsun for a main-sequence fit railed at the radius floor.
 
     ``primary_fill`` ('model' or 'zero') sets the re-fitted primary's flux in
     bands its grid cannot model (joint, cool-host branch only): the
@@ -1385,7 +1412,10 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     # (flux ~ L), and a coarse L grid quantizes the evidence -- a nested
     # two-component model would then win on interpolation alone.
     Tg = np.geomspace(30.0, 1500.0, 64)
-    Lg = np.geomspace(1e-7, 1e-1, 1024)
+    # (a young host's grid runs to its higher ceiling at the same spacing)
+    _l_hi = _IRX_YOUNG_DISK_LMAX if young_host else 1e-1
+    _l_dex = np.log10(_l_hi) + 7.0
+    Lg = np.geomspace(1e-7, _l_hi, int(round(1024 * _l_dex / 6.0)))
     Xg = np.array([_modbb_bolo_frac(T) for T in Tg])
     chi2_disk = np.empty((Tg.size, Lg.size))
     omega_grid = np.empty((Tg.size, Lg.size))
@@ -1399,7 +1429,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             chi2_disk[i] += Omega ** 2 * float(np.sum(Bf ** 2 * finv2))
         # Joint (T, L) prior: fractional luminosities above the empirical
         # ceiling are outside the disk hypothesis' support.
-        chi2_disk[i, Lg > _disk_lmax(T, wd_host)] = np.inf
+        chi2_disk[i, Lg > _disk_lmax(T, wd_host, young_host)] = np.inf
         omega_grid[i] = Omega
 
     # Two-temperature disk (warm + cold modified blackbodies, the asteroid- +
@@ -1411,7 +1441,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     Tflat = Lflat = Oflat = None
     if F.size >= 5:
         Tg2 = np.geomspace(30.0, 1500.0, 24)
-        Lg2 = np.geomspace(1e-7, 1e-1, 36)
+        Lg2 = np.geomspace(1e-7, _l_hi, int(round(36 * _l_dex / 6.0)))
         X2 = np.array([_modbb_bolo_frac(T) for T in Tg2])
         ncomb = Tg2.size * Lg2.size
         Mc = np.empty((ncomb, F.size))
@@ -1431,7 +1461,7 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
                 Oflat[k] = Om[j]
                 k += 1
         chi2_disk2 = np.full((ncomb, ncomb), np.inf)
-        valid2 = Lflat <= _disk_lmax(Tflat, wd_host)  # same joint (T, L) ceiling
+        valid2 = Lflat <= _disk_lmax(Tflat, wd_host, young_host)  # same joint (T, L) ceiling
         for i in range(ncomb):
             if not valid2[i]:
                 continue
@@ -1471,7 +1501,9 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     # luminous dM is the joint-binary regime), so cap at _IRX_WD_R2_MAX.
     r2_hi = 1.0
     if rad_primary is not None and np.isfinite(rad_primary):
-        if rad_primary > 0.05:
+        _compact = (rad_primary <= 0.05 if compact_primary is None
+                    else bool(compact_primary))
+        if not _compact:
             r2_hi = max(float(rad_primary), 0.12)   # MS primary: cap at R1
         else:
             r2_hi = _IRX_WD_R2_MAX                   # compact: substellar ceiling
@@ -3245,7 +3277,11 @@ class Fitter:
         # Distance prior setup.
         if not self._norm:
             if self.star.dist != -1:
-                _d_scale = 3 * self.star.dist_e
+                # The Bailer-Jones distance with its own uncertainty. The SED
+                # fixes R/d only, so the posterior of d is this prior; a
+                # widened one (3 dist_e until 2026-11-24) let fits sit far
+                # along the R/d degeneracy from the catalogue distance.
+                _d_scale = self.star.dist_e
                 defaults['dist'] = st.truncnorm(
                     a=-self.star.dist / _d_scale, b=1e100,
                     loc=self.star.dist, scale=_d_scale,
@@ -4603,6 +4639,7 @@ class Fitter:
                                           [v['obs'] for v in q.values()]))
         ms = {}
         comp_prior = None
+        young = compact = False
         if members:
             gname = max(members, key=lambda mm: mm[1])[0]   # highest weight
             # Cool-grid ensemble for the companion BMA: the dedicated BD grids
@@ -4650,6 +4687,13 @@ class Fitter:
             # against the full SED instead of inheriting the absorbed photosphere.
             unc = out.get('uncertainties_averaged', {}) or {}
             comp_prior = self._irx_companion_prior_obj(bf, unc, lum=f_lum)
+            # young host: the dust prior of a primordial disk
+            young = bool(comp_prior is not None and not wd
+                         and comp_prior.p_offms >= IRX_YOUNG_HOST_P)
+            # compact primary: decided by the FITTED radius (the white-dwarf
+            # branch fits R <= 0.05 Rsun, the main-sequence branch R >= 0.05)
+            _rfit = _finite_or_none(bf.get('rad'))
+            compact = bool(wd or (_rfit is not None and _rfit < 0.05))
             ms = _excess_model_selection(
                 list(q), waves, exc, errs, cool,
                 float(bf.get('z', 0.0)), float(bf.get('Av', 0.0)),
@@ -4660,7 +4704,8 @@ class Fitter:
                 exc_obs=[v['obs'] for v in q.values()], wd_host=wd,
                 exc_corr=[1.0 + v.get('baseline_corr', 0.0) for v in q.values()],
                 excess_cov=exc_cov, comp_prior=comp_prior,
-                primary_fill=self._irx_primary_fill_mode(), **fkw) or {}
+                primary_fill=self._irx_primary_fill_mode(),
+                young_host=young, compact_primary=compact, **fkw) or {}
             # Compact-primary composite demotion: a companion whose radius RAILS
             # at the substellar cap (_IRX_WD_R2_MAX) is too luminous to be a
             # brown dwarf -- it is a luminous (dM) companion (the joint-binary
@@ -4670,8 +4715,7 @@ class Fitter:
             # companion (e.g. GD 1400, R2 ~ 0.08) sits well below the cap and is
             # untouched; MS primaries (cap = R1) never reach this branch.
             _rp = f_rad
-            if (ms.get('excess_class') == 'companion' and _rp is not None
-                    and np.isfinite(float(_rp)) and float(_rp) <= 0.05):
+            if (ms.get('excess_class') == 'companion' and compact):
                 _r2 = (ms.get('companion') or {}).get('rad2')
                 if (_r2 is not None and np.isfinite(float(_r2))
                         and float(_r2) >= 0.95 * _IRX_WD_R2_MAX):
@@ -4687,8 +4731,7 @@ class Fitter:
             # in broadband -- report 'unresolved' instead of a coin-flip verdict.
             if (ms.get('excess_class') in ('companion', 'disk', 'disk2',
                                            'composite')
-                    and _rp is not None and np.isfinite(float(_rp))
-                    and float(_rp) <= 0.05):
+                    and compact):
                 _reddest = max((v['wave'] for v in q.values()), default=0.0)
                 if float(_reddest) <= _IRX_RESOLVE_UM:
                     ms = dict(ms)
@@ -4741,6 +4784,7 @@ class Fitter:
             # d_cat / d_fit and the primary radius and luminosity at the
             # catalogue distance, as used by every hypothesis (_irx_frame)
             distance_scale=f_scale, rad_primary=f_rad, lum_primary=f_lum,
+            young_host=young, compact_primary=compact,
             companion_prior=(comp_prior.summary() if comp_prior is not None
                              else {'mode': 'legacy'}),
             common_reach_um=(float(np.nanmax([v['wave'] for v in q.values()]))

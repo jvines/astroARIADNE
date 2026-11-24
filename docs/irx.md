@@ -274,6 +274,26 @@ fractional luminosity, the companion radius bounds and the overluminosity of
 the companion prior then all refer to one distance. `_summary` records
 `distance_scale`, `rad_primary` and `lum_primary`.
 
+The default distance prior is the Bailer-Jones distance with its own
+uncertainty, `N(dist, dist_e)` truncated at zero (it was `3 dist_e` until
+2026-11-24, which let the fit drift along `R/d`).
+
+### Dust ceiling of a young host
+
+The dust prior ends at `L_dust/L_* = 0.1` below 500 K, falling to `1e-4` at
+1500 K: the range of debris disks and hot exozodiacal dust. A primordial disk
+is more luminous. A flat passive disk intercepts a quarter of the stellar
+luminosity, flaring and accretion raise that, and its inner rim re-emits about
+a tenth of `L_*` near the sublimation temperature. For a host the companion
+prior puts off the main sequence (`p_off_main_sequence >= 0.5`) the ceiling is
+`1` below 500 K, falling log-linearly to `0.1` at 1500 K. `_summary` records
+`young_host`.
+
+The companion radius bound and the `composite` / `unresolved` labels of compact
+primaries are decided by the fitted radius (`compact_primary` in `_summary`),
+not by the radius at the catalogue distance: a main-sequence fit railed at the
+0.05 Rsun radius floor can fall below it there.
+
 ### Bands the re-fitted primary cannot model
 
 For cool hosts (below 4000 K) the null, disk and companion are scored against

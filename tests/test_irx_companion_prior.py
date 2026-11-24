@@ -346,3 +346,54 @@ def test_fitted_radius_at_the_catalogue_distance_made_it_a_companion():
     assert r['excess_class'] == 'companion'
     assert r['lnbf_disk_companion'] < -100.0
     assert r['disk']['l_dust_over_lstar'] > 0.095   # pinned at the 0.1 ceiling
+
+
+# ------------------------------------------- dust ceiling of a young host
+def test_dust_ceiling_of_a_young_host():
+    T = np.array([100.0, 500.0, 1500.0])
+    assert np.allclose(fmod._disk_lmax(T), [1e-1, 1e-1, 1e-4])
+    assert np.allclose(fmod._disk_lmax(T, young_host=True), [1.0, 1.0, 1e-1])
+    assert np.allclose(fmod._disk_lmax(T, wd_host=True, young_host=True), 1e-1)
+    mid = fmod._disk_lmax(np.array([866.0]), young_host=True)[0]
+    assert 1e-1 < mid < 1.0
+
+
+def test_primordial_disk_above_the_debris_ceiling_is_a_disk_for_a_young_host():
+    """The Upper Scorpius star with its radius and luminosity as fitted (at
+    54.6 pc) has L_dust/L_* = 0.22 against that luminosity, above the debris
+    ceiling of 0.1. As a young host it is a disk at that luminosity; as a
+    main-sequence host its dust is pinned at the ceiling."""
+    args, kw, prior = _usco(consistent=False)
+    young = fmod._excess_model_selection(*args, comp_prior=prior, primary_fill='model',
+                                         young_host=True, **kw)
+    ms = fmod._excess_model_selection(*args, comp_prior=prior, primary_fill='model', **kw)
+    assert ms['disk']['l_dust_over_lstar'] > 0.095
+    assert 0.15 < young['disk']['l_dust_over_lstar'] < 0.35
+    assert young['lnbf_disk_companion'] > ms['lnbf_disk_companion'] + 20.0
+
+
+@pytest.mark.parametrize('name', ['gj876', 'gliese1'])
+def test_main_sequence_host_keeps_the_debris_ceiling(name):
+    args, kw, _ = _load(name)
+    a = fmod._excess_model_selection(*args, comp_prior=None, primary_fill='model', **kw)
+    b = fmod._excess_model_selection(*args, comp_prior=None, primary_fill='model',
+                                     young_host=False, compact_primary=False, **kw)
+    for k in ('p_none', 'p_disk', 'p_companion'):
+        assert a[k] == b[k]
+
+
+# ------------------------------ compact primary: from the fitted radius
+def test_radius_below_the_floor_at_the_catalogue_distance_is_not_compact():
+    """A main-sequence fit railed at the 0.05 Rsun radius floor can have
+    R < 0.05 Rsun at the catalogue distance. It keeps the main-sequence
+    companion radius bound (max(R1, 0.12)), not the white-dwarf one."""
+    args, kw, _ = _load('gj876')
+    kw = dict(kw, rad_primary=0.04)
+    ms = fmod._excess_model_selection(*args, comp_prior=None, primary_fill='model',
+                                      compact_primary=False, **kw)
+    wd = fmod._excess_model_selection(*args, comp_prior=None, primary_fill='model',
+                                      compact_primary=True, **kw)
+    auto = fmod._excess_model_selection(*args, comp_prior=None, primary_fill='model', **kw)
+    assert ms['companion']['rad2'] <= 0.12 + 1e-9
+    assert auto['p_companion'] == wd['p_companion']      # None -> decided by rad_primary
+    assert max(s[1] for g in wd['companion']['per_grid'].values() for s in g['samples']) <= fmod._IRX_WD_R2_MAX + 1e-9
