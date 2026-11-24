@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Excess-model colours in the plot settings.** `plot_settings.dat` takes
+  `irx_comp_color`, `irx_comp_draw_color`, `irx_disk_color`,
+  `irx_disk_alt_color`, `irx_provisional_color` and `binary_comp_color`;
+  they were hard-coded, as were `legend_fontsize` and `legend_loc` (the
+  IRX_SED excess-model legend; `none` omits it) and `sed_draws` (gray posterior spectra on a BMA SED). Settings
+  files without these keys keep the old values.
+  `figsize` and `hr_figsize` accept non-integer inches, so a figure can be
+  sized to a journal column.
 - **Selectable companion injection model for injection-recovery tests.**
   `fitter.companion_injection_flux(..., model='sonora')` builds an injected
   companion from Sonora Bobcat by default (no longer BT-Settl, which shares
