@@ -845,6 +845,61 @@ def _finite_or_none(x):
     return v if np.isfinite(v) else None
 
 
+# Cool-dwarf regime boundary in BP-RP (``Fitter._cool_dwarf_flags``).
+_COOL_BP_RP = 1.8
+_DWARF_COLOURS = None
+
+
+def _dwarf_colours():
+    """Mamajek dwarf sequence: BP-RP, G-RP, G-Ks and M_G, sorted by BP-RP."""
+    global _DWARF_COLOURS
+    if _DWARF_COLOURS is None:
+        def _num(x):
+            try:
+                return float(x)
+            except ValueError:
+                return np.nan
+        rows = []
+        with open(os.path.join(filesdir, 'mamajek_spt.dat')) as fh:
+            for ln in fh:
+                if ln.startswith('#') or not ln.strip():
+                    continue
+                c = ln.split()
+                # Bp-Rp, G-Rp, G-V + V-Ks, M_G
+                rows.append((_num(c[10]), _num(c[11]),
+                             _num(c[9]) + _num(c[17]), _num(c[12])))
+        a = np.array(rows, float)
+        a = a[np.isfinite(a[:, 0])]
+        _DWARF_COLOURS = a[np.argsort(a[:, 0])]
+    return _DWARF_COLOURS
+
+
+def _bp_rp_equivalent(colour, which):
+    """BP-RP of the dwarf with G-RP (``which='g_rp'``) or G-Ks (``'g_ks'``)
+    equal to ``colour``, from the Mamajek sequence. Outside the tabulated
+    range the end values are returned, which keeps the comparison with
+    ``_COOL_BP_RP`` right on both sides."""
+    t = _dwarf_colours()
+    col = t[:, 1] if which == 'g_rp' else t[:, 2]
+    ok = np.isfinite(col)
+    x, y = col[ok], t[ok, 0]
+    # the sequence is monotonic in both colours over the range that matters
+    # (A to late M); keep the monotonic run through the boundary
+    keep = np.concatenate([[True], np.diff(x) > 0])
+    while not np.all(np.diff(x[keep]) > 0):
+        x, y = x[keep], y[keep]
+        keep = np.concatenate([[True], np.diff(x) > 0])
+    x, y = x[keep], y[keep]
+    return float(np.interp(colour, x, y))
+
+
+def _cool_abs_g():
+    """M_G of the dwarf with BP-RP = ``_COOL_BP_RP``."""
+    t = _dwarf_colours()
+    ok = np.isfinite(t[:, 3])
+    return float(np.interp(_COOL_BP_RP, t[ok, 0], t[ok, 3]))
+
+
 def default_walks(ndim):
     """rwalk steps per proposal for a fit of ``ndim`` free parameters:
     ``max(25, 5 * ndim)``.
@@ -2076,6 +2131,60 @@ def _prior_bound_flags(samples, priors, frac=0.01):
     return flags
 
 
+def _distance_mixing(samples, priors, shift_max=1.0, width_min=0.5,
+                     width_max=2.0, edge_frac=0.05):
+    """Mixing check of a fit from its distance posterior.
+
+    The likelihood depends on R/d only, so the posterior of d is its prior
+    unless the radius runs into a prior bound. A posterior displaced from the
+    prior median by more than ``shift_max`` prior sigma, or narrower than
+    ``width_min`` (wider than ``width_max``) times the prior, means the live
+    points lost their spread along R/d: the sampler did not mix, and neither
+    the evidence nor the parameters are converged.
+
+    Returns ``dict(mixed, shift, width, reason)``. ``mixed`` is ``None`` when
+    there is no verdict: no distance prior or samples (normalisation mode), a
+    fixed distance, or a radius within ``edge_frac`` of a prior bound (the
+    data then constrain d through the bound)."""
+    out = dict(mixed=None, shift=None, width=None, reason=None)
+    prior = (priors or {}).get('dist')
+    d = (samples or {}).get('dist')
+    if prior is None or d is None or not hasattr(prior, 'ppf'):
+        out['reason'] = 'no distance prior'
+        return out
+    d = np.asarray(d, float).ravel()
+    d = d[np.isfinite(d)]
+    if d.size < 10 or np.ptp(d) == 0:
+        out['reason'] = 'distance not sampled'
+        return out
+    lo, med, hi = (float(x) for x in prior.ppf([0.158655, 0.5, 0.841345]))
+    sig = 0.5 * (hi - lo)
+    if not (np.isfinite(sig) and sig > 0):
+        out['reason'] = 'no distance prior'
+        return out
+    q = np.percentile(d, [15.8655, 50.0, 84.1345])
+    out['shift'] = float((q[1] - med) / sig)
+    out['width'] = float(0.5 * (q[2] - q[0]) / sig)
+    r, rp = (samples or {}).get('rad'), (priors or {}).get('rad')
+    if r is not None and rp is not None and hasattr(rp, 'support'):
+        r = np.asarray(r, float).ravel()
+        r = r[np.isfinite(r)]
+        try:
+            rlo, rhi = (float(b) for b in rp.support())
+        except Exception:
+            rlo, rhi = -np.inf, np.inf
+        if r.size and ((np.isfinite(rlo) and np.median(r) <= rlo * (1 + edge_frac))
+                       or (np.isfinite(rhi) and np.median(r) >= rhi * (1 - edge_frac))):
+            out['reason'] = 'radius at a prior bound'
+            return out
+    out['mixed'] = bool(abs(out['shift']) <= shift_max
+                        and width_min <= out['width'] <= width_max)
+    if not out['mixed']:
+        out['reason'] = ('distance posterior %.1f sigma from its prior median, '
+                         '%.2f of its width' % (out['shift'], out['width']))
+    return out
+
+
 def _prior_flag_message(f):
     pct = '99.85' if f['edge'] == 'upper' else '0.15'
     return (f"{f['param']} posterior truncated by the {f['edge']} prior "
@@ -3074,22 +3183,41 @@ class Fitter:
         """Gaia BP-RP colour and absolute G magnitude from the star.
 
         Returns ``(bp_rp, abs_g)``, either being ``None`` when its inputs are
-        missing (no Gaia photometry, or no parallax/distance). This is the robust
-        cool-dwarf signal: M dwarfs almost always have Gaia BP/RP photometry even
-        when they lack a Gaia Teff/luminosity estimate.
+        missing (no Gaia photometry, or no parallax/distance). This is the
+        cool-dwarf signal of ``_cool_dwarf_flags``.
+
+        The faintest and reddest dwarfs often have no usable BP (too faint, or
+        removed by the photometry QC) and no Gaia Teff either, and they are
+        the stars that most need the cool-dwarf priors. Without BP the colour
+        comes from G-RP, and without RP from G-Ks (2MASS), each converted to
+        the BP-RP of a dwarf of that colour on the Mamajek sequence
+        (``_bp_rp_equivalent``).
         """
         try:
             fn = list(star.filter_names)
             mags = star.mags
-            bp = mags[fn.index('GaiaDR2v2_BP')]
-            g = mags[fn.index('GaiaDR2v2_G')]
-            rp = mags[fn.index('GaiaDR2v2_RP')]
-        except (ValueError, AttributeError, KeyError, IndexError, TypeError):
+        except (AttributeError, TypeError):
             return None, None
-        bp_rp = (bp - rp) if (bp and rp) else None
+
+        def _m(band):
+            try:
+                v = float(mags[fn.index(band)])
+            except (ValueError, IndexError, TypeError):
+                return None
+            return v if (np.isfinite(v) and v != 0) else None
+
+        bp, g, rp = _m('GaiaDR2v2_BP'), _m('GaiaDR2v2_G'), _m('GaiaDR2v2_RP')
+        ks = _m('2MASS_Ks')
+        bp_rp = None
+        if bp is not None and rp is not None:
+            bp_rp = bp - rp
+        elif g is not None and rp is not None:
+            bp_rp = _bp_rp_equivalent(g - rp, 'g_rp')
+        elif g is not None and ks is not None:
+            bp_rp = _bp_rp_equivalent(g - ks, 'g_ks')
         abs_g = None
         dist = getattr(star, 'dist', None)
-        if g and dist and dist > 0:
+        if g is not None and dist and dist > 0:
             abs_g = g + 5.0 - 5.0 * np.log10(dist)
         return bp_rp, abs_g
 
@@ -3120,16 +3248,24 @@ class Fitter:
 
         Primary signal is Gaia BP-RP colour (>1.8 -> M/late-K) and absolute G
         magnitude (>8 -> on the main sequence, excluding red giants), because M
-        dwarfs frequently lack the Gaia Teff/luminosity estimates. Falls back to
-        the Teff estimate (< 4000 K) and luminosity (< 0.5 Lsun) when colour /
-        parallax are unavailable (e.g. non-Gaia input).
+        dwarfs frequently lack the Gaia Teff/luminosity estimates. ``bp_rp`` may
+        be the BP-RP equivalent of G-RP or G-Ks (``_gaia_color_absmag``). Falls
+        back to the Teff estimate (< 4000 K) and luminosity (< 0.5 Lsun) when
+        no colour is available, and to the absolute G magnitude alone when
+        there is no Teff either.
         """
         if bp_rp is not None:
-            is_cool = bp_rp > 1.8
-        else:
+            is_cool = bp_rp > _COOL_BP_RP
+        elif temp is not None and temp > 0:
             # temp > 0 (not just != 0) so the -1 / -999 "no Gaia data" sentinels
             # are treated as unknown, NOT as cool (-1 < 4000 would misfire).
-            is_cool = temp is not None and temp > 0 and temp < 4000
+            is_cool = temp < 4000
+        elif abs_g is not None:
+            # No colour and no Teff: a main-sequence star fainter than the
+            # dwarf of BP-RP = 1.8 (M_G = 8.1) is an M dwarf or cooler.
+            is_cool = abs_g > _cool_abs_g()
+        else:
+            is_cool = False
         if abs_g is not None:
             dwarfish = abs_g > 8.0
         elif lum is not None and lum > 0:
@@ -5577,6 +5713,8 @@ class Fitter:
         diag['prior_flags'] = (_prior_bound_flags(param_samples, priors)
                                if param_samples is not None and priors
                                else [])
+        # mixing of the sampler, from the distance posterior (_distance_mixing)
+        diag['distance_mixing'] = _distance_mixing(param_samples, priors)
         return diag
 
     @staticmethod
@@ -5595,6 +5733,13 @@ class Fitter:
                 f"\t\t\t  WARNING: {f['param']} posterior pegged at the "
                 f"{f['edge']} grid edge (median {f['median']:.4g}, "
                 f"bound {f['bound']:.4g}) — error bar may be unreliable.",
+                'yellow'))
+        mix = diag.get('distance_mixing') or {}
+        if mix.get('mixed') is False:
+            print(colored(
+                '\t\t\t  WARNING: the sampler did not mix (' + mix['reason']
+                + '; the likelihood depends on R/d only). Evidence and '
+                'parameters are not converged: raise walks (setup[7]).',
                 'yellow'))
         for f in diag.get('prior_flags', []):
             print(colored('\t\t\t  WARNING: ' + _prior_flag_message(f),
