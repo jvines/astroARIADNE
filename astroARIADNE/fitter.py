@@ -5183,6 +5183,9 @@ class Fitter:
         # Save weights.
         out['weights'] = avgd['weights']
 
+        # Fit health of every grid and the evidence errors.
+        self._carry_fit_health(out, avgd)
+
         # Create raw samples holder
         out['weighted_samples'] = dict()
         out['weighted_average'] = dict()
@@ -5480,6 +5483,18 @@ class Fitter:
             self.to_netcdf(nc_file)
         except Exception as e:
             logger.warning('NetCDF export skipped (%s); BMA.pkl is written.', e)
+
+    @staticmethod
+    def _carry_fit_health(out, avgd):
+        """Copy the per-grid fit health and evidence errors into ``out``.
+
+        ``out['per_model_diagnostics'][grid]`` is the dictionary returned by
+        ``_fit_health`` (``prior_flags``, ``distance_mixing`` and the sampler
+        diagnostics); ``out['lnZerr'][grid]`` is the error of ln Z.
+        """
+        out['lnZerr'] = dict(avgd.get('evidences_err') or {})
+        out['per_model_diagnostics'] = dict(
+            avgd.get('per_model_diagnostics') or {})
 
     @staticmethod
     def bayesian_model_average(outputs, grids, norm, nsamples, c='white'):
