@@ -747,8 +747,11 @@ the same bands for the evidences to be comparable.
 
 **Performance & tuning knobs.** A few optional attributes control runtime:
 
-- `f.walks` (default `25`): number of `rwalk` MCMC steps per proposal. Can
-  also be passed as an 8th element of `setup`. Lower is faster but mixes less.
+- `f.walks` (default `None`, which means `max(25, 5 * ndim)`): number of
+  `rwalk` MCMC steps per proposal. Can also be passed as an 8th element of
+  `setup`. Fewer steps are faster but mix less: a flat 25 in the 20 to 40
+  dimensions of a fit lets the live points lose their spread, which biases
+  the evidence low and collapses the distance posterior.
 - `f.n_grid_jobs` (default `1`): number of BMA model grids to fit
   concurrently, one core each. Set to `len(models)` to run them all at once.
   **CAUTION:** this spawns that many processes — pick a value your machine's

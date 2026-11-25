@@ -845,6 +845,23 @@ def _finite_or_none(x):
     return v if np.isfinite(v) else None
 
 
+def default_walks(ndim):
+    """rwalk steps per proposal for a fit of ``ndim`` free parameters:
+    ``max(25, 5 * ndim)``.
+
+    A fit has six stellar parameters and one excess-noise term per band, 20 to
+    40 dimensions. dynesty's flat 25 steps are too few there: a random walk
+    that short stays close to the live point it started from, the live set
+    loses its spread, and the run ends early. Measured on Gaia DR3
+    6244258239317113088 (36 dimensions): with 25 steps ln Z of one grid
+    ranged over 605-646 between repeats and the distance posterior collapsed
+    to 93.9 +- 1.9 pc against a prior of 113.0 +- 4.9 pc, although the
+    likelihood depends on R/d only; with 150 steps ln Z was 651-658 and the
+    distance posterior was the prior. Five steps per dimension is the rule of
+    MOIRAI's daedalus backend."""
+    return max(25, 5 * int(ndim))
+
+
 class CompanionAstrometricPrior:
     """Weight of a companion node (Teff2, q = L2/L1) given the Gaia astrometry
     and the system's overluminosity; see the block comment above
@@ -2131,9 +2148,10 @@ class Fitter:
     n_samples : int or None
         Number of samples drawn from the BMA-averaged posterior. ``None`` uses
         the combined chain length.
-    walks : int
-        Number of ``rwalk`` MCMC steps per dynesty proposal. Default ``25``;
-        also settable as ``setup[7]``.
+    walks : int or None
+        Number of ``rwalk`` MCMC steps per dynesty proposal; also settable as
+        ``setup[7]``. Default ``None``: ``max(25, 5 * ndim)``
+        (:func:`default_walks`).
     av_law : str
         Extinction law. Default ``'fitzpatrick'``.
     estimate_logg : bool
@@ -2244,8 +2262,9 @@ class Fitter:
         # (Gaia XP synthetic fills, SPHEREx super-bands) are dropped from the
         # fit at initialize() -- catalog photometry only.
         self._spectra = True
-        # Number of MCMC steps per proposal for dynesty's rwalk sampler.
-        self.walks = 25
+        # Number of MCMC steps per proposal for dynesty's rwalk sampler. None
+        # (default) scales it with the dimension of the fit: default_walks().
+        self.walks = None
         # Number of BMA model grids to fit concurrently, each on a single
         # core. 1 (default) keeps the original sequential behaviour. Set this
         # to len(models) to run every grid at once. CAUTION: this spawns
@@ -2354,8 +2373,8 @@ class Fitter:
                 self._threads = setup[5]
                 self._dynamic = setup[6]
                 # Optional 8th element: number of rwalk MCMC steps per
-                # proposal. Omitted -> keep the current value (default 25),
-                # so existing 7-element setups are unaffected.
+                # proposal. Omitted -> keep the current value (default None:
+                # scaled with the dimension, see default_walks).
                 if len(setup) > 7:
                     self.walks = setup[7]
 
@@ -3987,7 +4006,8 @@ class Fitter:
                     sampler = dynesty.DynamicNestedSampler(
                         dynesty_loglike_bma, pt_dynesty, self.ndim,
                         bound=self._bound, sample=self._sample, pool=executor,
-                        queue_size=self._threads, logl_args=([intp])
+                        queue_size=self._threads, logl_args=([intp]),
+                        walks=self._rwalk_steps()
                     )
                     sampler.run_nested(dlogz_init=self._dlogz,
                                        nlive_batch=self._nlive,
@@ -3998,15 +4018,16 @@ class Fitter:
                         dynesty_loglike_bma, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
                         sample=self._sample, pool=executor,
-                        queue_size=self._threads, logl_args=([intp])
+                        queue_size=self._threads, logl_args=([intp]),
+                        walks=self._rwalk_steps()
                     )
                     sampler.run_nested(dlogz=self._dlogz)
 
         elif self._dynamic:
             sampler = dynesty.DynamicNestedSampler(
                 dynesty_loglike_bma, pt_dynesty, self.ndim,
-                bound=self._bound, sample=self._sample, logl_args=([intp])
-
+                bound=self._bound, sample=self._sample, logl_args=([intp]),
+                walks=self._rwalk_steps()
             )
             sampler.run_nested(dlogz_init=self._dlogz,
                                nlive_init=self._nlive,
@@ -4017,7 +4038,7 @@ class Fitter:
                     dynesty_loglike_bma, pt_dynesty, self.ndim,
                     nlive=self._nlive, bound=self._bound,
                     sample=self._sample,
-                    logl_args=([intp])
+                    logl_args=([intp]), walks=self._rwalk_steps()
                 )
                 self.sampler.run_nested(dlogz=self._dlogz)
             except Error:
@@ -4047,7 +4068,7 @@ class Fitter:
                     self.sampler = dynesty.DynamicNestedSampler(
                         dynesty_log_like, pt_dynesty, self.ndim,
                         bound=self._bound, sample=self._sample,
-                        pool=executor, walks=self.walks,
+                        pool=executor, walks=self._rwalk_steps(),
                         queue_size=self._threads
                     )
                     self.sampler.run_nested(dlogz_init=self._dlogz,
@@ -4055,7 +4076,7 @@ class Fitter:
                                             wt_kwargs={'pfrac': 1})
             else:
                 self.sampler = dynesty.DynamicNestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim, walks=self.walks,
+                    dynesty_log_like, pt_dynesty, self.ndim, walks=self._rwalk_steps(),
                     bound=self._bound, sample=self._sample
 
                 )
@@ -4069,13 +4090,13 @@ class Fitter:
                         dynesty_log_like, pt_dynesty, self.ndim,
                         nlive=self._nlive, bound=self._bound,
                         sample=self._sample,
-                        pool=executor, walks=self.walks,
+                        pool=executor, walks=self._rwalk_steps(),
                         queue_size=self._threads,
                     )
                     self.sampler.run_nested(dlogz=self._dlogz)
             else:
                 self.sampler = dynesty.NestedSampler(
-                    dynesty_log_like, pt_dynesty, self.ndim, walks=self.walks,
+                    dynesty_log_like, pt_dynesty, self.ndim, walks=self._rwalk_steps(),
                     nlive=self._nlive, bound=self._bound,
                     sample=self._sample
                 )
@@ -4085,6 +4106,13 @@ class Fitter:
             out_file = f'{self.out_folder}/{self._grid}_out.pkl'
         self.save(out_file, results=results)
         pass
+
+    def _rwalk_steps(self):
+        """rwalk steps per proposal: ``self.walks`` if set, else
+        :func:`default_walks` of the number of free parameters."""
+        if self.walks is not None:
+            return int(self.walks)
+        return default_walks(self.ndim)
 
     def save(self, out_file, results=None):
         """Save the dynesty output and relevant information.
