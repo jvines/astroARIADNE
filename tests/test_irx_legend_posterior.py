@@ -77,3 +77,12 @@ def test_results_without_medians_fall_back_to_legacy_curve():
     disp = _irx_disk_display(fit)
     assert disp['components'] == [(210.0, 1e-17)]
     assert _irx_disk_display({}) is None
+
+
+def test_quantiles_interpolate_between_grid_nodes():
+    from astroARIADNE.fitter import _wquantiles
+    # one node holds 70% of the mass: the 16% and 84% points must not collapse onto it
+    lo, med, hi = _wquantiles([100., 200., 400.], [0.15, 0.70, 0.15])
+    assert lo < med < hi
+    assert 100 < lo < 200 and 200 < hi < 400
+    assert abs(med - 200) < 30
