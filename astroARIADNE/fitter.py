@@ -1137,16 +1137,27 @@ def _modbb_bolo_frac(T):
 
 
 def _wquantiles(x, w, q=(0.16, 0.5, 0.84)):
-    """Weighted quantiles of the discrete distribution ``(x, w)`` (cumulative
-    mid-point interpolation); used for the dust posterior summaries."""
+    """Weighted quantiles of a posterior on a grid of positive nodes ``x``.
+
+    Each node's weight is spread uniformly in log x over its own bin (bin edges
+    at the geometric mid-points), so the quantiles interpolate between nodes
+    instead of collapsing onto one when a node holds a large share of the mass.
+    Duplicate node values are merged first. Used for the dust posterior
+    summaries (median and 68% interval)."""
     x = np.asarray(x, float).ravel()
     w = np.asarray(w, float).ravel()
-    m = (w > 0) & np.isfinite(x) & np.isfinite(w)
+    m = (w > 0) & np.isfinite(x) & np.isfinite(w) & (x > 0)
     x, w = x[m], w[m]
-    o = np.argsort(x)
-    x, w = x[o], w[o]
-    c = (np.cumsum(w) - 0.5 * w) / w.sum()
-    return [float(np.interp(qq, c, x)) for qq in q]
+    ux, inv = np.unique(x, return_inverse=True)
+    uw = np.bincount(inv, weights=w)
+    if ux.size == 1:
+        return [float(ux[0])] * len(q)
+    e = np.empty(ux.size + 1)
+    e[1:-1] = np.sqrt(ux[:-1] * ux[1:])
+    e[0] = ux[0] ** 2 / e[1]
+    e[-1] = ux[-1] ** 2 / e[-2]
+    cdf = np.concatenate([[0.0], np.cumsum(uw) / uw.sum()])
+    return [float(np.exp(np.interp(qq, cdf, np.log(e)))) for qq in q]
 
 
 def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
