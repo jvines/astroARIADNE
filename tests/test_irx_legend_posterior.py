@@ -60,6 +60,7 @@ def test_two_temperature_legend_is_warm_cold_medians():
     assert [o for _, o in disp['components']] == [d2['omega_warm_med'], d2['omega_cold_med']]
     nums = _numbers(disp['label'])        # P, T_w, T_c
     assert abs(nums[1] - round(d2['t_warm_med'])) <= 0.5 and abs(nums[2] - round(d2['t_cold_med'])) <= 0.5
+    assert d2['l_dust_over_lstar_lo'] <= d2['l_dust_over_lstar_med'] <= d2['l_dust_over_lstar_hi']
     for k in ('warm', 'cold'):
         assert d2[f't_{k}_lo'] <= d2[f't_{k}_med'] <= d2[f't_{k}_hi']
 

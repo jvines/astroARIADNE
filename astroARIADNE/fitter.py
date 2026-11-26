@@ -2034,6 +2034,10 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             disk2.update({f't_{_nm}_med': _b, f't_{_nm}_lo': _a, f't_{_nm}_hi': _c,
                           f'l_{_nm}_med': _e, f'l_{_nm}_lo': _d, f'l_{_nm}_hi': _f,
                           f'omega_{_nm}_med': _omega_at(_b, _e)})
+        # total fractional luminosity of the pair, from the joint posterior
+        _lt = _wquantiles((Lflat[:, None] + Lflat[None, :]), w2n)
+        disk2.update(l_dust_over_lstar_lo=_lt[0], l_dust_over_lstar_med=_lt[1],
+                     l_dust_over_lstar_hi=_lt[2])
     companion = None
     if comp_ok and z_comp > 0:
         # Per-grid posterior (within-grid mean/var), then BMA across grids by

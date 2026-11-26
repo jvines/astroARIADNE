@@ -323,7 +323,7 @@ model_err, excess, sigma, quantified`) plus `out['irx']['_summary']`:
 | `excess_class` | `none` / `disk` / `companion` / `ambiguous` |
 | `p_none`, `p_disk`, `p_disk2`, `p_companion` | posterior model probabilities |
 | `disk` | quadrature posterior: `t_dust ± err`, `l_dust_over_lstar ± err`, `omega_sr` (means, skewed by the log-uniform prior) and the **reported summaries**, posterior medians with 68% intervals: `t_dust_med/_lo/_hi`, `l_dust_over_lstar_med/_lo/_hi`, and `omega_med_sr` (the solid angle at the medians) |
-| `disk2` | two-T posterior: `t_warm/t_cold`, `l_warm/l_cold` (means), `t_*_med/_lo/_hi`, `l_*_med/_lo/_hi`, `omega_*_med` (the posterior medians `IRX_SED` prints and draws) and the `_map` best-fit values |
+| `disk2` | two-T posterior: `t_warm/t_cold`, `l_warm/l_cold` (means), `t_*_med/_lo/_hi`, `l_*_med/_lo/_hi`, `omega_*_med`, `l_dust_over_lstar_med/_lo/_hi` (the pair's total; the posterior medians `IRX_SED` prints and draws) and the `_map` best-fit values |
 | `disk_bb` | least-squares modified-BB fit to the measured excess (a diagnostic; not what the figure draws) |
 | `companion` | BMA `teff2 ± err`, `rad2 ± err`, `n_grids`, and `per_grid` posteriors (with correlated `(Teff2, R2)` samples) |
 | `lnbf_disk_companion` | log Bayes factor, disk-total vs companion |
