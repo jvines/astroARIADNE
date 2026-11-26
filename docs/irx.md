@@ -322,9 +322,9 @@ model_err, excess, sigma, quantified`) plus `out['irx']['_summary']`:
 | `has_excess`, `n_significant`, `excess_chi2` | aggregate detection stats |
 | `excess_class` | `none` / `disk` / `companion` / `ambiguous` |
 | `p_none`, `p_disk`, `p_disk2`, `p_companion` | posterior model probabilities |
-| `disk` | quadrature posterior: `t_dust ± err`, `l_dust_over_lstar ± err`, `omega_sr` |
-| `disk2` | two-T posterior: `t_warm/t_cold`, `l_warm/l_cold` (+ `_map` best-fit values used for display) |
-| `disk_bb` | least-squares modified-BB fit to the measured excess (the curve that threads the data) |
+| `disk` | quadrature posterior: `t_dust ± err`, `l_dust_over_lstar ± err`, `omega_sr` (means, skewed by the log-uniform prior) and the **reported summaries**, posterior medians with 68% intervals: `t_dust_med/_lo/_hi`, `l_dust_over_lstar_med/_lo/_hi`, and `omega_med_sr` (the solid angle at the medians) |
+| `disk2` | two-T posterior: `t_warm/t_cold`, `l_warm/l_cold` (means), `t_*_med/_lo/_hi`, `l_*_med/_lo/_hi`, `omega_*_med` (the posterior medians `IRX_SED` prints and draws) and the `_map` best-fit values |
+| `disk_bb` | least-squares modified-BB fit to the measured excess (a diagnostic; not what the figure draws) |
 | `companion` | BMA `teff2 ± err`, `rad2 ± err`, `n_grids`, and `per_grid` posteriors (with correlated `(Teff2, R2)` samples) |
 | `lnbf_disk_companion` | log Bayes factor, disk-total vs companion |
 | `common_reach_um` | reddest quantified wavelength |
@@ -348,6 +348,7 @@ spectral resolution from the spectra cache, with light-red correlated
 posterior draws mirroring the photosphere's gray ones. An ambiguous excess
 shows *both* candidate models, each labeled with its probability. Residuals
 use the reported per-band significances (photosphere uncertainty included).
+The dust curve is evaluated at the posterior medians of the disk parameters, and the legend prints them (`T_d` and `L_d/L_*`, or the warm and cold temperatures of a two-T disk), so the figure agrees with the reported `disk` / `disk2` summaries.
 
 The companion spectra ship inside the standard spectra cache
 (`spectra_cache.h5`, groups `btsettl_cool` / `atmo` / `sonora`); without the

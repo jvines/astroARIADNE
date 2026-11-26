@@ -1136,6 +1136,19 @@ def _modbb_bolo_frac(T):
                  / trapezoid(B, lam))
 
 
+def _wquantiles(x, w, q=(0.16, 0.5, 0.84)):
+    """Weighted quantiles of the discrete distribution ``(x, w)`` (cumulative
+    mid-point interpolation); used for the dust posterior summaries."""
+    x = np.asarray(x, float).ravel()
+    w = np.asarray(w, float).ravel()
+    m = (w > 0) & np.isfinite(x) & np.isfinite(w)
+    x, w = x[m], w[m]
+    o = np.argsort(x)
+    x, w = x[o], w[o]
+    c = (np.cumsum(w) - 0.5 * w) / w.sum()
+    return [float(np.interp(qq, c, x)) for qq in q]
+
+
 def _fit_excess_blackbody(waves_um, excess, excess_err, dist_pc, lum_lsun):
     """Characterize an IR excess as a single-temperature (debris-disk) modified
     blackbody (beta=1 beyond 210 um, the field-standard convention).
@@ -1973,11 +1986,25 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
     TT, LL = np.meshgrid(Tg, Lg, indexing='ij')
     t_dust = float(np.sum(wdn * TT))
     ld = float(np.sum(wdn * LL))
+    def _omega_at(T, L):
+        # solid angle of a modified blackbody of temperature T and fractional
+        # luminosity L (the grid's own convention)
+        return float(L * l_star / (4 * d_cm ** 2 * SB * T ** 4 * 1e3
+                                   * _modbb_bolo_frac(T)))
+
+    # Posterior medians and 68% intervals: the log-uniform prior skews the mean,
+    # so these (not t_dust/l_dust_over_lstar) are the reported summaries and
+    # what IRX_SED prints and draws.
+    _t16, _tmed, _t84 = _wquantiles(Tg, wdn.sum(axis=1))
+    _l16, _lmed, _l84 = _wquantiles(Lg, wdn.sum(axis=0))
     disk = dict(
         t_dust=t_dust, t_dust_err=float(np.sqrt(np.sum(wdn * (TT - t_dust) ** 2))),
         l_dust_over_lstar=ld,
         l_dust_over_lstar_err=float(np.sqrt(np.sum(wdn * (LL - ld) ** 2))),
-        omega_sr=float(np.sum(wdn * omega_grid)))
+        omega_sr=float(np.sum(wdn * omega_grid)),
+        t_dust_med=_tmed, t_dust_lo=_t16, t_dust_hi=_t84,
+        l_dust_over_lstar_med=_lmed, l_dust_over_lstar_lo=_l16,
+        l_dust_over_lstar_hi=_l84, omega_med_sr=_omega_at(_tmed, _lmed))
     disk2 = None
     if wd2 is not None and wd2.sum() > 0:
         w2n = wd2 / wd2.sum()
@@ -2001,6 +2028,12 @@ def _excess_model_selection(names, waves_um, excess, excess_err, cool_interps,
             t_cold_map=float(Tflat[im[1]]),
             l_cold_map=float(Lflat[im[1]]),
             omega_cold_map=float(Oflat[im[1]]))
+        for _nm, _wt in (('warm', wi), ('cold', wj)):
+            _a, _b, _c = _wquantiles(Tflat, _wt)
+            _d, _e, _f = _wquantiles(Lflat, _wt)
+            disk2.update({f't_{_nm}_med': _b, f't_{_nm}_lo': _a, f't_{_nm}_hi': _c,
+                          f'l_{_nm}_med': _e, f'l_{_nm}_lo': _d, f'l_{_nm}_hi': _f,
+                          f'omega_{_nm}_med': _omega_at(_b, _e)})
     companion = None
     if comp_ok and z_comp > 0:
         # Per-grid posterior (within-grid mean/var), then BMA across grids by
@@ -4905,10 +4938,10 @@ class Fitter:
                         '%.1f um): disk vs companion is broadband-degenerate '
                         'without a W3+ band' % float(_reddest))
         # Least-squares single-temperature blackbody fit to the measured
-        # excess. This is the curve used by the SED+IRX model overlay: it
-        # threads the excess by construction, whereas the evidence-marginalized
-        # `disk` posterior-mean omega is skewed high by its log-uniform prior
-        # (the integrated L_dust/L_star is robust; the curve shape is not).
+        # excess: a diagnostic that threads the excess by construction. It is
+        # NOT what is reported or drawn: IRX_SED prints and draws the posterior
+        # MEDIANS of `disk` / `disk2` (`*_med`; the posterior mean is skewed
+        # high by the log-uniform prior).
         disk_bb = _fit_excess_blackbody(
             waves, exc, errs, f_dist, f_lum)
         result['_summary'] = dict(

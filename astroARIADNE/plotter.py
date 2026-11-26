@@ -78,6 +78,48 @@ from .sed_library import *
 from .utils import *
 
 
+def _irx_disk_display(fit):
+    """The dust model ``IRX_SED`` draws and labels, from the IRX summary.
+
+    The reported dust parameters are POSTERIOR MEDIANS (``*_med`` fields of
+    ``disk`` / ``disk2``; the mean is skewed by the log-uniform prior). The
+    drawn curve is evaluated at those medians and the legend prints them, so
+    figure and tables show the same numbers. Two-temperature disk (warm and
+    cold medians) when it wins decisively (same 0.75 rule as the
+    classification), single-temperature disk otherwise.
+
+    Returns ``dict(components=[(T, omega), ...], label=str)`` or ``None``.
+    Results written before the medians existed fall back to the
+    least-squares curve (``disk_bb``) and the 2-T MAP pair they carried.
+    """
+    fit = fit or {}
+    d, d2 = fit.get('disk') or {}, fit.get('disk2') or {}
+    p_d = float(fit.get('p_disk') or 0.0)
+    p_d2 = float(fit.get('p_disk2') or 0.0)
+    two = (bool(d2) and (p_d + p_d2) > 0 and p_d2 / (p_d + p_d2) > 0.75)
+    P = p_d + p_d2
+    if two and 't_warm_med' in d2:
+        return dict(components=[(d2['t_warm_med'], d2['omega_warm_med']),
+                                (d2['t_cold_med'], d2['omega_cold_med'])],
+                    label=(r'2-T disk (P=%.2f): T$_w$=%.0f K, T$_c$=%.0f K'
+                           % (P, d2['t_warm_med'], d2['t_cold_med'])))
+    if not two and 't_dust_med' in d and np.isfinite(d['t_dust_med']):
+        return dict(components=[(d['t_dust_med'], d['omega_med_sr'])],
+                    label=(r'disk BB (P=%.2f): T$_d$=%.0f K, L$_d$/L$_*$=%.1g'
+                           % (P, d['t_dust_med'], d['l_dust_over_lstar_med'])))
+    bb = fit.get('disk_bb')                       # legacy results
+    if two and 't_warm_map' in d2:
+        return dict(components=[(d2['t_warm_map'], d2['omega_warm_map']),
+                                (d2['t_cold_map'], d2['omega_cold_map'])],
+                    label=(r'2-T disk (P=%.2f): T$_w$=%.0f K, T$_c$=%.0f K'
+                           % (P, d2['t_warm_map'], d2['t_cold_map'])))
+    if bb and np.isfinite(bb.get('t_dust', np.nan)):
+        return dict(components=[(bb['t_dust'], bb['omega_sr'])],
+                    label=(r'disk BB (P=%.2f): T$_d$=%.0f K, L$_d$/L$_*$=%.1g'
+                           % (P, bb['t_dust'], bb['l_dust_over_lstar'])))
+    return None
+
+
 class SEDPlotter:
     """Artist class for all things SED.
 
@@ -1035,7 +1077,8 @@ class SEDPlotter:
             _comp = (fit or {}).get('companion') if fit else None
             p_d = float((fit or {}).get('p_disk') or 0.0)
             p_c = float((fit or {}).get('p_companion') or 0.0)
-            have_bb = bool(bb) and np.isfinite(bb.get('t_dust', np.nan))
+            _disp = _irx_disk_display(fit)
+            have_bb = _disp is not None
             show_comp = bool(_cls in ('companion', 'ambiguous') and _comp
                              and np.isfinite(_comp.get('teff2', np.nan))
                              and not self.norm)
@@ -1056,24 +1099,15 @@ class SEDPlotter:
                     fac = np.where(lam_um > 210.0, 210.0 / lam_um, 1.0)
                     return omega * planck * fac * lam_um
 
-                # Draw the 2-T disk only when it DECISIVELY beats single-T
-                # (same 0.75 convention as the classification): at even odds
-                # the second component is prior-volume wash, not a detection.
-                # Display uses the MAP pair -- marginal means of a weakly
-                # constrained component are not a real solution.
-                _d2 = (fit or {}).get('disk2')
-                p_d2 = float((fit or {}).get('p_disk2') or 0.0)
-                _use2 = (bool(_d2) and 't_warm_map' in (_d2 or {})
-                         and (p_d + p_d2) > 0
-                         and p_d2 / (p_d + p_d2) > 0.75)
+                # The dust curve is evaluated at the POSTERIOR MEDIAN parameters
+                # that the legend prints (_irx_disk_display); a 2-T disk is
+                # drawn only when it DECISIVELY beats single-T (same 0.75
+                # convention as the classification).
+                _use2 = len(_disp['components']) == 2
 
                 def _diskbb(lam_um):
-                    if _use2:
-                        return (_dustbb(lam_um, _d2['t_warm_map'],
-                                        _d2['omega_warm_map'])
-                                + _dustbb(lam_um, _d2['t_cold_map'],
-                                          _d2['omega_cold_map']))
-                    return _dustbb(lam_um, bb['t_dust'], bb['omega_sr'])
+                    return sum(_dustbb(lam_um, _T, _om)
+                               for _T, _om in _disp['components'])
 
                 def _comp_spectrum(gname, t2):
                     # Full-resolution companion spectrum from the cool-spectra
@@ -1356,25 +1390,13 @@ class SEDPlotter:
                     if _use2:
                         # Two-temperature disk: warm + cold components shown
                         # individually, the summed curve labeled with both.
-                        for _tk, _ok in (('t_warm_map', 'omega_warm_map'),
-                                         ('t_cold_map', 'omega_cold_map')):
-                            ax.plot(lam_um,
-                                    _dustbb(lam_um, _d2[_tk], _d2[_ok]),
+                        for _T, _om in _disp['components']:
+                            ax.plot(lam_um, _dustbb(lam_um, _T, _om),
                                     ls=':', lw=1.0, color=disk_color,
                                     alpha=0.6, zorder=2)
-                        ax.plot(lam_um, _diskbb(lam_um), ls=d_ls, lw=1.3,
-                                color=disk_color, alpha=0.85, zorder=2,
-                                label=(r'2-T disk (P=%.2f): T$_w$=%.0f K, '
-                                       r'T$_c$=%.0f K'
-                                       % (p_d + p_d2, _d2['t_warm_map'],
-                                          _d2['t_cold_map'])))
-                    else:
-                        ax.plot(lam_um, _diskbb(lam_um), ls=d_ls, lw=1.3,
-                                color=disk_color, alpha=0.85, zorder=2,
-                                label=(r'disk BB (P=%.2f): T$_d$=%.0f K, '
-                                       r'L$_d$/L$_*$=%.1g'
-                                       % (p_d + p_d2, bb['t_dust'],
-                                          bb['l_dust_over_lstar'])))
+                    ax.plot(lam_um, _diskbb(lam_um), ls=d_ls, lw=1.3,
+                            color=disk_color, alpha=0.85, zorder=2,
+                            label=_disp['label'])
                 if str(self.legend_loc).lower() != 'none':
                     ax.legend(loc=self.legend_loc,
                               fontsize=self.legend_fontsize, frameon=False)
